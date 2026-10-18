@@ -1,0 +1,1191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Daily Planning Forecast | KSC, CCSFS, Patrick SFB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF2F1; --panel:#FFFFFF; --panel-2:#F6F8F8; --ink:#13202E; --ink-2:#4B5A68; --ink-3:#7D8B97;
+  --rule:#D4DBDF; --rule-2:#E6EBED; --accent:#0B6E79; --accent-ink:#FFFFFF; --edit:#B5730C; --edit-bg:#FFF4DF;
+  --warn:#B23A2E; --warn-bg:#FBE9E6; --band:rgba(11,110,121,.13); --peak:#3359A8; --ct:#B4472A; --band-pk:rgba(51,89,168,.10); --guide:#13202E;
+  --hires:#7A4FA0; --blend:#0B6E79; --global:#3D6FB0; --ens:#8A9AA8; --mos:#B5730C;
+  --p:11,110,121; --hot:178,58,46; --cold:52,102,170;
+  --font:"Barlow", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --cond:"Barlow Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+    --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+    --warn:#F08070; --warn-bg:#3B1C18; --band:rgba(77,191,200,.16); --peak:#93B4F0; --ct:#F08A6A; --band-pk:rgba(147,180,240,.12); --guide:#E5ECF1;
+    --hires:#B892DA; --blend:#4DBFC8; --global:#7FA8E0; --ens:#6E7F8D; --mos:#E3A53D;
+    --p:77,191,200; --hot:240,128,112; --cold:120,160,230;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+  --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+  --warn:#F08070; --warn-bg:#3B1C18; --band:rgba(77,191,200,.16); --peak:#93B4F0; --ct:#F08A6A; --band-pk:rgba(147,180,240,.12); --guide:#E5ECF1;
+  --hires:#B892DA; --blend:#4DBFC8; --global:#7FA8E0; --ens:#6E7F8D; --mos:#E3A53D;
+  --p:77,191,200; --hot:240,128,112; --cold:120,160,230;
+  color-scheme: dark;
+}
+:root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+body{ margin:0; background:var(--paper); color:var(--ink); font:15px/1.45 var(--font); font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
+button,input,select{ font:inherit; color:inherit; }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+/* ---------- top bar ---------- */
+.top{ display:grid; grid-template-columns:1fr auto; grid-template-areas:"brand actions" "sites sites"; gap:14px 28px; align-items:center; padding:18px 28px 16px; background:var(--panel); border-bottom:1px solid var(--rule); }
+.locator{ width:80px; height:118px; flex:none; }
+.locator .coast{ fill:none; stroke:var(--ink-3); stroke-width:1.2; stroke-linejoin:round; }
+.locator .water{ fill:var(--panel-2); }
+.locator .pt{ fill:var(--panel); stroke:var(--ink-2); stroke-width:1.4; cursor:pointer; transition:r .15s; }
+.locator .pt.on{ fill:var(--accent); stroke:var(--accent); }
+.locator text{ font:600 8px var(--cond); fill:var(--ink-3); }
+.brand{ grid-area:brand; display:flex; gap:16px; align-items:center; }
+.brand h1{ margin:0; font:700 26px/1 var(--cond); letter-spacing:.2px; }
+.brand .where{ margin-top:6px; color:var(--ink-2); font-size:14px; }
+.brand .where b{ color:var(--ink); font-weight:600; }
+.sites{ grid-area:sites; display:flex; flex-wrap:nowrap; gap:0; justify-self:start; margin-left:96px; border:1px solid var(--rule); border-radius:10px; overflow:hidden; background:var(--panel-2); }
+.sites button{ border:0; background:transparent; padding:8px 18px 9px; cursor:pointer; text-align:left; border-right:1px solid var(--rule); min-width:0; white-space:nowrap; }
+.sites button:last-child{ border-right:0; }
+.sites button .n{ display:block; font:600 15px/1.15 var(--cond); }
+.sites button .p{ display:block; font-size:12px; color:var(--ink-3); }
+.sites button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); }
+.sites button[aria-pressed="true"] .p{ color:inherit; opacity:.8; }
+.sites button .dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--edit); margin-left:6px; vertical-align:middle; visibility:hidden; }
+.sites button.dirty .dot{ visibility:visible; }
+.actions{ grid-area:actions; display:flex; gap:8px; align-items:center; }
+.btn{ border:1px solid var(--rule); background:var(--panel); border-radius:8px; padding:7px 13px; cursor:pointer; font-weight:500; white-space:nowrap; }
+.btn:hover{ border-color:var(--ink-3); }
+a.btn{ text-decoration:none; color:var(--ink); display:inline-block; }
+.btn:disabled{ opacity:.45; cursor:default; }
+.btn.primary{ background:var(--ink); color:var(--panel); border-color:var(--ink); font-weight:600; padding:8px 18px; }
+.btn.primary:hover{ opacity:.9; }
+.btn.icon{ padding:7px 10px; }
+.seg{ display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden; }
+.seg button{ border:0; background:var(--panel); padding:6px 10px; cursor:pointer; font-size:13px; }
+.seg button[aria-pressed="true"]{ background:var(--ink); color:var(--panel); }
+
+.statusline{ display:flex; flex-wrap:wrap; gap:6px 22px; align-items:center; padding:9px 28px; font-size:13px; color:var(--ink-2); border-bottom:1px solid var(--rule); background:var(--panel-2); }
+.statusline .k{ color:var(--ink-3); margin-right:5px; }
+.statusline .live::before{ content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-right:7px; vertical-align:1px; }
+.statusline .live.err::before{ background:var(--warn); }
+.statusline .spacer{ flex:1; }
+.statusline label{ display:inline-flex; gap:6px; align-items:center; cursor:pointer; }
+.statusline input[type=text]{ width:64px; padding:3px 7px; border:1px solid var(--rule); border-radius:6px; background:var(--panel); text-transform:uppercase; }
+.banner{ margin:14px 28px 0; padding:10px 14px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-weight:500; display:none; }
+.banner.show{ display:block; }
+.banner.demo{ background:var(--edit-bg); color:var(--edit); }
+
+main{ padding:18px 28px 40px; display:grid; gap:18px; }
+.matrix:focus{ outline:none; }
+.panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; }
+
+/* ---------- graph editor ---------- */
+.editor{ padding:14px 16px 10px; }
+.params{ display:flex; flex-wrap:wrap; gap:14px 22px; }
+.pgroup{ display:flex; flex-direction:column; gap:5px; }
+.pgroup .gl{ font:600 12px var(--cond); color:var(--ink-3); letter-spacing:.3px; }
+.pgroup .chips{ display:flex; gap:4px; flex-wrap:wrap; }
+.chip{ border:1px solid var(--rule); background:var(--panel); padding:3px 9px; border-radius:6px; cursor:pointer; font-size:13px; position:relative; }
+.chip:hover{ border-color:var(--ink-3); }
+.chip[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+.chip.edited::after{ content:""; position:absolute; top:-3px; right:-3px; width:7px; height:7px; border-radius:50%; background:var(--edit); border:1.5px solid var(--panel); }
+.charthead{ display:flex; align-items:flex-end; gap:16px; margin:16px 2px 4px; flex-wrap:wrap; }
+.charthead h2{ margin:0; font:700 22px/1 var(--cond); }
+.charthead .unit{ color:var(--ink-3); font-size:13px; }
+.charthead .hint{ color:var(--ink-3); font-size:13px; flex:1; min-width:220px; }
+.legend{ display:flex; gap:14px; font-size:12.5px; color:var(--ink-2); align-items:center; flex-wrap:wrap; }
+.legend i{ display:inline-block; width:18px; height:0; border-top:2px solid; vertical-align:middle; margin-right:5px; }
+.legend i.off{ border-color:var(--accent); border-top-width:3px; }
+.legend i.off.pk{ border-color:var(--peak); }
+.legend i.gd{ border-color:var(--guide); border-top-style:dashed; opacity:.7; }
+.legend i.src{ border-color:var(--ink-3); border-top-width:1px; }
+.legend i.bd{ border:0; height:9px; background:var(--band); }
+.chartwrap{ position:relative; }
+#chart{ display:block; width:100%; height:300px; touch-action:none; user-select:none; cursor:crosshair; }
+#chart .grid{ stroke:var(--rule-2); }
+#chart .dayband{ fill:var(--panel-2); }
+#chart .axis{ font:500 11px var(--font); fill:var(--ink-3); }
+#chart .daylab{ font:600 12px var(--cond); fill:var(--ink-2); }
+#chart .thr{ stroke:var(--warn); stroke-dasharray:3 4; opacity:.55; }
+#chart .thrlab{ font:600 10.5px var(--cond); fill:var(--warn); opacity:.8; }
+#chart .band{ fill:var(--band); }
+#chart .src{ fill:none; stroke-width:1.1; opacity:.45; }
+#chart .src.hot{ opacity:1; stroke-width:2; }
+#chart .guide{ fill:none; stroke:var(--guide); stroke-width:1.4; stroke-dasharray:5 4; opacity:.65; }
+#chart .off{ fill:none; stroke:var(--accent); stroke-width:2.6; stroke-linejoin:round; }
+#chart .h{ fill:var(--panel); stroke:var(--accent); stroke-width:1.6; }
+#chart .off.pk{ stroke:var(--peak); }
+#chart .h.pk{ stroke:var(--peak); }
+#chart .h.e{ fill:var(--edit); stroke:var(--edit); }
+#chart .band.pk{ fill:var(--band-pk); }
+#chart .serlab{ font:700 11px var(--cond); fill:var(--accent); }
+#chart .serlab.pk{ fill:var(--peak); }
+#chart .cursor{ stroke:var(--ink-3); stroke-dasharray:2 3; }
+#chart .nowln{ stroke:var(--accent); stroke-width:1; opacity:.5; }
+.tip{ position:absolute; pointer-events:none; background:var(--ink); color:var(--panel); border-radius:8px; padding:8px 10px; font-size:12.5px; line-height:1.4; min-width:150px; display:none; z-index:5; box-shadow:0 6px 18px rgba(0,0,0,.18); }
+.tip b{ font-weight:600; }
+.tip .r{ display:flex; justify-content:space-between; gap:14px; }
+.tip .r span:last-child{ font-weight:600; }
+.tip .mut{ opacity:.65; }
+.tools{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; padding-top:10px; border-top:1px solid var(--rule-2); font-size:13px; color:var(--ink-2); }
+.tools .sp{ flex:1; }
+#drawWrap{ display:inline-flex; gap:8px; align-items:center; margin-right:10px; }
+#drawWrap[hidden]{ display:none; }
+.kbd{ font:600 11px var(--font); border:1px solid var(--rule); border-bottom-width:2px; border-radius:4px; padding:0 5px; color:var(--ink-2); background:var(--panel-2); }
+
+/* ---------- sources ---------- */
+details.sources{ padding:0; }
+details.sources > summary{ list-style:none; cursor:pointer; padding:12px 16px; display:flex; gap:12px; align-items:center; font-weight:600; }
+details.sources > summary::-webkit-details-marker{ display:none; }
+details.sources > summary .chev{ transition:transform .15s; color:var(--ink-3); }
+details.sources[open] > summary .chev{ transform:rotate(90deg); }
+details.sources > summary .sum{ font-weight:400; color:var(--ink-2); font-size:13.5px; }
+.srcgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px 26px; padding:4px 16px 16px; }
+.srcfam h3{ margin:0 0 6px; font:600 13px var(--cond); color:var(--ink-3); letter-spacing:.3px; display:flex; align-items:center; gap:7px; }
+.srcfam h3 i{ width:10px; height:3px; border-radius:2px; display:inline-block; }
+.srow{ display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; padding:3px 0; font-size:13.5px; }
+.srow .st{ font-size:12px; color:var(--ink-3); }
+.srow.na{ color:var(--ink-3); }
+.srow select{ border:1px solid var(--rule); border-radius:5px; background:var(--panel); padding:1px 2px; font-size:12px; }
+.srcfoot{ padding:0 16px 14px; font-size:12.5px; color:var(--ink-3); display:flex; gap:18px; flex-wrap:wrap; align-items:center; }
+.srcfoot label{ display:inline-flex; gap:6px; align-items:center; cursor:pointer; color:var(--ink-2); }
+.limits{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.limits input{ width:52px; border:1px solid var(--rule); border-radius:5px; padding:2px 5px; background:var(--panel); }
+
+/* ---------- matrix ---------- */
+.matrix{ overflow:auto; max-height:calc(100vh - 120px); border-radius:12px; }
+table.mx{ border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; font-size:13.5px; }
+.mx th,.mx td{ border-right:1px solid var(--rule-2); border-bottom:1px solid var(--rule-2); padding:0; text-align:center; white-space:nowrap; }
+.mx thead th{ position:sticky; background:var(--panel); z-index:3; font-weight:600; }
+.mx thead tr.g th{ top:0; height:30px; font:700 13.5px var(--cond); letter-spacing:.2px; border-bottom:1px solid var(--rule); color:var(--ink); padding:0 8px; }
+.mx thead tr.c th{ top:30px; height:44px; font:600 12.5px/1.15 var(--cond); color:var(--ink-2); border-bottom:2px solid var(--ink); padding:4px 6px; cursor:pointer; min-width:46px; white-space:normal; }
+.mx thead tr.c th:hover{ color:var(--ink); }
+.mx thead tr.c th.sel{ color:var(--accent); box-shadow:inset 0 -3px 0 var(--accent); }
+.mx thead tr.c th small{ display:block; font-weight:500; color:var(--ink-3); font-size:11px; }
+.mx .gstart{ border-left:1px solid var(--rule); }
+.mx .stick{ position:sticky; left:0; z-index:2; background:var(--panel); text-align:left; }
+.mx .stick2{ position:sticky; left:84px; z-index:2; background:var(--panel); border-right:1px solid var(--rule); }
+.mx thead .stick,.mx thead .stick2{ z-index:4; }
+.mx td.day{ width:84px; min-width:84px; padding:0 10px; font:600 13px/1.2 var(--cond); color:var(--ink-2); vertical-align:top; padding-top:6px; }
+.mx td.day b{ display:block; color:var(--ink); font-size:15px; }
+.mx td.tm{ min-width:92px; padding:0 10px; font-weight:600; text-align:left; color:var(--ink); }
+.mx td.tm small{ color:var(--ink-3); font-weight:500; margin-left:4px; }
+.mx tr.dstart td{ border-top:2px solid var(--ink-3); }
+.mx tr.sect td.tm{ box-shadow:inset 3px 0 0 var(--rule); }
+.mx td.c{ height:30px; min-width:46px; cursor:cell; position:relative; padding:0 6px; }
+.mx td.c.na{ color:var(--ink-3); cursor:default; }
+.mx td.c.ed{ font-weight:700; }
+.mx td.c.ed::after{ content:""; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent var(--edit) transparent transparent; }
+.mx td.c.bad{ box-shadow:inset 0 -2px 0 var(--warn); color:var(--warn); }
+.mx td.c.cur{ outline:2px solid var(--accent); outline-offset:-2px; z-index:1; }
+.mx tr.hov td{ background-image:linear-gradient(rgba(var(--p),.07),rgba(var(--p),.07)); }
+.mx td.c input,.mx td.c select{ position:absolute; inset:0; width:100%; height:100%; border:0; text-align:center; background:var(--panel); font-weight:700; outline:2px solid var(--edit); outline-offset:-2px; padding:0 2px; }
+.mx td.sev{ min-width:84px; }
+.foot{ color:var(--ink-3); font-size:12.5px; max-width:100ch; padding:0 2px; }
+.foot p{ margin:4px 0; }
+
+/* ---------- dialog / toast ---------- */
+dialog{ border:1px solid var(--rule); border-radius:14px; padding:0; width:min(520px,92vw); background:var(--panel); color:var(--ink); box-shadow:0 24px 60px rgba(0,0,0,.25); }
+dialog::backdrop{ background:rgba(13,21,29,.45); }
+.dlg{ padding:22px 24px 20px; }
+.dlg h2{ margin:0 0 4px; font:700 24px/1.1 var(--cond); }
+.dlg p.sub{ margin:0 0 16px; color:var(--ink-2); font-size:14px; }
+.dlg fieldset{ border:0; padding:0; margin:0 0 14px; }
+.dlg legend{ font:600 13px var(--cond); color:var(--ink-3); margin-bottom:6px; letter-spacing:.3px; }
+.dlg .opts{ display:flex; flex-wrap:wrap; gap:6px 16px; }
+.dlg .opts label{ display:inline-flex; gap:7px; align-items:center; cursor:pointer; }
+.dlg .qc{ background:var(--warn-bg); color:var(--warn); border-radius:8px; padding:9px 12px; font-size:13.5px; margin-bottom:14px; display:none; max-height:130px; overflow:auto; }
+.dlg .qc.show{ display:block; }
+.dlg .qc ul{ margin:4px 0 0; padding-left:18px; }
+.dlg .row{ display:flex; gap:10px; justify-content:flex-end; margin-top:6px; }
+.dlg input[type=text]{ padding:6px 9px; border:1px solid var(--rule); border-radius:7px; background:var(--panel); width:90px; text-transform:uppercase; }
+.toast{ position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%) translateY(20px); background:var(--ink); color:var(--panel); padding:10px 18px; border-radius:10px; font-weight:500; opacity:0; transition:all .2s; pointer-events:none; z-index:50; }
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+@media (max-width:860px){
+  .top{ grid-template-columns:1fr; grid-template-areas:"brand" "actions" "sites"; }
+  .sites{ flex-wrap:wrap; margin-left:0; }
+}
+@media (max-width:640px){
+  .top,.statusline,main{ padding-left:14px; padding-right:14px; }
+  .banner{ margin-left:14px; margin-right:14px; }
+  .sites button{ min-width:0; flex:1 1 30%; }
+  .locator{ display:none; }
+}
+@media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+@media print{
+  .top .actions,.statusline,.editor,details.sources,.banner{ display:none !important; }
+  .matrix{ max-height:none; overflow:visible; }
+  body{ background:#fff; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="locator" id="locator" viewBox="0 0 80 118" aria-label="Forecast point locator"></svg>
+    <div>
+      <h1>Daily planning forecast</h1>
+      <div class="where" id="where"></div>
+    </div>
+  </div>
+  <nav class="sites" id="sites" aria-label="Forecast point"></nav>
+  <div class="actions">
+    <button class="btn icon" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>&#8630;</button>
+    <button class="btn icon" id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>&#8631;</button>
+    <a class="btn" href="taf.html" title="Separate tool: generate the Patrick SFB TAF">KCOF TAF</a>
+    <button class="btn" id="resetSite" title="Clear every edit for this point">Reset to guidance</button>
+    <button class="btn primary" id="publish">Save and publish</button>
+  </div>
+</header>
+<div class="statusline">
+  <span class="live" id="live">Loading guidance</span>
+  <span><span class="k">Last published</span><span id="lastPub">not yet</span></span>
+  <span><span class="k">Edits</span><span id="editCount">0</span></span>
+  <span class="spacer"></span>
+  <span class="seg" role="group" aria-label="Time zone"><button id="tzL" aria-pressed="true">Local</button><button id="tzZ" aria-pressed="false">Zulu</button></span>
+  <button class="btn" id="refresh" style="padding:4px 10px;font-size:13px">Refresh guidance</button>
+  <label>Forecaster <input type="text" id="initials" maxlength="5" placeholder="Init" autocomplete="off"></label>
+</div>
+<div class="banner" id="banner"></div>
+
+<main>
+  <section class="panel editor" aria-label="Graph editor">
+    <div class="params" id="params"></div>
+    <div class="charthead">
+      <h2 id="ptitle">Temperature</h2><span class="unit" id="punit"></span>
+      <span class="hint" id="phint">Drag across the graph to draw the forecast. Hold Alt while dragging to erase back to guidance. Double-click a point to reset it.</span>
+      <div class="legend"><span><i class="off"></i><span id="lgOff">Official</span></span><span id="lgPeak" hidden><i class="off pk"></i>Peak</span><span><i class="gd"></i>Guidance blend</span><span><i class="src"></i>Sources</span><span><i class="bd"></i>Member 10th to 90th</span></div>
+    </div>
+    <div class="chartwrap" id="chartwrap">
+      <svg id="chart" role="img" aria-label="Forecast graph"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="tools">
+      <span id="drawWrap" hidden>Draw <span class="seg" id="drawSel" role="group" aria-label="Line to draw"><button type="button" data-d="n" title="Draw whichever line you start nearest">Nearest line</button><button type="button" data-d="s">Sustained</button><button type="button" data-d="p">Peak</button></span></span>
+      <button class="btn" id="smooth" title="Soften jumps between neighbouring edited points">Smooth edits</button>
+      <button class="btn" id="nudgeDn" title="Lower every point by one step">Shift down</button>
+      <button class="btn" id="nudgeUp" title="Raise every point by one step">Shift up</button>
+      <button class="btn" id="resetParam">Reset this parameter</button>
+      <span class="sp"></span>
+      <span>Table: <span class="kbd">Enter</span> edit, <span class="kbd">Del</span> back to guidance, paste a column from Excel</span>
+    </div>
+  </section>
+
+  <details class="panel sources" id="sourcesPanel">
+    <summary><span class="chev">&#9656;</span>Guidance sources <span class="sum" id="srcSum"></span></summary>
+    <div class="srcgrid" id="srcgrid"></div>
+    <div class="srcfoot">
+      <label><input type="checkbox" id="linkProbs" checked> Shift exceedance probabilities with my wind and temperature edits</label>
+      <label><input type="checkbox" id="clampProbs" checked> Keep guidance probabilities between 1% and 99%</label>
+      <span class="limits">Hot threshold (°F) <input type="number" id="hotThr" step="1"></span>
+    </div>
+  </details>
+
+  <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
+
+  <div class="foot">
+    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. In longer blocks, the 1 hr and 3 hr precipitation and lightning columns show the highest hour or 3-hour period inside the block.</p>
+    <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
+  </div>
+</main>
+
+<dialog id="pubDlg">
+  <form method="dialog" class="dlg" id="pubForm">
+    <h2>Save and publish</h2>
+    <p class="sub">Downloads the official forecast. Points you haven't edited go out as guidance.</p>
+    <fieldset><legend>Forecast points</legend><div class="opts" id="pubSites"></div></fieldset>
+    <fieldset><legend>Files</legend><div class="opts">
+      <label><input type="checkbox" id="fmtX" checked> Excel workbook</label>
+      <label><input type="checkbox" id="fmtC" checked> CSV</label>
+    </div></fieldset>
+    <fieldset><legend>Forecaster</legend><input type="text" id="pubInit" maxlength="5" placeholder="Init" required></fieldset>
+    <div class="qc" id="qc"></div>
+    <div class="row"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" id="pubGo" value="ok">Publish</button></div>
+  </form>
+</dialog>
+<div class="toast" id="toast"></div>
+<script src="guidance.js"></script>
+<script>
+/* ============================================================
+   App state
+   ============================================================ */
+const LS = { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
+};
+const DEMO = /[?&]demo=1\b/.test(location.search);
+const prefs = Object.assign({ enabled:{}, weight:{}, tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param:"t" }, store.get(LS.prefs, {}));
+let edits = store.get(LS.edits, {});
+if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
+if (["s200","g200"].includes(prefs.param)) prefs.param = "w200";
+if (!prefs.draw) prefs.draw = "n";
+if (!SITES.some(x => x.id === prefs.site)) prefs.site = SITES[0].id;
+delete edits["cape-pad"];   /* old SLC-40 point */
+let published = store.get(LS.pub, {});
+const S = { rows:null, TL:null, G:{}, agg:{}, status:{}, loading:true, cur:null, hoverRow:null, undo:[], redo:[], fetchedAt:null, errors:0 };
+const savePrefs = () => store.set(LS.prefs, prefs);
+const saveEdits = () => store.set(LS.edits, edits);
+const site = () => SITES.find(s => s.id === prefs.site) || SITES[0];
+const hotOf = s => prefs.hot[s.id] ?? s.hot;
+const zulu = () => prefs.tz === "Z";
+const $ = id => document.getElementById(id);
+
+function pruneEdits(){
+  const now = Date.now();
+  for (const sid in edits) for (const k in edits[sid]) for (const key in edits[sid][k]){ const [a, len] = key.split("_").map(Number); if (a + len*H < now - H) delete edits[sid][k][key]; }
+}
+function editCount(sid){ let n = 0; const e = edits[sid] || {}; for (const k in e) n += Object.keys(e[k]).length; return n; }
+
+/* ---------- guidance + official values ---------- */
+const rnd = v => v == null ? null : Math.round(v);
+function guidanceFor(sid){
+  const A = S.agg[sid]; if (!A) return null;
+  const clampP = v => v == null ? v : prefs.clamp ? Math.max(1, Math.min(99, v)) : Math.max(0, Math.min(100, v));
+  const g = {};
+  for (const p of PARAMS){
+    if (p.k.startsWith("x")) continue;
+    const arr = A.val[p.k] || [];
+    g[p.k] = S.rows.map((r, i) => {
+      const v = arr[i];
+      if (p.win && !probCell(S.rows[i], p.win)) return undefined;
+      if (p.kind === "prob") return v == null ? null : rnd(clampP(v));
+      if (p.kind === "dir") return v == null ? null : (Math.round(v/10)*10) % 360;
+      if (p.kind === "sev") return v || "-";
+      return rnd(v);
+    });
+  }
+  return g;
+}
+function officialFor(sid){
+  const s = SITES.find(x => x.id === sid), G = S.G[sid], g = guidanceFor(sid) || {};
+  const e = edits[sid] || {}, rows = S.rows, o = {}, src = {};
+  const ed = (k, r) => e[k] && e[k][r.key] !== undefined ? e[k][r.key] : undefined;
+  for (const p of PARAMS){
+    if (p.k.startsWith("x")) continue;
+    o[p.k] = rows.map((r, i) => { if (p.win && !probCell(r, p.win)) return undefined; const x = ed(p.k, r); return x !== undefined ? x : (g[p.k] ? g[p.k][i] : null); });
+  }
+  /* peaks follow edited sustained winds unless the peak itself is edited */
+  rows.forEach((r, i) => {
+    for (const [sk, gk] of [["s54","g54"],["s200","g200"]]){
+      if (ed(gk, r) !== undefined || ed(sk, r) === undefined || o[gk][i] == null || g[sk] == null || g[sk][i] == null) continue;
+      o[gk][i] = Math.max(o[sk][i], o[gk][i] + (o[sk][i] - g[sk][i]));
+    }
+  });
+  /* WBGT follows edited temperature / dew point unless WBGT itself is edited */
+  rows.forEach((r, i) => {
+    if (ed("wbgt", r) !== undefined || (ed("t", r) === undefined && ed("td", r) === undefined)) return;
+    if (o.t[i] == null || o.td[i] == null || g.t[i] == null || g.td[i] == null || g.wbgt[i] == null) return;
+    const d = wbgtF(o.t[i], o.td[i], 400, 8) - wbgtF(g.t[i], g.td[i], 400, 8);
+    o.wbgt[i] = Math.round(g.wbgt[i] + d);
+  });
+  const gx = {};
+  for (const p of PARAMS.filter(p => p.k.startsWith("x"))){
+    o[p.k] = []; gx[p.k] = []; src[p.k] = {};
+    rows.forEach((r, i) => {
+      let delta = 0;
+      if (prefs.link && G && g.t){
+        if (p.ex === "smax"){ const a = Math.max(o.s54[i] ?? -1, o.s200[i] ?? -1), b = Math.max(g.s54[i] ?? -1, g.s200[i] ?? -1); if (a >= 0 && b >= 0) delta = a - b; }
+        else if (p.ex === "gmax"){ const a = Math.max(o.g54[i] ?? -1, o.g200[i] ?? -1), b = Math.max(g.g54[i] ?? -1, g.g200[i] ?? -1); if (a >= 0 && b >= 0) delta = a - b; }
+        else if (p.ex === "tmax" || p.ex === "tmin"){ if (o.t[i] != null && g.t[i] != null) delta = o.t[i] - g.t[i]; }
+      }
+      const clampP = v => v == null ? v : prefs.clamp ? Math.max(1, Math.min(99, v)) : v;
+      const base = G && G.mem ? exceed(G, p.k, i, 0, hotOf(s)) : { v:null, per:{} };
+      const shifted = delta && G && G.mem ? exceed(G, p.k, i, delta, hotOf(s)) : base;
+      gx[p.k][i] = rnd(clampP(base.v));
+      for (const id in base.per) (src[p.k][id] = src[p.k][id] || [])[i] = base.per[id];
+      const x = ed(p.k, r);
+      o[p.k][i] = x !== undefined ? x : rnd(clampP(shifted.v));
+    });
+  }
+  return { o, g: Object.assign(g, gx), xsrc: src };
+}
+
+/* QC: impossible or inconsistent combinations */
+function qcIssues(sid, OF){
+  const { o } = OF, out = [], bad = {};
+  const flag = (k, i, msg) => { (bad[k] = bad[k] || {})[i] = msg; out.push({ i, k, msg }); };
+  S.rows.forEach((r, i) => {
+    if (o.t[i] != null && o.td[i] != null && o.td[i] > o.t[i]) flag("td", i, "Dew point above temperature");
+    if (o.s54[i] != null && o.g54[i] != null && o.g54[i] < o.s54[i]) flag("g54", i, "54 ft peak below sustained");
+    if (o.s200[i] != null && o.g200[i] != null && o.g200[i] < o.s200[i]) flag("g200", i, "200 ft peak below sustained");
+    for (const ev of ["pp","lt"]){
+      const a = o[ev+"1"][i], b = o[ev+"3"][i], c = o[ev+"6"][i];
+      if (r.len === 1 && a != null && b != null && a > b) flag(ev+"3", i, (ev === "pp" ? "Precip" : "Lightning") + " 3 hr below 1 hr");
+      if (b != null && c != null && b > c) flag(ev+"6", i, (ev === "pp" ? "Precip" : "Lightning") + " 6 hr below 3 hr");
+    }
+    for (const [lo, hi] of [["x50","x35"],["x35","x25"],["x32","x40"]]) if (o[lo][i] != null && o[hi][i] != null && o[lo][i] > o[hi][i]) flag(lo, i, `${P[lo].l} more likely than ${P[hi].l}`);
+  });
+  return { list: out, bad };
+}
+
+/* ---------- formatting ---------- */
+function fmt(p, v){
+  if (v === undefined) return "";
+  if (v == null) return "";
+  if (p.kind === "sky") return skyCat(v);
+  if (p.kind === "dir") return compass(v);
+  if (p.kind === "sev") return v === "-" ? "-" : SEV_NAME[v] || v;
+  return String(v);
+}
+function tint(p, v){
+  if (v == null || v === undefined) return "";
+  if (p.kind === "prob"){ const a = Math.min(0.62, Math.max(0, v)/100*0.62); return a > 0.02 ? `background:rgba(var(--p),${a.toFixed(3)})` : ""; }
+  if (p.k === "t" || p.k === "wbgt"){ if (v >= 85) return `background:rgba(var(--hot),${Math.min(0.32,(v-84)/40).toFixed(3)})`; if (v <= 50) return `background:rgba(var(--cold),${Math.min(0.3,(51-v)/40).toFixed(3)})`; return ""; }
+  if (["s54","g54","s200","g200"].includes(p.k)){ const a = Math.max(0, Math.min(0.4, (v - 12)/45)); return a > 0.02 ? `background:rgba(var(--hot),${a.toFixed(3)})` : ""; }
+  if (p.kind === "sky"){ const a = Math.max(0, v)/100*0.16; return a > 0.02 ? `background:rgba(120,135,150,${a.toFixed(3)})` : ""; }
+  if (p.kind === "sev" && v !== "-") return `background:rgba(var(--hot),${(0.08 + SEV.indexOf(v)*0.06).toFixed(3)})`;
+  return "";
+}
+function rowTime(r){
+  const z = zulu();
+  if (r.len === 1) return hhmm(r.a, z);
+  return hhmm(r.a, z) + "–" + hhmm(r.b, z);
+}
+function tzLabel(){ return zulu() ? "UTC" : tzAbbr(Date.now()); }
+function colLabel(p, s){ if (p.k === "xhot") return `>${hotOf(s)}°F`; return p.l; }
+
+/* ============================================================
+   Rendering: header, locator, params, sources
+   ============================================================ */
+function renderSites(){
+  $("sites").innerHTML = SITES.map(s => `<button type="button" data-site="${s.id}" aria-pressed="${s.id === prefs.site}" class="${editCount(s.id) ? "dirty" : ""}"><span class="n">${s.name}<span class="dot" title="Has edits"></span></span><span class="p">${s.point}</span></button>`).join("");
+  const s = site();
+  $("where").innerHTML = `<b>${s.name}</b>, forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}), MOS from ${s.stn}`;
+  renderLocator();
+  $("hotThr").value = hotOf(s);
+}
+function renderLocator(){
+  const X = lon => (lon + 80.78)/0.28*80, Y = lat => (28.80 - lat)/0.64*118;
+  const coast = [[28.85,-80.73],[28.76,-80.68],[28.70,-80.655],[28.64,-80.60],[28.59,-80.575],[28.53,-80.555],[28.48,-80.535],[28.455,-80.526],[28.435,-80.56],[28.40,-80.598],[28.32,-80.604],[28.24,-80.594],[28.10,-80.575]];
+  const pts = coast.map(([la, lo]) => `${X(lo).toFixed(1)},${Y(la).toFixed(1)}`).join(" ");
+  const tags = { "ksc-inland":"SLF", "ksc-pads":"39B", "cape-inland":"XMR", "cape-pad37":"37", patrick:"COF" };
+  const off = { "ksc-inland":[-5,3,"end"], "ksc-pads":[0,-7,"middle"], "cape-inland":[-6,3,"end"], "cape-pad37":[-6,3,"end"], patrick:[-6,3,"end"] };
+  $("locator").innerHTML = `<polygon class="water" points="${pts} 80,118 80,0"/><polyline class="coast" points="${pts}"/>` +
+    SITES.map(s => { const x = X(s.lon), y = Y(s.lat), o = off[s.id], on = s.id === prefs.site; return `<g data-site="${s.id}" style="cursor:pointer"><title>${s.name} (${s.point})</title><circle class="pt ${on ? "on" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${on ? 4.4 : 3.2}"/><text x="${(x + o[0]).toFixed(1)}" y="${(y + o[1]).toFixed(1)}" text-anchor="${o[2]}" style="${on ? "fill:var(--accent)" : ""}">${tags[s.id]}</text></g>`; }).join("");
+}
+const CHART_GROUPS = [
+  ["Sky and temperature", ["sky","t","td","wbgt"]],
+  ["Precipitation", ["pp1","pp3","pp6"]],
+  ["Lightning", ["lt1","lt3","lt6"]],
+  ["Wind", ["w54","w200","dir"]],
+  ["Exceedance probability", ["x18","x25","x35","x50","xhot","x40","x32","xvis"]],
+];
+const chipName = k => ({ sky:"Sky", t:"Temp", td:"Dew pt", wbgt:"WBGT", pp1:"1 hr", pp3:"3 hr", pp6:"6 hr", lt1:"1 hr", lt3:"3 hr", lt6:"6 hr", w54:"54 ft", w200:"200 ft", dir:"Direction", x18:">18 kt", x25:">25 kt", x35:">35 kt", x50:">50 kt", xhot:`>${hotOf(site())}°F`, x40:"<40°F", x32:"<32°F", xvis:"Vis <3 mi" }[k]);
+function renderParams(){
+  const e = edits[prefs.site] || {};
+  $("params").innerHTML = CHART_GROUPS.map(([gl, ks]) => `<div class="pgroup"><span class="gl">${gl}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${keysOf(k).some(q => e[q] && Object.keys(e[q]).length) ? "edited" : ""}" data-p="${k}" aria-pressed="${k === prefs.param}">${chipName(k)}</button>`).join("")}</div></div>`).join("");
+}
+function renderSources(){
+  const fams = Object.keys(FAMILIES);
+  let ok = 0, tot = 0;
+  $("srcgrid").innerHTML = fams.map(f => {
+    const list = ALL_SOURCES.filter(s => s.fam === f);
+    return `<div class="srcfam"><h3><i style="background:${FAMILIES[f].color}"></i>${FAMILIES[f].label}</h3>` + list.map(s => {
+      const st = S.status[s.id] || {}; tot++; if (st.ok) ok++;
+      const on = prefs.enabled[s.id] !== false, w = prefs.weight[s.id] ?? s.w ?? 1;
+      const txt = st.loading ? "loading" : st.ok ? st.note : (st.err || "not available");
+      return `<div class="srow ${st.ok ? "" : "na"}"><input type="checkbox" data-src="${s.id}" ${on ? "checked" : ""} aria-label="Use ${s.name}"><span>${s.name} <span class="st">${txt}</span></span><select data-w="${s.id}" aria-label="${s.name} weight">${[0.5,1,2,3].map(x => `<option value="${x}" ${x == w ? "selected" : ""}>×${x}</option>`).join("")}</select></div>`;
+    }).join("") + `</div>`;
+  }).join("");
+  const used = ALL_SOURCES.filter(s => (S.status[s.id] || {}).ok && prefs.enabled[s.id] !== false).length;
+  $("srcSum").textContent = S.loading && !ok ? "loading" : `${used} in the blend, ${ok} of ${tot} available`;
+}
+function renderStatus(){
+  const live = $("live");
+  const ok = Object.values(S.status).filter(s => s.ok).length;
+  const pend = Object.values(S.status).filter(s => s.loading).length;
+  live.classList.toggle("err", !S.loading && ok === 0);
+  live.textContent = DEMO ? "Demo guidance (synthetic data)" : pend ? `Loading guidance, ${ok} sources in` : ok ? `Guidance from ${ok} sources, fetched ${hhmm(S.fetchedAt, zulu())}${zulu() ? "Z" : " " + tzAbbr(S.fetchedAt)}` : "No guidance loaded";
+  const pb = published[prefs.site];
+  $("lastPub").textContent = pb ? `${hhmm(pb.t, zulu())}${zulu() ? "Z" : ""} ${new Date(pb.t).toDateString().slice(4,10)} by ${pb.by}` : "not yet";
+  $("editCount").textContent = editCount(prefs.site);
+  $("undo").disabled = !S.undo.length; $("redo").disabled = !S.redo.length;
+  $("tzL").setAttribute("aria-pressed", !zulu()); $("tzZ").setAttribute("aria-pressed", zulu());
+  const b = $("banner");
+  if (DEMO){ b.className = "banner show demo"; b.textContent = "Demo mode: every value on this page is synthetic. Remove ?demo=1 from the address to load real guidance."; }
+  else if (!S.loading && ok === 0){ b.className = "banner show"; b.textContent = "Couldn't reach any guidance source from this browser. Check the network connection, then press Refresh guidance. You can still type a forecast into the table."; }
+  else if (!S.loading && ![...OM_DET, ...OM_ENS].some(d => (S.status[d.id] || {}).ok)){ b.className = "banner show"; b.textContent = "Model guidance from Open-Meteo didn't load, so only MOS and LAMP are showing. Press Refresh guidance to try again."; }
+  else if (!S.loading && !["lav","mav","nbs","met","mex","nbe","hrefct","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
+  else b.className = "banner";
+}
+
+/* ============================================================
+   Matrix
+   ============================================================ */
+let OF = null, QC = null;
+function recompute(){ OF = officialFor(prefs.site); QC = qcIssues(prefs.site, OF); }
+function renderTable(){
+  const s = site(), rows = S.rows, { o } = OF, e = edits[s.id] || {}, z = zulu();
+  const groups = []; PARAMS.forEach(p => { const g = groups[groups.length - 1]; if (g && g.g === p.g) g.n++; else groups.push({ g:p.g, n:1 }); });
+  let h = `<table class="mx"><thead><tr class="g"><th class="stick" rowspan="1"></th><th class="stick2"></th>${groups.map(g => `<th colspan="${g.n}" class="gstart">${g.g}</th>`).join("")}</tr>`;
+  h += `<tr class="c"><th class="stick">Day</th><th class="stick2">Time<small>${tzLabel()}</small></th>`;
+  let lastG = null;
+  for (const p of PARAMS){ const gs = p.g !== lastG; lastG = p.g; h += `<th data-p="${p.k}" class="${gs ? "gstart" : ""} ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" title="${p.title}">${colLabel(p, s)}${p.s ? `<small>${p.s}</small>` : ""}</th>`; }
+  h += `</tr></thead><tbody>`;
+  let lastDay = null, lastBlk = null;
+  const dayRuns = {}; rows.forEach(r => { const dk = dayKey(r.a, z); dayRuns[dk] = (dayRuns[dk] || 0) + 1; });
+  rows.forEach((r, i) => {
+    const dk = dayKey(r.a, z), ds = dk !== lastDay, bs = r.len !== lastBlk && !ds; lastDay = dk; lastBlk = r.len;
+    let cls = (ds ? "dstart " : "") + (bs ? "sect " : "") + (S.hoverRow === i ? "hov" : "");
+    h += `<tr data-r="${i}" class="${cls}">`;
+    if (ds){ const L = dayLabel(r.a, z); const today = i === 0 ? "Today" : (dayKey(r.a, z) === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<td class="stick day" rowspan="${dayRuns[dk]}"><b>${today}</b>${today === L.wd ? "" : L.wd + "<br>"}${L.dt}</td>`; }
+    h += `<td class="stick2 tm">${rowTime(r)}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</td>`;
+    lastG = null;
+    for (const p of PARAMS){
+      const gs = p.g !== lastG; lastG = p.g;
+      const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
+      const bad = QC.bad[p.k] && QC.bad[p.k][i];
+      const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
+      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
+      h += `<td class="${c}" data-k="${p.k}" data-i="${i}" style="${na ? "" : tint(p, v)}"${bad ? ` title="${bad}"` : ""}>${na ? "·" : fmt(p, v)}</td>`;
+    }
+    h += `</tr>`;
+  });
+  h += `</tbody></table>`;
+  const m = $("matrix"), st = m.scrollTop, sl = m.scrollLeft;
+  m.innerHTML = h; m.scrollTop = st; m.scrollLeft = sl;
+}
+function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderTable(); renderChart(); }
+
+/* ---------- editing ---------- */
+function parseInput(p, txt){
+  txt = String(txt).trim(); if (txt === "") return null;
+  if (p.kind === "sky"){ const u = txt.toUpperCase(); const alias = { CLEAR:"CLR", SKC:"CLR", SCATTERED:"SCT", BROKEN:"BKN", OVERCAST:"OVC" }; const c = alias[u] || u; if (SKY_MID[c] !== undefined) return SKY_MID[c]; const n = parseFloat(txt); return isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : undefined; }
+  if (p.kind === "dir"){ const d = parseDir(txt); return d == null ? undefined : (Math.round(d/10)*10) % 360; }
+  if (p.kind === "sev"){ const u = txt.toUpperCase(); const map = { NONE:"-", "-":"-", MARGINAL:"MRGL", SLIGHT:"SLGT", ENHANCED:"ENH", MODERATE:"MDT" }; const c = map[u] || u; return SEV.includes(c) ? c : undefined; }
+  let n = parseFloat(txt.replace("%", "")); if (!isFinite(n)) return undefined;
+  if (p.kind === "prob" && n > 0 && n < 1 && txt.includes(".")) n *= 100;
+  if (p.lo != null) n = Math.max(p.lo, n); if (p.hi != null) n = Math.min(p.hi, n);
+  return Math.round(n);
+}
+function setEdit(sid, k, key, val, group){
+  const e = edits[sid] = edits[sid] || {}; const m = e[k] = e[k] || {};
+  const old = m[key];
+  if (val === undefined || val === null) delete m[key]; else m[key] = val;
+  if (old !== m[key]) group.push({ sid, k, key, old, nw: m[key] });
+}
+/* store an edit, dropping it if it equals guidance */
+function writeCell(k, i, val, group){
+  const r = S.rows[i], p = P[k];
+  if (OF.o[k][i] === undefined && p.kind === "prob") return;
+  const g = OF.g[k] ? OF.g[k][i] : null;
+  if (val === null) return setEdit(prefs.site, k, r.key, undefined, group);
+  const same = p.kind === "sky" ? skyCat(val) === skyCat(g) && Math.abs(val - (g ?? -99)) < 1 : val === g;
+  setEdit(prefs.site, k, r.key, same ? undefined : val, group);
+}
+function commit(group){
+  if (!group.length) return;
+  S.undo.push(group); if (S.undo.length > 200) S.undo.shift(); S.redo = [];
+  saveEdits(); renderAll();
+}
+function applyGroup(group, dir){
+  for (const c of (dir < 0 ? [...group].reverse() : group)){
+    const e = edits[c.sid] = edits[c.sid] || {}; const m = e[c.k] = e[c.k] || {};
+    const v = dir < 0 ? c.old : c.nw; if (v === undefined) delete m[c.key]; else m[c.key] = v;
+  }
+  saveEdits();
+  if (group[0] && group[0].sid !== prefs.site){ prefs.site = group[0].sid; savePrefs(); }
+  renderAll();
+}
+function undo(){ const g = S.undo.pop(); if (!g) return; S.redo.push(g); applyGroup(g, -1); toast("Undone"); }
+function redo(){ const g = S.redo.pop(); if (!g) return; S.undo.push(g); applyGroup(g, 1); }
+
+let editor = null;
+function cellEl(i, k){ return $("matrix").querySelector(`td.c[data-i="${i}"][data-k="${k}"]`); }
+function selectCell(i, k, scroll){
+  S.cur = { i, k };
+  $("matrix").querySelectorAll("td.cur").forEach(x => x.classList.remove("cur"));
+  const el = cellEl(i, k); if (el){ el.classList.add("cur"); if (scroll) el.scrollIntoView({ block:"nearest", inline:"nearest" }); }
+  if (viewOf(k) !== prefs.param && P[k].kind !== "sev"){ prefs.param = viewOf(k); savePrefs(); renderParams(); renderChart(); $("matrix").querySelectorAll("thead th.sel").forEach(x => x.classList.remove("sel")); keysOf(prefs.param).forEach(q => { const th = $("matrix").querySelector(`thead th[data-p="${q}"]`); if (th) th.classList.add("sel"); }); }
+}
+function openEditor(i, k, initial){
+  const el = cellEl(i, k); if (!el || el.classList.contains("na")) return;
+  const p = P[k], cur = OF.o[k][i];
+  closeEditor(false);
+  let inp;
+  if (p.kind === "sky" || p.kind === "sev"){
+    inp = document.createElement("select");
+    const opts = p.kind === "sky" ? SKY.map(x => x[0]) : SEV;
+    inp.innerHTML = opts.map(x => `<option value="${x}" ${(p.kind === "sky" ? skyCat(cur) : cur) === x ? "selected" : ""}>${p.kind === "sev" ? SEV_NAME[x] : x}</option>`).join("");
+    inp.addEventListener("change", () => finishEditor(true, 0));
+  } else {
+    inp = document.createElement("input"); inp.type = "text"; inp.inputMode = p.kind === "dir" ? "text" : "decimal";
+    inp.value = initial != null ? initial : fmt(p, cur);
+  }
+  el.appendChild(inp); editor = { i, k, inp };
+  inp.focus(); if (initial == null && inp.select) inp.select();
+  inp.addEventListener("keydown", ev => {
+    if (ev.key === "Enter"){ ev.preventDefault(); finishEditor(true, 1); }
+    else if (ev.key === "Tab"){ ev.preventDefault(); finishEditor(true, 0, ev.shiftKey ? -1 : 1); }
+    else if (ev.key === "Escape"){ ev.preventDefault(); closeEditor(false); $("matrix").focus(); }
+    ev.stopPropagation();
+  });
+  inp.addEventListener("blur", () => setTimeout(() => { if (editor && editor.inp === inp) finishEditor(true, 0); }, 0));
+}
+function finishEditor(save, down, right){
+  if (!editor) return;
+  const { i, k, inp } = editor; editor = null;
+  if (save){
+    const v = parseInput(P[k], inp.value);
+    if (v === undefined){ toast(`Couldn't read "${inp.value}" as ${P[k].title.toLowerCase()}`); }
+    else { const g = []; writeCell(k, i, v, g); if (g.length) commit(g); }
+  }
+  if (inp.parentNode) inp.remove();
+  if (!save) return;
+  let ni = i, kidx = PARAMS.findIndex(p => p.k === k);
+  if (down) ni = Math.min(S.rows.length - 1, i + down);
+  if (right) kidx = Math.max(0, Math.min(PARAMS.length - 1, kidx + right));
+  renderTable(); selectCell(ni, PARAMS[kidx].k, true); $("matrix").focus({ preventScroll:true });
+}
+function closeEditor(){ if (editor){ editor.inp.remove(); editor = null; } }
+
+/* ============================================================
+   Graph editor
+   ============================================================ */
+const CH = { m:{ l:46, r:14, t:22, b:30 }, w:0, h:300, x:null, y:null, pts:[], drag:null };
+function chartDomain(p, pts, A, srcv){
+  if (p.kind === "prob" || p.kind === "sky") return [0, 100];
+  if (p.kind === "dir") return [0, 360];
+  let lo = Infinity, hi = -Infinity;
+  const acc = v => { if (v != null && isFinite(v)){ lo = Math.min(lo, v); hi = Math.max(hi, v); } };
+  pts.forEach(q => { acc(q.v); acc(q.g); });
+  (A.band[p.k] || []).forEach(b => { if (b){ acc(b[0]); acc(b[1]); } });
+  for (const id in (srcv || {})) (srcv[id] || []).forEach(acc);
+  if (!isFinite(lo)){ lo = 0; hi = 10; }
+  const padv = Math.max(2, (hi - lo)*0.1); lo -= padv; hi += padv;
+  if (p.lo === 0) lo = Math.max(0, lo);
+  if (p.unit === "kt") hi = Math.max(hi, 20);
+  return [Math.floor(lo), Math.ceil(hi)];
+}
+function srcColor(id){ const s = ALL_SOURCES.find(x => x.id === id); return s ? FAMILIES[s.fam].color : "var(--ink-3)"; }
+const VIEWS = {
+  w54:  { title:"54 ft wind",  keys:["s54","g54"],   names:["Sustained","Peak"] },
+  w200: { title:"200 ft wind", keys:["s200","g200"], names:["Sustained","Peak"] },
+};
+const viewOf = k => k === "s54" || k === "g54" ? "w54" : k === "s200" || k === "g200" ? "w200" : k;
+const keysOf = v => VIEWS[v] ? VIEWS[v].keys : [v];
+const seriesName = k => { const v = VIEWS[viewOf(k)]; return v ? v.names[v.keys.indexOf(k)] : P[k].title; };
+/* which series a drag edits in a combined view: nearest line, or the locked one */
+function pickKey(i, py){
+  const ks = keysOf(prefs.param); if (ks.length === 1) return ks[0];
+  if (prefs.draw === "s") return ks[0]; if (prefs.draw === "p") return ks[1];
+  let best = ks[0], d = Infinity;
+  for (const k of ks){ const v = OF.o[k][i]; if (v == null) continue; const dd = Math.abs(CH.y(Math.max(CH.y0, Math.min(CH.y1, v))) - py); if (dd < d){ d = dd; best = k; } }
+  return best;
+}
+function renderChart(){
+  const svg = $("chart"), view = prefs.param, ks = keysOf(view), combo = ks.length > 1, p = P[ks[0]] || P.t, s = site();
+  $("ptitle").textContent = combo ? VIEWS[view].title : p.k === "xhot" ? `Temperature above ${hotOf(s)}°F` : p.title;
+  $("punit").textContent = p.kind === "prob" ? "percent chance" : p.kind === "sky" ? "percent cloud cover (categories at right)" : p.kind === "dir" ? "degrees true, toward the points" : p.unit || "";
+  $("drawWrap").hidden = !combo; $("lgPeak").hidden = !combo;
+  $("lgOff").textContent = combo ? "Sustained" : "Official";
+  $("drawSel").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.d === (prefs.draw || "n")));
+  const W = svg.clientWidth || 900, Hh = CH.h; CH.w = W;
+  const A = S.agg[s.id] || { val:{}, srcv:{}, band:{} };
+  const rows = S.rows, n = rows.length, { o, g } = OF;
+  const srcOf = k => k.startsWith("x") ? OF.xsrc[k] : A.srcv[k] || {};
+  const ptsOf = k => rows.map((r, i) => ({ i, v:o[k][i], g:g[k] ? g[k][i] : null, ed: ((edits[s.id] || {})[k] || {})[r.key] !== undefined })).filter(q => q.v !== undefined);
+  const allPts = ks.flatMap(ptsOf); CH.pts = allPts;
+  const na = rows.map((r, i) => o[ks[0]][i] === undefined);   /* rows where this window doesn't apply: draw across them */
+  /* domain across every series in the view */
+  const merged = {}; ks.forEach((k, j) => { const sv = srcOf(k); for (const id in sv) merged[id + "_" + j] = sv[id]; });
+  const bandAll = { band:{ [p.k]: rows.map((r, i) => { const bs = ks.map(k => (A.band[k] || [])[i]).filter(Boolean); return bs.length ? [Math.min(...bs.map(b => b[0])), Math.max(...bs.map(b => b[1]))] : null; }) } };
+  const [y0, y1] = chartDomain(p, allPts, bandAll, merged);
+  const L = CH.m.l, R = W - CH.m.r, T = CH.m.t, B = Hh - CH.m.b;
+  const x = i => L + (i + 0.5) * (R - L)/n, y = v => B - (v - y0)/(y1 - y0)*(B - T);
+  CH.x = x; CH.y = y; CH.inv = py => y0 + (B - py)/(B - T)*(y1 - y0); CH.ix = px => Math.max(0, Math.min(n - 1, Math.floor((px - L)/((R - L)/n)))); CH.y0 = y0; CH.y1 = y1;
+  let h = "";
+  const z = zulu(); let start = 0, band = 0;
+  for (let i = 1; i <= n; i++){
+    if (i === n || dayKey(rows[i].a, z) !== dayKey(rows[start].a, z)){
+      const xa = L + start*(R - L)/n, xb = L + i*(R - L)/n;
+      if (band % 2 === 0) h += `<rect class="dayband" x="${xa}" y="${T}" width="${xb - xa}" height="${B - T}"/>`;
+      const Lb = dayLabel(rows[start].a, z); if (xb - xa > 34) h += `<text class="daylab" x="${xa + 5}" y="${T - 7}">${Lb.wd.slice(0,3)} ${Lb.dt}</text>`;
+      start = i; band++;
+    }
+  }
+  const step = p.kind === "dir" ? 90 : p.kind === "prob" || p.kind === "sky" ? 20 : niceStep((y1 - y0)/5);
+  for (let v = Math.ceil(y0/step)*step; v <= y1 + 1e-9; v += step){ const yy = y(v); h += `<line class="grid" x1="${L}" x2="${R}" y1="${yy}" y2="${yy}"/><text class="axis" x="${L - 7}" y="${yy + 4}" text-anchor="end">${p.kind === "dir" ? compass(v) : v}</text>`; }
+  rows.forEach((r, i) => { const hh = z ? new Date(r.a).getUTCHours() : r.lh; if (hh % 6 === 0 && (r.len < 6 || hh % 12 === 0)) h += `<text class="axis" x="${x(i)}" y="${B + 16}" text-anchor="middle">${pad2(hh)}</text>`; });
+  const thr = combo ? [18, 25, 35, 50] : p.thr ? p.thr.slice() : p.k === "t" ? [hotOf(s), 40, 32] : p.k === "wbgt" ? [82, 85, 88, 90] : [];
+  thr.filter(v => v > y0 && v < y1).forEach(v => { h += `<line class="thr" x1="${L}" x2="${R}" y1="${y(v)}" y2="${y(v)}"/><text class="thrlab" x="${R - 3}" y="${y(v) - 4}" text-anchor="end">${v}${p.unit === "kt" ? " kt" : "°"}</text>`; });
+  if (p.kind === "sky") SKY.forEach(([c, a, b]) => { const yy = y(Math.min(100, (a + Math.min(b, 100))/2)); h += `<text class="thrlab" style="fill:var(--ink-3)" x="${R - 3}" y="${yy + 4}" text-anchor="end">${c}</text>`; if (a > 0) h += `<line class="grid" x1="${L}" x2="${R}" y1="${y(a)}" y2="${y(a)}" style="stroke-dasharray:2 3"/>`; });
+  const line = (arr, cls, style) => { let d = "", pen = false; arr.forEach((v, i) => { if (v === undefined && na[i]) return; if (v == null || !isFinite(v)){ pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(Math.max(y0, Math.min(y1, v))).toFixed(1); pen = true; }); return d ? `<path class="${cls}" d="${d}" style="${style || ""}"/>` : ""; };
+  ks.forEach((k, j) => {
+    const bnd = A.band[k] || [];
+    if (p.kind !== "dir" && bnd.some(b => b)){
+      let seg = [];
+      const flush = () => { if (seg.length > 1) h += `<path class="band ${j ? "pk" : ""}" d="M${seg.map(i => `${x(i)},${y(Math.max(y0, Math.min(y1, bnd[i][1])))}`).join("L")}L${seg.slice().reverse().map(i => `${x(i)},${y(Math.max(y0, Math.min(y1, bnd[i][0])))}`).join("L")}Z"/>`; seg = []; };
+      rows.forEach((r, i) => { if (bnd[i]) seg.push(i); else flush(); }); flush();
+    }
+  });
+  ks.forEach((k, j) => {
+    const srcv = srcOf(k);
+    for (const id in srcv){
+      const arr = rows.map((r, i) => srcv[id][i]);
+      if (p.kind === "dir"){ arr.forEach((v, i) => { if (v != null) h += `<circle cx="${x(i)}" cy="${y(v)}" r="1.8" fill="${srcColor(id)}" opacity=".45"/>`; }); }
+      else h += line(arr, "src", `stroke:${srcColor(id)}${j ? ";stroke-dasharray:3 2" : ""}`);
+    }
+  });
+  ks.forEach((k, j) => {
+    const garr = rows.map((r, i) => g[k] ? g[k][i] : null), oarr = rows.map((r, i) => o[k][i]);
+    if (p.kind !== "dir"){ h += line(garr, "guide"); h += line(oarr, "off" + (j ? " pk" : "")); }
+    ptsOf(k).forEach(q => { if (q.v == null) return; h += `<circle class="h ${j ? "pk" : ""} ${q.ed ? "e" : ""}" cx="${x(q.i)}" cy="${y(Math.max(y0, Math.min(y1, q.v)))}" r="${n > 90 ? 2.6 : 3.4}"/>`; });
+    if (combo){ const last = ptsOf(k).filter(q => q.v != null).pop(); if (last) h += `<text class="serlab ${j ? "pk" : ""}" x="${x(last.i) + 6}" y="${y(last.v) + 4}">${j ? "Pk" : "Sus"}</text>`; }
+  });
+  if (S.hoverRow != null) h += `<line class="cursor" x1="${x(S.hoverRow)}" x2="${x(S.hoverRow)}" y1="${T}" y2="${B}"/>`;
+  if (!allPts.some(q => q.v != null)) h += `<text class="axis" x="${(L + R)/2}" y="${(T + B)/2}" text-anchor="middle" style="font-size:14px">${S.loading ? "Loading guidance" : "No guidance for this parameter. Drag on the graph to draw a forecast."}</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${Hh}`); svg.style.height = Hh + "px";
+  svg.innerHTML = h;
+}
+function niceStep(s){ const e = Math.pow(10, Math.floor(Math.log10(s))); const f = s/e; return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10)*e; }
+function chartValue(py, k){
+  const p = P[k]; let v = CH.inv(py);
+  v = Math.max(p.lo ?? CH.y0, Math.min(p.hi ?? CH.y1, v));
+  const st = p.step || 1; v = Math.round(v/st)*st;
+  if (p.kind === "dir") v = ((v % 360) + 360) % 360;
+  return v;
+}
+function paintRange(k, i0, v0, i1, v1, erase){
+  const lo = Math.min(i0, i1), hi = Math.max(i0, i1);
+  for (let i = lo; i <= hi; i++){
+    if (OF.o[k][i] === undefined) continue;
+    const f = i1 === i0 ? 1 : (i - i0)/(i1 - i0);
+    let v = v0 + (v1 - v0)*f; const st = P[k].step || 1; v = Math.round(v/st)*st;
+    writeCell(k, i, erase ? null : v, CH.drag.group);
+  }
+}
+let tableTimer = null;
+function liveRefresh(){ recompute(); renderChart(); if (!tableTimer) tableTimer = setTimeout(() => { tableTimer = null; renderTable(); }, 140); }
+function chartPos(ev){ const r = $("chart").getBoundingClientRect(); return { px: (ev.clientX - r.left) * (CH.w / r.width), py: (ev.clientY - r.top) * (CH.h / r.height) }; }
+function bindChart(){
+  const svg = $("chart");
+  svg.addEventListener("pointerdown", ev => {
+    if (ev.button !== 0 || P[keysOf(prefs.param)[0]].kind === "sev") return;
+    svg.setPointerCapture(ev.pointerId);
+    const { px, py } = chartPos(ev); const i = CH.ix(px), k = pickKey(i, py), v = chartValue(py, k);
+    CH.drag = { k, i, v, erase: ev.altKey, group: [] };
+    paintRange(k, i, v, i, v, ev.altKey); liveRefresh();
+  });
+  svg.addEventListener("pointermove", ev => {
+    const { px, py } = chartPos(ev); const i = CH.ix(px);
+    if (CH.drag){ const d = CH.drag, v = chartValue(py, d.k); paintRange(d.k, d.i, d.v, i, v, d.erase || ev.altKey); d.i = i; d.v = v; liveRefresh(); }
+    hover(i, ev);
+  });
+  const end = () => { if (!CH.drag) return; const g = CH.drag.group; CH.drag = null; if (g.length){ S.undo.push(g); S.redo = []; saveEdits(); } renderAll(); };
+  svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", end);
+  svg.addEventListener("pointerleave", () => { if (!CH.drag){ hover(null); } });
+  svg.addEventListener("dblclick", ev => { const { px, py } = chartPos(ev); const i = CH.ix(px); const g = []; writeCell(pickKey(i, py), i, null, g); commit(g); });
+  window.addEventListener("resize", () => renderChart());
+}
+function hover(i, ev){
+  const tip = $("tip");
+  if (S.hoverRow !== i){
+    const tb = $("matrix"); tb.querySelectorAll("tr.hov").forEach(x => x.classList.remove("hov"));
+    S.hoverRow = i; if (i != null){ const tr = tb.querySelector(`tr[data-r="${i}"]`); if (tr) tr.classList.add("hov"); }
+    renderChart();
+  }
+  if (i == null || !ev){ tip.style.display = "none"; return; }
+  const ks = keysOf(prefs.param), combo = ks.length > 1, p = P[ks[0]], s = site(), r = S.rows[i], A = S.agg[s.id] || { srcv:{} };
+  const srcOf = k => k.startsWith("x") ? OF.xsrc[k] : (A.srcv[k] || {});
+  const f = v => v == null || v === undefined ? "–" : p.kind === "sky" ? `${Math.round(v)}% ${skyCat(v)}` : p.kind === "dir" ? `${Math.round(v)}° ${compass(v)}` : p.kind === "prob" ? `${Math.round(v)}%` : `${Math.round(v)}${p.unit === "°F" ? "°" : ""}`;
+  const fv = getter => ks.map(k => f(getter(k))).join(" / ");
+  const Ld = dayLabel(r.a, zulu());
+  let h = `<div><b>${Ld.wd.slice(0,3)} ${Ld.dt}, ${rowTime(r)}${zulu() ? "Z" : ""}</b></div>`;
+  if (combo) h += `<div class="r mut"><span></span><span>sust / peak</span></div>`;
+  h += `<div class="r"><span>Official</span><span>${fv(k => OF.o[k][i])}</span></div><div class="r mut"><span>Guidance</span><span>${fv(k => OF.g[k] ? OF.g[k][i] : null)}</span></div>`;
+  const s0 = srcOf(ks[0]);
+  const ids = [...new Set(ks.flatMap(k => Object.keys(srcOf(k))))].filter(id => ks.some(k => (srcOf(k)[id] || [])[i] != null)).sort((a, b) => ALL_SOURCES.findIndex(x => x.id === a) - ALL_SOURCES.findIndex(x => x.id === b));
+  ids.slice(0, 14).forEach(id => { const d = ALL_SOURCES.find(x => x.id === id); h += `<div class="r mut"><span>${d ? d.name : id}</span><span>${fv(k => (srcOf(k)[id] || [])[i])}</span></div>`; });
+  tip.innerHTML = h; tip.style.display = "block";
+  const wrap = $("chartwrap").getBoundingClientRect(); let lx = ev.clientX - wrap.left + 14; if (lx + 200 > wrap.width) lx = ev.clientX - wrap.left - 214;
+  tip.style.left = lx + "px"; tip.style.top = Math.max(0, ev.clientY - wrap.top - 20) + "px";
+}
+
+/* ============================================================
+   Publish: Excel (hand-built xlsx) + CSV
+   ============================================================ */
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b){ let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zip(files){
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+  for (const [name, text] of files){
+    const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, dt, true); lh.setUint16(12, dd, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, nb.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), nb, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, dt, true); ch.setUint16(14, dd, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, nb.length, true); ch.setUint32(42, off, true);
+    central.push(new Uint8Array(ch.buffer), nb);
+    off += 30 + nb.length + data.length;
+  }
+  const csz = central.reduce((a, b) => a + b.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, csz, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+const xesc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const colName = c => { let s = ""; c++; while (c > 0){ const m = (c - 1) % 26; s = String.fromCharCode(65 + m) + s; c = Math.floor((c - 1)/26); } return s; };
+const XSTYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="6"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="15"/><color rgb="FF13202E"/><name val="Arial"/></font><font><sz val="9"/><color rgb="FF4B5A68"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FF13202E"/><name val="Arial"/></font><font><b/><sz val="9"/><color rgb="FF13202E"/><name val="Arial"/></font></fonts>
+<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF13202E"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE6EBED"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF4F7F7"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="3"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFD4DBDF"/></left><right style="thin"><color rgb="FFD4DBDF"/></right><top style="thin"><color rgb="FFD4DBDF"/></top><bottom style="thin"><color rgb="FFD4DBDF"/></bottom><diagonal/></border><border><left style="thin"><color rgb="FFD4DBDF"/></left><right style="thin"><color rgb="FFD4DBDF"/></right><top style="medium"><color rgb="FF13202E"/></top><bottom style="thin"><color rgb="FFD4DBDF"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="13">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="1" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="9" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="1" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="9" fontId="0" fillId="0" borderId="2" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="4" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+function sheetXML(sh){
+  let x = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`;
+  x += `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" zoomScale="100"><pane xSplit="${sh.freeze.c}" ySplit="${sh.freeze.r}" topLeftCell="${colName(sh.freeze.c)}${sh.freeze.r + 1}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>`;
+  x += `<sheetFormatPr defaultRowHeight="15"/><cols>${sh.cols.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols><sheetData>`;
+  sh.rows.forEach((row, ri) => {
+    const ht = sh.heights && sh.heights[ri];
+    x += `<row r="${ri + 1}"${ht ? ` ht="${ht}" customHeight="1"` : ""}>`;
+    row.forEach((c, ci) => {
+      if (!c) return; const ref = colName(ci) + (ri + 1); const st = c.s ? ` s="${c.s}"` : "";
+      if (c.v === null || c.v === undefined || c.v === "") x += `<c r="${ref}"${st}/>`;
+      else if (typeof c.v === "number") x += `<c r="${ref}"${st}><v>${c.v}</v></c>`;
+      else x += `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xesc(c.v)}</t></is></c>`;
+    });
+    x += `</row>`;
+  });
+  x += `</sheetData>`;
+  if (sh.merges.length) x += `<mergeCells count="${sh.merges.length}">${sh.merges.map(m => `<mergeCell ref="${m}"/>`).join("")}</mergeCells>`;
+  (sh.cf || []).forEach((ref, i) => { x += `<conditionalFormatting sqref="${ref}"><cfRule type="colorScale" priority="${i + 1}"><colorScale><cfvo type="num" val="0"/><cfvo type="num" val="1"/><color rgb="FFFFFFFF"/><color rgb="FF6FAFB6"/></colorScale></cfRule></conditionalFormatting>`; });
+  x += `<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+  return x;
+}
+function workbook(sheets){
+  const files = [
+    ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`],
+    ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`],
+    ["docProps/core.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Daily Planning Forecast</dc:title><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0,19)}Z</dcterms:created></cp:coreProperties>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>${sheets.map((s, i) => `<sheet name="${xesc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((s, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/styles.xml", XSTYLES],
+    ...sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheetXML(s)]),
+  ];
+  return zip(files);
+}
+const XCOLS = ["Day","Time","Period", "sky","t","td","wbgt","pp1","pp3","pp6","lt1","lt3","lt6","s54","g54","s200","g200","dir","x18","x25","x35","x50","xhot","x40","x32","xvis","sev"];
+function siteSheet(s, OFs, issued, by){
+  const z = zulu(), tz = z ? "UTC" : tzAbbr(issued), o = OFs.o, rows = S.rows;
+  const it = new Date(issued), iss = `${dayLabel(issued, z).wd}, ${dayLabel(issued, z).dt} ${new Date(issued).getUTCFullYear()} at ${hhmm(issued, z)} ${tz}`;
+  const R = [], merges = [], heights = {};
+  const ncol = XCOLS.length, last = colName(ncol - 1);
+  R.push([{ v:`${s.name} Daily Planning Forecast`, s:1 }]); heights[0] = 22;
+  R.push([{ v:`Issued ${iss} by ${by}`, s:2 }]);
+  R.push([{ v:`Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times are ${tz}. Probabilities are the chance of the event at any time in the period.`, s:2 }]);
+  R.push([{ v:"Hourly to 24 h, 3-hour blocks to day 5, 6-hour blocks on days 6 and 7. In blocks, temperature is the daytime high or overnight low, winds are the block maximum.", s:2 }]);
+  R.push([]);
+  const G = [["Valid",0,2],["Sky",3,3],["Temperature (°F)",4,6],["Precip prob",7,9],["Lightning prob",10,12],["Winds (kt)",13,17],["Probability of exceeding, sfc to 200 ft",18,25],["Severe",26,26]];
+  const gr = new Array(ncol).fill(null).map(() => ({ v:"", s:3 }));
+  G.forEach(([n, a, b]) => { gr[a] = { v:n, s:3 }; if (b > a) merges.push(`${colName(a)}6:${colName(b)}6`); });
+  R.push(gr); heights[5] = 20;
+  const hd = XCOLS.map((k, ci) => { if (ci < 3) return { v: ci === 1 ? `Time (${tz})` : k, s:4 }; const p = P[k]; return { v: (p.k === "xhot" ? `>${hotOf(s)}°F` : p.k === "sev" ? "Damaging wind, hail, tornado" : p.l) + (p.s ? `\n${p.s}` : ""), s:4 }; });
+  R.push(hd); heights[6] = 30;
+  let lastDay = null;
+  rows.forEach((r, i) => {
+    const dk = dayKey(r.a, z), top = dk !== lastDay; lastDay = dk;
+    const st = (base) => top ? base + 4 : base;
+    const L = dayLabel(r.a, z);
+    const row = [{ v: top ? `${L.wd.slice(0,3)} ${L.dt}` : "", s: st(8) }, { v: rowTime(r), s: st(5) }, { v: `${r.len} h`, s: st(5) }];
+    for (const k of XCOLS.slice(3)){
+      const p = P[k], v = o[k][i];
+      if (v === undefined || v === null){ row.push({ v:"", s: st(5) }); continue; }
+      if (p.kind === "prob") row.push({ v: Math.round(v)/100, s: st(7) });
+      else if (p.kind === "sky") row.push({ v: skyCat(v), s: st(5) });
+      else if (p.kind === "dir") row.push({ v: compass(v), s: st(5) });
+      else if (p.kind === "sev") row.push({ v: v === "-" ? "-" : SEV_NAME[v], s: st(5) });
+      else row.push({ v: Math.round(v), s: st(6) });
+    }
+    R.push(row);
+  });
+  const n0 = 8, n1 = 7 + rows.length;
+  merges.push(`A1:${last}1`, `A2:${last}2`, `A3:${last}3`, `A4:${last}4`);
+  return { name: `${s.name} (${s.point})`.slice(0, 31), rows:R, merges, heights, freeze:{ r:7, c:3 },
+    cols:[11,11,7, 8,7,8,7, 7,7,7, 7,7,7, 7,7,7,7,7, 8,8,8,8,8,8,8,8, 14], cf:[`H${n0}:M${n1}`, `S${n0}:Z${n1}`] };
+}
+function csvFor(list, issued, by){
+  const head = ["site","point","valid_start_utc","valid_end_utc","valid_start_local","period_h","sky","sky_pct","temp_f","dewpoint_f","wbgt_f","pop_1h_pct","pop_3h_pct","pop_6h_pct","ltg_1h_pct","ltg_3h_pct","ltg_6h_pct","wind54_sust_kt","wind54_peak_kt","wind200_sust_kt","wind200_peak_kt","wind_dir_deg","wind_dir","p_sust_gt18kt_pct","p_peak_gt25kt_pct","p_peak_gt35kt_pct","p_peak_gt50kt_pct","p_temp_gt_hot_pct","hot_threshold_f","p_temp_lt40f_pct","p_temp_lt32f_pct","p_vis_lt3mi_pct","severe","issued_utc","forecaster"];
+  const q = v => { if (v === undefined || v === null) return ""; const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [head.join(",")];
+  for (const [s, OFs] of list){
+    const o = OFs.o;
+    S.rows.forEach((r, i) => {
+      const p = lp(r.a), loc = `${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:00`;
+      const n = k => o[k][i] == null ? "" : Math.round(o[k][i]);
+      lines.push([s.name, s.point, new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, o.sky[i] == null ? "" : skyCat(o.sky[i]), n("sky"), n("t"), n("td"), n("wbgt"), n("pp1"), n("pp3"), n("pp6"), n("lt1"), n("lt3"), n("lt6"), n("s54"), n("g54"), n("s200"), n("g200"), n("dir"), o.dir[i] == null ? "" : compass(o.dir[i]), n("x18"), n("x25"), n("x35"), n("x50"), n("xhot"), hotOf(s), n("x40"), n("x32"), n("xvis"), o.sev[i] || "-", new Date(issued).toISOString().slice(0,16) + "Z", by].map(q).join(","));
+    });
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+function download(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
+function openPublish(){
+  const dlg = $("pubDlg");
+  $("pubSites").innerHTML = SITES.map(s => `<label><input type="checkbox" value="${s.id}" ${s.id === prefs.site || editCount(s.id) ? "checked" : ""}> ${s.name} <span style="color:var(--ink-3)">${s.point}</span></label>`).join("");
+  $("pubInit").value = prefs.initials || "";
+  const qcRefresh = () => {
+    const ids = [...$("pubSites").querySelectorAll("input:checked")].map(x => x.value);
+    const msgs = [];
+    ids.forEach(id => { const q = qcIssues(id, officialFor(id)); q.list.forEach(it => msgs.push(`${SITES.find(s => s.id === id).name}, ${dayLabel(S.rows[it.i].a, zulu()).wd.slice(0,3)} ${rowTime(S.rows[it.i])}: ${it.msg}`)); });
+    const el = $("qc");
+    if (msgs.length){ el.className = "qc show"; el.innerHTML = `<b>${msgs.length} check${msgs.length > 1 ? "s" : ""} to look at.</b> You can still publish.<ul>${msgs.slice(0, 10).map(m => `<li>${m}</li>`).join("")}${msgs.length > 10 ? `<li>and ${msgs.length - 10} more</li>` : ""}</ul>`; }
+    else el.className = "qc";
+    $("pubGo").disabled = !ids.length;
+  };
+  $("pubSites").onchange = qcRefresh; qcRefresh();
+  dlg.showModal(); $("pubInit").focus();
+}
+function doPublish(){
+  const ids = [...$("pubSites").querySelectorAll("input:checked")].map(x => x.value);
+  const by = ($("pubInit").value || "").trim().toUpperCase() || "WX";
+  prefs.initials = by; $("initials").value = by; savePrefs();
+  const issued = Date.now(), list = ids.map(id => [SITES.find(s => s.id === id), officialFor(id)]);
+  const p = lp(issued), stamp = `${p.y}${pad2(p.mo)}${pad2(p.d)}_${pad2(p.h)}${pad2(p.mi)}`;
+  const tag = ids.length === 1 ? "_" + SITES.find(s => s.id === ids[0]).point.replace(/[^A-Za-z0-9]/g, "") : "";
+  let nfiles = 0;
+  if ($("fmtX").checked){ download(workbook(list.map(([s, o]) => siteSheet(s, o, issued, by))), `Planning_Forecast${tag}_${stamp}.xlsx`); nfiles++; }
+  if ($("fmtC").checked){ setTimeout(() => download(new Blob([csvFor(list, issued, by)], { type:"text/csv" }), `Planning_Forecast${tag}_${stamp}.csv`), 300); nfiles++; }
+  ids.forEach(id => published[id] = { t: issued, by }); store.set(LS.pub, published);
+  renderStatus();
+  toast(`Published ${hhmm(issued, zulu())}${zulu() ? "Z" : ""}, ${nfiles} file${nfiles === 1 ? "" : "s"} downloaded`);
+}
+let toastT = null;
+function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2600); }
+
+/* ============================================================
+   Loading
+   ============================================================ */
+function recomputeAgg(){ for (const s of SITES) if (S.G[s.id]) S.agg[s.id] = aggregate(S.G[s.id], prefs); }
+let renderT = null;
+function scheduleRender(){ if (renderT) return; renderT = setTimeout(() => { renderT = null; recomputeAgg(); renderAll(); renderSources(); }, 120); }
+async function loadAll(){
+  S.loading = true; S.rows = buildRows(Date.now()); S.TL = makeTimeline(Date.now()); S.G = {}; S.agg = {}; S.status = {}; S.fetchedAt = Date.now();
+  pruneEdits(); saveEdits();
+  for (const s of SITES) S.G[s.id] = new SiteGuidance(s, S.TL, S.rows);
+  ALL_SOURCES.forEach(d => S.status[d.id] = { loading:true });
+  renderSources(); recomputeAgg(); renderAll();
+  const tasks = [];
+  const det = (d, ens) => (DEMO ? demoOM(d, ens, S.TL) : fetchOM(d, ens, S.TL)).then(per => {
+    let n = 0; SITES.forEach((s, si) => { if (per[si] && per[si].length){ S.G[s.id].addSource(d, per[si]); n = per[si].length; } });
+    S.status[d.id] = n ? { ok:true, note: ens ? `${n} members` : "loaded" } : { err:"no data for this area" };
+  }).catch(e => { S.status[d.id] = { err: e.name === "AbortError" ? "timed out" : "not available" }; }).finally(scheduleRender);
+  OM_DET.forEach(d => tasks.push(det(d, false)));
+  OM_ENS.forEach(d => tasks.push(det(d, true)));
+  MOS.forEach(d => tasks.push((DEMO ? demoMOS(d, S.TL) : fetchMOS(d, S.TL)).then(per => {
+    let n = 0, run = null, from = "";
+    SITES.forEach(s => { const x = per[s.stn]; if (x && x.members[0].t.some(v => v != null)){ S.G[s.id].addSource(d, x.members, { iv:x.iv, run:x.run }); n++; run = x.run; from = x.from; } });
+    S.status[d.id] = n ? { ok:true, note: run ? `${pad2(new Date(run).getUTCHours())}Z run${from === "mirror" ? ", mirror" : ""}` : "loaded" } : { err:"no stations" };
+  }).catch(e => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleRender)));
+  PIPE.forEach(d => S.status[d.id] = { loading:true });
+  tasks.push((DEMO ? demoPipeline(S.TL) : fetchPipeline(S.TL)).then(res => {
+    for (const d of PIPE){
+      const x = res[d.id];
+      if (!x || !Object.keys(x.per).length){ S.status[d.id] = { err:"not in this run" }; continue; }
+      SITES.forEach(s => { const p = x.per[s.id]; if (p) S.G[s.id].addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); });
+      S.status[d.id] = { ok:true, note: `${pad2(new Date(x.run).getUTCHours())}Z run${x.n > 1 ? `, ${x.n} members` : ""}` };
+    }
+  }).catch(e => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleRender));
+  tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
+  await Promise.allSettled(tasks);
+  S.loading = false; S.fetchedAt = Date.now(); scheduleRender();
+}
+
+/* ---------- demo data (only with ?demo=1) ---------- */
+function rng(seed){ let x = seed >>> 0 || 1; return () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296; }
+function demoSeries(TL, r, bias){
+  const m = {}; ["t","td","sky","s10","d10","g10","s80","vis","sw","pr","pp"].forEach(k => m[k] = new Array(TL.n).fill(null));
+  const front = TL.t0 + (70 + r()*10) * H;
+  for (let i = 0; i < TL.n; i++){
+    const t = TL.t0 + i*H, h = lp(t).h, post = t > front;
+    const diur = Math.sin((h - 9) / 24 * 2*Math.PI);
+    m.t[i] = 78 + bias + 6*diur - (post ? 9 : 0) + (r() - 0.5)*1.5;
+    m.td[i] = (post ? 55 : 70) + bias*0.5 + (r() - 0.5)*2;
+    m.sky[i] = Math.max(0, Math.min(100, (post ? 15 : 45) + 35*Math.sin(i/9 + bias) + (r() - 0.5)*25));
+    m.s10[i] = Math.max(1, (post ? 15 : 9) + 3*diur + (r() - 0.5)*4 + bias*0.4);
+    m.d10[i] = ((post ? 340 : 120) + (r() - 0.5)*30 + 360) % 360;
+    m.g10[i] = m.s10[i] * (1.35 + r()*0.2);
+    m.s80[i] = m.s10[i] * 1.32;
+    m.vis[i] = r() < 0.04 ? 3000 : 16000;
+    m.sw[i] = Math.max(0, 850*Math.sin((h - 6)/12*Math.PI));
+    m.pr[i] = !post && h >= 13 && h <= 19 && r() < 0.18 ? 0.05 + r()*0.3 : (Math.abs(t - front) < 6*H && r() < 0.4 ? 0.1 : 0);
+    m.pp[i] = !post && h >= 13 && h <= 19 ? 25 + r()*20 : 5;
+  }
+  return m;
+}
+async function demoOM(d, ens, TL){
+  await new Promise(r => setTimeout(r, 60 + Math.random()*300));
+  if (d.id === "ukmo") throw new Error("demo outage");
+  return SITES.map((s, si) => {
+    const r = rng((d.id.charCodeAt(0) * 97 + d.id.length * 31 + si * 7) | 0); const n = ens ? 20 : 1;
+    const ms = []; for (let k = 0; k < n; k++){ const m = demoSeries(TL, r, (r() - 0.5)*4 + (si === 4 ? 1.5 : 0)); if (d.fam === "hires") for (let i = 48; i < TL.n; i++) Object.keys(m).forEach(x => m[x][i] = null); if (d.id !== "nbm") m.pp = new Array(TL.n).fill(null); m.gap = 3; deriveMember(m, TL.n); ms.push(m); }
+    return ms;
+  });
+}
+async function demoMOS(d, TL){
+  await new Promise(r => setTimeout(r, 100 + Math.random()*300));
+  const out = {};
+  STATIONS.forEach((stn, si) => {
+    const r = rng(d.model.charCodeAt(0)*13 + si); const m = demoSeries(TL, r, 0);
+    const step = d.model === "LAV" ? 1 : 3, span = d.model === "LAV" ? 25 : d.model === "NBS" ? 72 : d.model === "GFSX" || d.model === "NBE" ? 190 : 72;
+    Object.keys(m).forEach(k => { for (let i = 0; i < TL.n; i++) if (i < 6 || i > 6 + span || (i % step)) m[k][i] = null; });
+    const iv = { pop:[], tst:[] }; const L = d.model === "LAV" ? 1 : d.model === "GFSX" || d.model === "NBE" ? 12 : 6, Lt = d.model === "LAV" ? 2 : d.model === "NBS" ? 3 : L;
+    for (let t = TL.t0 + 6*H; t < TL.t0 + (6 + span)*H; t += L*H){ const h = lp(t).h; iv.pop.push({ a:t, b:t + L*H, p: h >= 12 && h <= 20 ? 0.2 + r()*0.3 : 0.05 }); }
+    for (let t = TL.t0 + 6*H; t < TL.t0 + (6 + span)*H; t += Lt*H){ const h = lp(t).h; iv.tst.push({ a:t, b:t + Lt*H, p: h >= 13 && h <= 19 && t < TL.t0 + 76*H ? 0.1 + r()*0.25 : 0.01 }); }
+    m.gap = L; deriveMember(m, TL.n);
+    out[stn] = { members:[m], iv, run: Math.floor(Date.now()/(6*H))*6*H - 6*H, from:"demo" };
+  });
+  return out;
+}
+async function demoPipeline(TL){
+  await new Promise(r => setTimeout(r, 200));
+  const out = {};
+  const run = Math.floor(Date.now()/(6*H))*6*H - 6*H;
+  for (const d of PIPE){
+    const per = {};
+    SITES.forEach((s, si) => {
+      const r = rng(d.id.length*101 + si*17);
+      if (d.fam === "ct"){
+        const tst = [], tst4 = [], maxh = d.id === "hrefct" ? 48 : 60;
+        for (let h = 1; h <= maxh; h++){ const b = run + h*H, lh = lp(b).h; const base = lh >= 13 && lh <= 20 && h < 40 ? 0.08 + r()*0.25 : 0.01; tst.push({ a:b - H, b, p:base }); if (h >= 4) tst4.push({ a:b - 4*H, b, p:Math.min(0.9, base*2.2) }); }
+        per[s.id] = { members:[], iv:{ tst, tst4 } };
+      } else {
+        const n = d.id === "refsm" ? 5 : 1, ms = [];
+        for (let k = 0; k < n; k++){ const m = demoSeries(TL, r, (r() - 0.5)*3); const lim = TL.idx(run + (d.id === "rrfs" ? 84 : 60)*H); Object.keys(m).forEach(x => { for (let i = Math.max(0, lim); i < TL.n; i++) m[x][i] = null; }); m.pp = new Array(TL.n).fill(null); m.gap = 3; ms.push(deriveMember(m, TL.n)); }
+        per[s.id] = { members: ms, iv:null };
+      }
+    });
+    out[d.id] = { run, per, n: d.id === "refsm" ? 5 : 1 };
+  }
+  return out;
+}
+async function demoSPC(){ const t = Date.now(); const d = new Date(t); const v = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 12); return [{ cat:"MRGL", a:v, b:v + 24*H, geom:{ type:"Polygon", coordinates:[[[-81.5,27.5],[-80,27.5],[-80,29.5],[-81.5,29.5],[-81.5,27.5]]] } }]; }
+
+/* ============================================================
+   Events
+   ============================================================ */
+function bind(){
+  $("sites").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; renderAll(); });
+  $("locator").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); renderAll(); });
+  $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderTable(); });
+  $("undo").onclick = undo; $("redo").onclick = redo;
+  $("drawSel").addEventListener("click", ev => { const b = ev.target.closest("[data-d]"); if (!b) return; prefs.draw = b.dataset.d; savePrefs(); renderChart(); });
+  $("resetSite").onclick = () => {
+    const n = editCount(prefs.site); if (!n){ toast("No edits to clear"); return; }
+    if (!confirm(`Clear all ${n} edits for ${site().name}? You can undo this.`)) return;
+    const g = []; const e = edits[prefs.site] || {}; for (const k in e) for (const key in e[k]) setEdit(prefs.site, k, key, undefined, g); commit(g); toast("Reset to guidance");
+  };
+  const toolKeys = () => { const ks = keysOf(prefs.param); return ks.length > 1 && prefs.draw === "s" ? [ks[0]] : ks.length > 1 && prefs.draw === "p" ? [ks[1]] : ks; };
+  $("resetParam").onclick = () => { const g = []; for (const k of toolKeys()){ const m = (edits[prefs.site] || {})[k] || {}; for (const key in m) setEdit(prefs.site, k, key, undefined, g); } commit(g); };
+  const nudge = d => { const g = []; for (const k of toolKeys()){ const p = P[k]; S.rows.forEach((r, i) => { const v = OF.o[k][i]; if (v == null) return; let nv = v + d*(p.step || 1); if (p.kind === "dir") nv = ((nv % 360) + 360) % 360; else { if (p.lo != null) nv = Math.max(p.lo, nv); if (p.hi != null) nv = Math.min(p.hi, nv); } writeCell(k, i, nv, g); }); recompute(); } commit(g); };
+  $("nudgeUp").onclick = () => nudge(1); $("nudgeDn").onclick = () => nudge(-1);
+  $("smooth").onclick = () => {
+    if (P[keysOf(prefs.param)[0]].kind === "dir") return toast("Smoothing isn't available for direction");
+    const g = [];
+    for (const k of toolKeys()){
+      const p = P[k], m = (edits[prefs.site] || {})[k] || {}; const v = OF.o[k].slice();
+      S.rows.forEach((r, i) => { if (m[r.key] === undefined || v[i] == null) return; const a = v[i - 1] ?? v[i], b = v[i + 1] ?? v[i]; writeCell(k, i, Math.round((a + 2*v[i] + b)/4/(p.step || 1))*(p.step || 1), g); });
+    }
+    commit(g); if (!g.length) toast("Edit some points first, then smooth them");
+  };
+  $("publish").onclick = openPublish;
+  $("pubDlg").addEventListener("close", () => { if ($("pubDlg").returnValue === "ok") doPublish(); });
+  $("pubForm").addEventListener("submit", ev => { if (ev.submitter && ev.submitter.value === "ok" && !$("pubInit").value.trim()){ ev.preventDefault(); $("pubInit").focus(); } });
+  $("tzL").onclick = () => { prefs.tz = "L"; savePrefs(); renderAll(); };
+  $("tzZ").onclick = () => { prefs.tz = "Z"; savePrefs(); renderAll(); };
+  $("refresh").onclick = () => { if (S.loading) return; loadAll(); };
+  $("initials").value = prefs.initials || ""; $("initials").oninput = e => { prefs.initials = e.target.value.toUpperCase(); savePrefs(); };
+  $("linkProbs").checked = prefs.link; $("linkProbs").onchange = e => { prefs.link = e.target.checked; savePrefs(); renderAll(); };
+  $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
+  $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
+  $("srcgrid").addEventListener("change", ev => {
+    const t = ev.target;
+    if (t.dataset.src){ prefs.enabled[t.dataset.src] = t.checked; }
+    if (t.dataset.w){ prefs.weight[t.dataset.w] = parseFloat(t.value); }
+    savePrefs(); recomputeAgg(); renderAll(); renderSources();
+  });
+  /* matrix */
+  const mx = $("matrix");
+  mx.addEventListener("click", ev => {
+    const th = ev.target.closest("thead th[data-p]"); if (th){ if (P[th.dataset.p].kind !== "sev"){ prefs.param = viewOf(th.dataset.p); savePrefs(); renderParams(); renderChart(); renderTable(); $("chart").scrollIntoView({ block:"nearest", behavior:"smooth" }); } return; }
+    const td = ev.target.closest("td.c"); if (!td || ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
+    const i = +td.dataset.i, k = td.dataset.k;
+    if (S.cur && S.cur.i === i && S.cur.k === k && !td.classList.contains("na")) openEditor(i, k);
+    else { selectCell(i, k); mx.focus({ preventScroll:true }); }
+  });
+  mx.addEventListener("dblclick", ev => { const td = ev.target.closest("td.c"); if (td) openEditor(+td.dataset.i, td.dataset.k); });
+  mx.addEventListener("mouseover", ev => { const tr = ev.target.closest("tbody tr"); if (!tr) return; const i = +tr.dataset.r; if (S.hoverRow !== i){ mx.querySelectorAll("tr.hov").forEach(x => x.classList.remove("hov")); tr.classList.add("hov"); S.hoverRow = i; renderChart(); } });
+  mx.addEventListener("mouseleave", () => { mx.querySelectorAll("tr.hov").forEach(x => x.classList.remove("hov")); S.hoverRow = null; renderChart(); });
+  mx.addEventListener("keydown", ev => {
+    if (editor || !S.cur) return;
+    const ks = PARAMS.map(p => p.k); let { i, k } = S.cur; let ki = ks.indexOf(k);
+    const mv = (di, dk) => { i = Math.max(0, Math.min(S.rows.length - 1, i + di)); ki = Math.max(0, Math.min(ks.length - 1, ki + dk)); selectCell(i, ks[ki], true); ev.preventDefault(); };
+    if (ev.key === "ArrowDown") return mv(1, 0);
+    if (ev.key === "ArrowUp") return mv(-1, 0);
+    if (ev.key === "ArrowRight" || (ev.key === "Tab" && !ev.shiftKey)) return mv(0, 1);
+    if (ev.key === "ArrowLeft" || (ev.key === "Tab" && ev.shiftKey)) return mv(0, -1);
+    if (ev.key === "Enter" || ev.key === "F2"){ ev.preventDefault(); return openEditor(i, k); }
+    if (ev.key === "Delete" || ev.key === "Backspace"){ ev.preventDefault(); const g = []; writeCell(k, i, null, g); commit(g); selectCell(i, k); return; }
+    if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey && /[0-9a-zA-Z.\-]/.test(ev.key)){ ev.preventDefault(); openEditor(i, k, P[k].kind === "sky" || P[k].kind === "sev" ? null : ev.key); }
+  });
+  mx.addEventListener("paste", ev => {
+    if (editor || !S.cur) return;
+    const txt = (ev.clipboardData || window.clipboardData).getData("text"); if (!txt) return;
+    ev.preventDefault();
+    const lines = txt.replace(/\r/g, "").split("\n"); if (lines[lines.length - 1] === "") lines.pop();
+    const ks = PARAMS.map(p => p.k), k0 = ks.indexOf(S.cur.k), g = []; let bad = 0, ri = S.cur.i;
+    for (const ln of lines){
+      while (ri < S.rows.length && OF.o[S.cur.k][ri] === undefined) ri++;
+      if (ri >= S.rows.length) break;
+      ln.split("\t").forEach((cell, c) => { const k = ks[k0 + c]; if (!k) return; const v = parseInput(P[k], cell); if (v === undefined){ if (cell.trim()) bad++; return; } writeCell(k, ri, v, g); });
+      ri++;
+    }
+    commit(g); toast(`Pasted ${g.length} value${g.length === 1 ? "" : "s"}${bad ? `, skipped ${bad} unreadable` : ""}`);
+  });
+  document.addEventListener("keydown", ev => {
+    const mod = ev.ctrlKey || ev.metaKey; if (!mod || editor) return;
+    if (ev.target.tagName === "INPUT" && ev.target.type === "text" && ev.target.id !== "") return;
+    if (ev.key.toLowerCase() === "z" && !ev.shiftKey){ ev.preventDefault(); undo(); }
+    else if ((ev.key.toLowerCase() === "z" && ev.shiftKey) || ev.key.toLowerCase() === "y"){ ev.preventDefault(); redo(); }
+  });
+  bindChart();
+}
+bind();
+loadAll();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TAF Generator | Patrick SFB (KCOF)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF2F1; --panel:#FFFFFF; --panel-2:#F6F8F8; --ink:#13202E; --ink-2:#4B5A68; --ink-3:#7D8B97;
+  --rule:#D4DBDF; --rule-2:#E6EBED; --accent:#0B6E79; --accent-ink:#FFFFFF; --edit:#B5730C; --edit-bg:#FFF4DF;
+  --warn:#B23A2E; --warn-bg:#FBE9E6; --ok:#2F7A4A;
+  --c1:#F6D58A; --c2:#EFA765; --c3:#E07152; --c4:#C2414A; --c5:#8E2F5B;
+  --hires:#7A4FA0; --blend:#0B6E79; --global:#3D6FB0; --ens:#8A9AA8; --mos:#B5730C; --ct:#B4472A; --peak:#3359A8;
+  --p:11,110,121; --hot:178,58,46; --cold:52,102,170;
+  --font:"Barlow", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --cond:"Barlow Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+    --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+    --warn:#F08070; --warn-bg:#3B1C18; --ok:#6CC08A;
+    --c1:#6B5A26; --c2:#7A4A26; --c3:#80382A; --c4:#7A2430; --c5:#5E1E44;
+    --hires:#B892DA; --blend:#4DBFC8; --global:#7FA8E0; --ens:#6E7F8D; --mos:#E3A53D; --ct:#F08A6A; --peak:#93B4F0;
+    --p:77,191,200; --hot:240,128,112; --cold:120,160,230;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+  --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+  --warn:#F08070; --warn-bg:#3B1C18; --ok:#6CC08A;
+  --c1:#6B5A26; --c2:#7A4A26; --c3:#80382A; --c4:#7A2430; --c5:#5E1E44;
+  --p:77,191,200; color-scheme: dark;
+}
+:root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+body{ margin:0; background:var(--paper); color:var(--ink); font:15px/1.45 var(--font); font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
+button,input,select,textarea{ font:inherit; color:inherit; }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+a{ color:var(--accent); }
+
+.top{ display:grid; grid-template-columns:1fr auto; gap:14px 28px; align-items:center; padding:18px 28px 16px; background:var(--panel); border-bottom:1px solid var(--rule); }
+.top h1{ margin:0; font:700 26px/1 var(--cond); }
+.top .where{ margin-top:6px; color:var(--ink-2); font-size:14px; }
+.top .where b{ color:var(--ink); }
+.actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.btn{ border:1px solid var(--rule); background:var(--panel); border-radius:8px; padding:7px 13px; cursor:pointer; font-weight:500; white-space:nowrap; text-decoration:none; color:var(--ink); display:inline-block; }
+.btn:hover{ border-color:var(--ink-3); }
+.btn.primary{ background:var(--ink); color:var(--panel); border-color:var(--ink); font-weight:600; padding:8px 18px; }
+.seg{ display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden; }
+.seg button{ border:0; background:var(--panel); padding:6px 12px; cursor:pointer; font-size:13.5px; }
+.seg button[aria-pressed="true"]{ background:var(--ink); color:var(--panel); }
+
+.statusline{ display:flex; flex-wrap:wrap; gap:8px 22px; align-items:center; padding:10px 28px; font-size:13.5px; color:var(--ink-2); border-bottom:1px solid var(--rule); background:var(--panel-2); }
+.statusline .k{ color:var(--ink-3); margin-right:6px; }
+.statusline .live::before{ content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-right:7px; vertical-align:1px; }
+.statusline .live.err::before{ background:var(--warn); }
+.statusline label{ display:inline-flex; gap:7px; align-items:center; }
+.statusline input{ width:78px; padding:3px 7px; border:1px solid var(--rule); border-radius:6px; background:var(--panel); font-family:var(--mono); }
+.statusline .sp{ flex:1; }
+.banner{ margin:14px 28px 0; padding:10px 14px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-weight:500; display:none; }
+.banner.show{ display:block; }
+.banner.demo{ background:var(--edit-bg); color:var(--edit); }
+
+main{ padding:18px 28px 40px; display:grid; gap:18px; }
+main > *{ min-width:0; }
+.panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; }
+
+/* TAF text: the product itself */
+.taf{ padding:16px 18px 14px; }
+.tafhead{ display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:10px; }
+.tafhead h2{ margin:0; font:700 22px/1 var(--cond); }
+.tafhead .note{ color:var(--ink-3); font-size:13px; flex:1; }
+.tafhead .note.edited{ color:var(--edit); }
+textarea#taf{ width:100%; resize:vertical; border:1px solid var(--rule); border-radius:10px; background:var(--panel-2); padding:14px 16px; font:500 16px/1.75 var(--mono); letter-spacing:.2px; white-space:pre; overflow:auto; }
+textarea#taf:focus{ outline:2px solid var(--accent); outline-offset:-1px; background:var(--panel); }
+.lint{ margin:10px 0 0; padding:0; list-style:none; display:grid; gap:4px; font-size:13.5px; }
+.lint li{ display:flex; gap:8px; align-items:baseline; }
+.lint li::before{ content:""; flex:none; width:7px; height:7px; border-radius:50%; background:var(--warn); transform:translateY(-1px); }
+.lint li.ok{ color:var(--ok); }
+.lint li.ok::before{ background:var(--ok); }
+.lint li.err{ color:var(--warn); }
+.lint li.info{ color:var(--ink-2); }
+.lint li.info::before{ background:var(--ink-3); }
+.lint code{ font:500 13px var(--mono); background:var(--panel-2); padding:0 4px; border-radius:4px; }
+
+/* hourly guidance strip */
+.strip{ padding:14px 0 6px; }
+.strip h2{ margin:0 18px 2px; font:700 20px/1 var(--cond); }
+.strip .sub{ margin:4px 18px 10px; color:var(--ink-3); font-size:13px; }
+.gridwrap{ overflow-x:auto; }
+table.hr{ border-collapse:separate; border-spacing:0; font-size:13px; width:max-content; min-width:100%; }
+.hr th,.hr td{ border-bottom:1px solid var(--rule-2); border-right:1px solid var(--rule-2); padding:4px 6px; text-align:center; white-space:nowrap; }
+.hr th.rl{ position:sticky; left:0; z-index:2; background:var(--panel); text-align:left; font:600 13px var(--cond); color:var(--ink-2); padding:4px 12px 4px 18px; min-width:118px; border-right:1px solid var(--rule); }
+.hr thead th{ font:600 12.5px var(--cond); color:var(--ink-2); min-width:54px; }
+.hr thead th small{ display:block; color:var(--ink-3); font-weight:500; }
+.hr thead th.day{ border-left:2px solid var(--ink-3); }
+.hr td.day{ border-left:2px solid var(--ink-3); }
+.hr tr.groups td{ padding:3px 2px; font:600 11.5px var(--cond); }
+.hr .g{ display:block; border-radius:5px; padding:2px 4px; background:var(--panel-2); color:var(--ink-2); }
+.hr .g.init{ background:rgba(var(--p),.18); color:var(--ink); }
+.hr .g.becmg{ background:rgba(var(--p),.32); color:var(--ink); }
+.hr .g.tempo{ background:var(--edit-bg); color:var(--edit); }
+.hr td.c1{ background:var(--c1); } .hr td.c2{ background:var(--c2); } .hr td.c3{ background:var(--c3); color:#fff; } .hr td.c4{ background:var(--c4); color:#fff; } .hr td.c5{ background:var(--c5); color:#fff; }
+.hr td.mono{ font-family:var(--mono); font-size:12.5px; }
+.hr td.p{ font-weight:600; }
+
+/* settings + sources */
+details.cfg > summary{ list-style:none; cursor:pointer; padding:12px 16px; display:flex; gap:12px; align-items:center; font-weight:600; }
+details.cfg > summary::-webkit-details-marker{ display:none; }
+details.cfg > summary .chev{ color:var(--ink-3); transition:transform .15s; }
+details.cfg[open] > summary .chev{ transform:rotate(90deg); }
+details.cfg > summary .sum{ font-weight:400; color:var(--ink-2); font-size:13.5px; }
+.cfggrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px 26px; padding:4px 16px 18px; }
+.cfggrid h3{ margin:0 0 6px; font:600 13px var(--cond); color:var(--ink-3); letter-spacing:.3px; }
+.cfggrid label{ display:flex; justify-content:space-between; gap:10px; align-items:center; font-size:13.5px; padding:3px 0; }
+.cfggrid input{ width:110px; border:1px solid var(--rule); border-radius:6px; padding:3px 7px; background:var(--panel); font-family:var(--mono); font-size:13px; }
+.cfggrid input[type=checkbox]{ width:auto; }
+.srow{ display:flex; gap:8px; align-items:center; font-size:13.5px; padding:2px 0; }
+.srow .st{ font-size:12px; color:var(--ink-3); }
+.srow.na{ color:var(--ink-3); }
+.foot{ color:var(--ink-3); font-size:12.5px; max-width:100ch; }
+.foot p{ margin:4px 0; }
+.toast{ position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%) translateY(20px); background:var(--ink); color:var(--panel); padding:10px 18px; border-radius:10px; font-weight:500; opacity:0; transition:all .2s; pointer-events:none; z-index:50; }
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+@media (max-width:760px){
+  .top{ grid-template-columns:1fr; }
+  .top,.statusline,main{ padding-left:14px; padding-right:14px; }
+  .banner{ margin-left:14px; margin-right:14px; }
+  textarea#taf{ font-size:14px; }
+}
+@media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>TAF generator</h1>
+    <div class="where"><b>Patrick SFB (KCOF)</b>, Air Force format (AFMAN 15-129), 30-hour valid period</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="./">Planning forecast</a>
+    <button class="btn" id="regen">Regenerate from guidance</button>
+    <button class="btn" id="download">Download .txt</button>
+    <button class="btn primary" id="copy">Copy TAF</button>
+  </div>
+</header>
+<div class="statusline">
+  <span class="live" id="live">Loading guidance</span>
+  <span class="seg" role="group" aria-label="TAF type"><button data-k="" aria-pressed="true">Routine</button><button data-k="AMD" aria-pressed="false">AMD</button><button data-k="COR" aria-pressed="false">COR</button></span>
+  <label>Issued <input id="issue" maxlength="7" placeholder="ddhhmmZ" autocomplete="off"></label>
+  <label>Valid from <input id="vstart" maxlength="4" placeholder="ddhh" autocomplete="off"></label>
+  <span><span class="k">to</span><span id="vend"></span></span>
+  <span class="sp"></span>
+  <button class="btn" id="refresh" style="padding:4px 10px;font-size:13px">Refresh guidance</button>
+</div>
+<div class="banner" id="banner"></div>
+<main>
+  <section class="panel taf" aria-label="TAF">
+    <div class="tafhead"><h2>TAF</h2><span class="note" id="tafnote">Generated from guidance. Edit freely; the checks below update as you type.</span></div>
+    <textarea id="taf" spellcheck="false" autocomplete="off" aria-label="TAF text"></textarea>
+    <ul class="lint" id="lint"></ul>
+  </section>
+
+  <section class="panel strip" aria-label="Hourly guidance">
+    <h2>Hourly guidance at KCOF</h2>
+    <p class="sub" id="stripsub">Blend of the sources below. Shaded ceiling and visibility cells are below your category thresholds; the top row shows how the TAF groups line up.</p>
+    <div class="gridwrap" id="grid"></div>
+  </section>
+
+  <details class="panel cfg" id="cfg">
+    <summary><span class="chev">&#9656;</span>Generator settings <span class="sum">thresholds for change groups, TEMPO and weather</span></summary>
+    <div class="cfggrid" id="cfggrid"></div>
+  </details>
+
+  <details class="panel cfg" id="srcs">
+    <summary><span class="chev">&#9656;</span>Guidance sources <span class="sum" id="srcSum"></span></summary>
+    <div class="cfggrid" id="srcgrid"></div>
+  </details>
+
+  <div class="foot">
+    <p>The generator writes a starting point, not a finished product. It builds the initial group and BECMG groups where ceiling or visibility categories, weather, or wind change for at least the minimum period, and TEMPO groups for thunderstorm and shower chances between your TEMPO and prevailing thresholds. Wind is 10 m. QNH is the lowest forecast altimeter setting in each group. TX/TN are the warmest and coolest hourly blend temperatures in the valid period.</p>
+    <p>Not generated: wind shear (WS), icing (6) and turbulence (5) groups, and remarks. Add them by hand where they apply.</p>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<script src="guidance.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   KCOF TAF generator (Air Force format, AFMAN 15-129)
+   Uses the shared guidance engine in guidance.js.
+   ============================================================ */
+const SITE = SITES.find(s => s.id === "patrick");
+const SI = SITES.indexOf(SITE);
+const $ = id => document.getElementById(id);
+const LSK = "taffx:v1", LSD = "taffx:v1:draft";
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
+};
+const DEMO = /[?&]demo=1\b/.test(location.search);
+const DEF = {
+  tsPrev:50, tsTempo:20, popPrev:60, popTempo:30, vcsh:15,
+  cig:"3000 2000 1000 700 500 200", vis:"4800 3200 1600 0800",
+  dirChg:30, spdChg:10, gustMin:10, minSeg:3, maxBecmg:7,
+  tempoTsVis:4800, tempoTsBase:3000, tempoShVis:6000, tempoShBase:2500, tAtEnd:true,
+};
+const CFG_UI = [
+  ["Thunder (lightning probability, %)", [["tsPrev","Prevailing TS at or above"],["tsTempo","TEMPO TS at or above"]]],
+  ["Precipitation (1 h probability, %)", [["popPrev","Prevailing rain at or above"],["popTempo","TEMPO showers at or above"],["vcsh","VCSH at or above"]]],
+  ["Category thresholds", [["cig","Ceiling (ft)"],["vis","Visibility (m)"]]],
+  ["Change groups", [["dirChg","Wind direction change (°)"],["spdChg","Wind speed change (kt)"],["gustMin","Report gusts at (kt over mean)"],["minSeg","Minimum hours for a BECMG"],["maxBecmg","Most BECMG groups"]]],
+  ["TEMPO content", [["tempoTsVis","TS visibility (m)"],["tempoTsBase","TS cloud base (ft)"],["tempoShVis","Shower visibility (m)"],["tempoShBase","Shower cloud base (ft)"],["tAtEnd","TX/TN on the last line"]]],
+];
+const T = Object.assign({ enabled:{}, weight:{}, kind:"" }, store.get(LSK, {}));
+T.cfg = Object.assign({ ...DEF }, T.cfg || {});
+const saveT = () => store.set(LSK, T);
+const S = { TL:null, G:null, status:{}, loading:true, fetchedAt:null, hours:[], states:[], plan:null, gen:"", start:null, issue:null };
+
+/* AF reportable visibility values (m) */
+const AF_VIS = [0,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2200,2400,2600,2800,3000,3200,3400,3600,3700,4000,4400,4500,4800,5000,6000,7000,8000,9000,9999];
+const afVis = m => { if (m == null) return 9999; if (m >= 9000) return 9999; let r = 0; for (const v of AF_VIS) if (v <= m) r = v; return r; };
+const v4 = v => String(v).padStart(4, "0");
+const nums = s => String(s).split(/[\s,]+/).map(Number).filter(n => isFinite(n) && n > 0).sort((a, b) => b - a);
+
+/* ---------- time ---------- */
+const p2 = n => String(n).padStart(2, "0");
+function ddhh(ms, end){ const d = new Date(ms); if (end && d.getUTCHours() === 0){ const q = new Date(ms - H); return p2(q.getUTCDate()) + "24"; } return p2(d.getUTCDate()) + p2(d.getUTCHours()); }
+function ddhhmm(ms){ const d = new Date(ms); return p2(d.getUTCDate()) + p2(d.getUTCHours()) + p2(d.getUTCMinutes()); }
+/* ddhh near a reference time -> ms (handles month rollover) */
+function fromDdhh(s, ref){
+  const m = String(s).match(/^(\d{2})(\d{2})$/); if (!m) return null;
+  const dd = +m[1], hh = +m[2]; const r = new Date(ref);
+  let best = null;
+  for (const mo of [-1, 0, 1]){ const t = Date.UTC(r.getUTCFullYear(), r.getUTCMonth() + mo, dd, hh); if (new Date(t).getUTCDate() !== dd && hh !== 24) continue; if (best == null || Math.abs(t - ref) < Math.abs(best - ref)) best = t; }
+  return best;
+}
+
+/* ============================================================
+   Hourly blend at KCOF
+   ============================================================ */
+const Wt = s => T.weight[s.def.id] ?? s.def.w ?? 1;
+const onSources = () => S.G ? S.G.src.filter(s => T.enabled[s.def.id] !== false && Wt(s) > 0) : [];
+function wmed(pairs){
+  const p = pairs.filter(x => x[0] != null && isFinite(x[0])).sort((a, b) => a[0] - b[0]); if (!p.length) return null;
+  const tot = p.reduce((a, x) => a + x[1], 0); let c = 0; for (const x of p){ c += x[1]; if (c >= tot/2) return x[0]; } return p[p.length - 1][0];
+}
+const mean = a => a.length ? a.reduce((x, y) => x + y, 0)/a.length : null;
+const median = a => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); const k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k])/2; };
+function blendHour(t){
+  const i = S.TL.idx(t), on = onSources();
+  const acc = {}, push = (k, v, w) => { if (v != null && isFinite(v)) (acc[k] = acc[k] || []).push([v, w]); };
+  let U = 0, V = 0, UW = 0, R = 0, RN = 0;
+  for (const s of on){
+    const w = Wt(s), ms = s.members;
+    if (ms.length && i >= 0 && i < S.TL.n){
+      for (const k of ["t","td","s10","g10","cl","cm","ch","sky","slp"]) push(k, mean(ms.map(m => m[k] ? m[k][i] : null).filter(v => v != null)), w);
+      for (const k of ["vis","cig","lcb"]) push(k, median(ms.map(m => m[k] ? m[k][i] : null).filter(v => v != null)), w);
+      let u = 0, v = 0, n = 0;
+      for (const m of ms){ const d = m.d10[i], sp = m.s10[i]; if (d == null || sp == null) continue; u += -Math.sin(d*Math.PI/180)*Math.max(.5, sp); v += -Math.cos(d*Math.PI/180)*Math.max(.5, sp); n++; }
+      if (n){ U += u/n*w; V += v/n*w; UW += w; const L = Math.hypot(u/n, v/n); const S2 = mean(ms.map(m => m.s10[i]).filter(x => x != null)); if (S2) { R += Math.min(1, L/Math.max(.5, S2)); RN++; } }
+      const j = S.TL.idx(t + H);
+      const q = ms.map(m => m.pr && j < S.TL.n && (!m.pacc || !m.pacc[j] || m.pacc[j] === 1) ? m.pr[j] : null).filter(v => v != null);
+      push("qpf", mean(q), w);
+    }
+    const pp = S.G.srcWin(s, "pop", t, t + H); if (pp != null) push("pop", pp, w);
+    const lt = S.G.srcWin(s, "tst", t, t + H); if (lt != null) push("ltg", lt, w);
+  }
+  const b = {};
+  for (const k of ["t","td","s10","g10","cl","cm","ch","sky","slp","qpf","pop","ltg"]) b[k] = acc[k] ? wmean(acc[k]) : null;
+  for (const k of ["vis","cig","lcb"]) b[k] = acc[k] ? wmed(acc[k]) : null;
+  b.d10 = UW ? (Math.atan2(-U, -V)*180/Math.PI + 360) % 360 : null;
+  b.steady = RN ? R/RN : 1;    /* 1 = sources agree on direction, near 0 = variable */
+  b.n = on.length;
+  return b;
+}
+
+/* ============================================================
+   Hour -> TAF elements
+   ============================================================ */
+const RANK = { FEW:1, SCT:2, BKN:3, OVC:4 };
+const covCat = p => p == null || p < 6.25 ? null : p < 31.25 ? "FEW" : p < 56.25 ? "SCT" : p < 93.75 ? "BKN" : "OVC";
+const roundH = h => h < 5000 ? Math.max(100, Math.round(h/100)*100) : h < 10000 ? Math.round(h/500)*500 : Math.round(h/1000)*1000;
+const hhh = h => String(Math.round(h/100)).padStart(3, "0");
+function cloudLayers(b){
+  const lowB = b.lcb != null && b.lcb < 12000 ? b.lcb : b.cig != null && b.cig < 6500 ? b.cig : 3000;
+  let layers = [];
+  if (b.cl != null || b.cm != null || b.ch != null){
+    const own = [b.cl ?? 0, b.cm ?? 0, b.ch ?? 0];
+    const cum = [own[0], Math.max(own[0], own[1]), Math.max(own[0], own[1], own[2])];
+    const hts = [lowB, Math.max(lowB + 2000, 10000), 25000];
+    for (let j = 0; j < 3; j++){
+      let a = covCat(cum[j]); if (!a || own[j] < 6.25) continue;
+      const last = layers[layers.length - 1];
+      if (last && last.amt === "OVC") break;
+      if (last && RANK[a] < RANK[last.amt]) a = last.amt;
+      layers.push({ amt:a, h:hts[j] });
+    }
+  } else if (b.sky != null){ const a = covCat(b.sky); if (a) layers.push({ amt:a, h:lowB }); }
+  if (b.cig != null && b.cig < 12000){
+    const first = layers.find(l => RANK[l.amt] >= 3);
+    if (!first || first.h > b.cig + 200){
+      const below = layers.filter(l => l.h < b.cig - 200 && RANK[l.amt] < 3);
+      const above = layers.filter(l => l.h > b.cig + 200).map(l => ({ amt: RANK[l.amt] < 3 ? "BKN" : l.amt, h:l.h }));
+      layers = [...below, { amt:"BKN", h:b.cig }, ...above];
+    }
+  }
+  layers = layers.map(l => ({ amt:l.amt, h:roundH(l.h) })).sort((a, b) => a.h - b.h).filter((l, k, arr) => !k || l.h > arr[k - 1].h);
+  for (let k = 1; k < layers.length; k++) if (RANK[layers[k].amt] < RANK[layers[k - 1].amt]) layers[k].amt = layers[k - 1].amt;
+  const ov = layers.findIndex(l => l.amt === "OVC"); if (ov >= 0) layers = layers.slice(0, ov + 1);
+  layers = layers.slice(0, 3);
+  const c = layers.find(l => RANK[l.amt] >= 3);
+  return { layers, ceil: c ? c.h : null };
+}
+function hourState(t, b){
+  const c = T.cfg, cig = nums(c.cig), visT = nums(c.vis);
+  const vis = afVis(b.vis), cl = cloudLayers(b);
+  const ltg = b.ltg != null ? b.ltg*100 : null, pop = b.pop != null ? b.pop*100 : null;
+  const q = b.qpf, inten = q == null || q < 0.10 ? "-" : q < 0.30 ? "" : "+";
+  let prev = "", tempo = "";
+  if (ltg != null && ltg >= c.tsPrev) prev = inten + "TSRA";
+  else if (pop != null && pop >= c.popPrev) prev = inten + ((ltg ?? 0) >= 10 || (b.sky ?? 100) < 87.5 ? "SHRA" : "RA");
+  if (ltg != null && ltg >= c.tsTempo && ltg < c.tsPrev) tempo = "TS";
+  else if (!prev && pop != null && pop >= c.popTempo && pop < c.popPrev) tempo = "SH";
+  const vc = !prev && pop != null && pop >= c.vcsh && !tempo ? "VCSH" : "";
+  let ob = "";
+  if (vis < 9999 && (!prev || vis < 5000)) ob = vis < 1000 ? "FG" : (b.t != null && b.td != null && b.t - b.td <= 4 ? "BR" : "HZ");
+  const wx = [prev, ob, vc].filter(Boolean).join(" ");
+  /* wind */
+  const s = b.s10 == null ? null : Math.round(b.s10), gRaw = b.g10 == null ? null : Math.round(b.g10);
+  const gust = s != null && gRaw != null && gRaw - s >= c.gustMin ? gRaw : null;
+  let wind = "/////KT";
+  if (s != null){
+    if (s < 2) wind = "00000KT";
+    else if (s <= 6 && b.steady < 0.5) wind = `VRB${p2(s)}KT`;
+    else wind = `${String(Math.round((b.d10 ?? 0)/10)*10 % 360 || 360).padStart(3, "0")}${p2(s)}${gust ? "G" + p2(gust) : ""}KT`;
+  }
+  const cigCat = cl.ceil == null ? 0 : cig.filter(x => cl.ceil < x).length;
+  const visCat = visT.filter(x => vis < x).length;
+  const wxBase = /TS/.test(prev) ? "TS" : /RA/.test(prev) ? "RA" : "";
+  return { t, b, vis, wx, prev, tempo, ob, vc, wind, s, gust, d:b.d10, ...cl, cigCat, visCat, wxBase, qnh: b.slp == null ? null : Math.floor(b.slp*0.0295300*100)/100, tc: b.t == null ? null : (b.t - 32)*5/9 };
+}
+function windChanged(a, b){
+  const c = T.cfg; if (a.s == null || b.s == null) return false;
+  if (Math.abs(a.s - b.s) >= c.spdChg) return true;
+  if (!!a.gust !== !!b.gust) return true;
+  if (Math.max(a.s, b.s) >= 10 && a.d != null && b.d != null){ const dd = Math.abs(((a.d - b.d + 540) % 360) - 180); if (dd >= c.dirChg) return true; }
+  return false;
+}
+const changed = (a, b) => a.cigCat !== b.cigCat || a.visCat !== b.visCat || a.wxBase !== b.wxBase || windChanged(a, b);
+
+/* ============================================================
+   Build the TAF
+   ============================================================ */
+function plan(states){
+  const n = states.length; let minSeg = Math.max(1, +T.cfg.minSeg || 3), segs;
+  for (let tries = 0; tries < 6; tries++, minSeg++){
+    segs = [0]; let ref = states[0];
+    for (let i = 1; i < n; i++){
+      if (!changed(ref, states[i])) continue;
+      let k = i; while (k < n && !changed(states[i], states[k])) k++;
+      if (k - i >= minSeg || (k === n && n - i >= Math.min(2, minSeg))){ segs.push(i); ref = states[i]; i = k - 1; }
+    }
+    if (segs.length - 1 <= (+T.cfg.maxBecmg || 7)) break;
+  }
+  /* a first group shorter than the minimum just starts with the next conditions */
+  let rep0 = 0;
+  if (segs.length > 1 && segs[1] < minSeg){ rep0 = segs[1]; segs.splice(1, 1); }
+  const seg = segs.map((st, j) => ({ a:st, b: j + 1 < segs.length ? segs[j + 1] : n, rep: j ? st : rep0 }));
+  /* TEMPO runs, at most 4 h each */
+  const tempo = []; let i = 0;
+  while (i < n){
+    if (!states[i].tempo){ i++; continue; }
+    let k = i; while (k < n && states[k].tempo && k - i < 4) k++;
+    const run = states.slice(i, k);
+    tempo.push({ a:i, b:k, kind: run.some(s => s.tempo === "TS") ? "TS" : "SH" });
+    i = k;
+  }
+  return { seg, tempo };
+}
+function cloudText(layers, cb){
+  if (!layers.length) return cb ? `SCT${hhh(T.cfg.tempoTsBase)}CB` : "SKC";
+  const L = layers.map(l => l.amt + hhh(l.h));
+  if (cb){ const k = layers.findIndex(l => RANK[l.amt] >= 2); L[k >= 0 ? k : 0] += "CB"; }
+  return L.join(" ");
+}
+function groupText(st, seg, states){
+  const qn = states.slice(seg.a, seg.b).map(s => s.qnh).filter(v => v != null);
+  const q = qn.length ? Math.min(...qn) : null;
+  const ts = /TS/.test(st.prev);
+  return [st.wind, v4(st.vis), st.wx, cloudText(st.layers, ts), q != null ? `QNH${String(Math.round(q*100)).padStart(4, "0")}INS` : ""].filter(Boolean).join(" ");
+}
+function tempoText(tp, states, seg){
+  const c = T.cfg, base = states[seg.rep];
+  const low = base.layers.length ? base.layers[0].h : 99999;
+  if (tp.kind === "TS"){
+    const vis = afVis(Math.min(base.vis, c.tempoTsVis));
+    return `${v4(vis)} TSRA BKN${hhh(roundH(Math.min(low, c.tempoTsBase)))}CB`;
+  }
+  const vis = afVis(Math.min(base.vis, c.tempoShVis));
+  return `${vis < base.vis ? v4(vis) + " " : ""}SHRA BKN${hhh(roundH(Math.min(low, c.tempoShBase)))}`;
+}
+function tempGroups(states){
+  const ok = states.filter(s => s.tc != null); if (!ok.length) return "";
+  const mx = ok.reduce((a, s) => s.tc > a.tc ? s : a), mn = ok.reduce((a, s) => s.tc < a.tc ? s : a);
+  const f = v => { const r = Math.round(v); return (r < 0 ? "M" : "") + p2(Math.abs(r)); };
+  return `TX${f(mx.tc)}/${ddhh(mx.t)}Z TN${f(mn.tc)}/${ddhh(mn.t)}Z`;
+}
+function buildTAF(){
+  const start = S.start, n = 30;
+  S.hours = Array.from({ length:n }, (_, k) => start + k*H);
+  S.states = S.hours.map(t => hourState(t, blendHour(t)));
+  const P = plan(S.states); S.plan = P;
+  const head = `TAF${T.kind ? " " + T.kind : ""} ${SITE.stn} ${ddhhmm(S.issue)}Z ${ddhh(start)}/${ddhh(start + n*H, true)}`;
+  const lines = [];
+  lines.push({ t:start, s:`${head} ${groupText(S.states[P.seg[0].rep], P.seg[0], S.states)}` });
+  P.seg.slice(1).forEach(sg => { const t = S.hours[sg.a]; lines.push({ t:t - 0.5, s:`     BECMG ${ddhh(t - H)}/${ddhh(t, true)} ${groupText(S.states[sg.rep], sg, S.states)}` }); });
+  P.tempo.forEach(tp => {
+    const sg = P.seg.filter(x => x.a <= tp.a).pop();
+    lines.push({ t:S.hours[tp.a], s:`     TEMPO ${ddhh(S.hours[tp.a])}/${ddhh(S.hours[tp.a] + (tp.b - tp.a)*H, true)} ${tempoText(tp, S.states, sg)}` });
+  });
+  lines.sort((a, b) => a.t - b.t);
+  const tg = tempGroups(S.states);
+  if (tg){ if (T.cfg.tAtEnd) lines[lines.length - 1].s += " " + tg; else lines[0].s += " " + tg; }
+  return lines.map(l => l.s).join("\n");
+}
+
+/* ============================================================
+   Format checks
+   ============================================================ */
+const WX_RE = /^(\+|-|VC)?(MI|PR|BC|DR|BL|SH|TS|FZ)?(DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)*$/;
+function lint(txt){
+  const out = [], add = (lvl, msg) => out.push({ lvl, msg });
+  const tok = txt.replace(/=/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (!tok.length){ add("err", "The TAF is empty."); return out; }
+  let p = 0;
+  if (tok[p] !== "TAF"){ add("err", "Start with <code>TAF</code>."); return out; }
+  p++; const kind = tok[p] === "AMD" || tok[p] === "COR" ? tok[p++] : "";
+  if (tok[p] !== SITE.stn) add("err", `Station should be <code>${SITE.stn}</code>, found <code>${tok[p] || ""}</code>.`);
+  p++;
+  if (!/^\d{6}Z$/.test(tok[p] || "")) add("err", "Issue time should be <code>ddhhmmZ</code>.");
+  p++;
+  const vm = (tok[p] || "").match(/^(\d{4})\/(\d{4})$/);
+  let vs = null, ve = null;
+  if (!vm) add("err", "Valid period should be <code>ddhh/ddhh</code>.");
+  else {
+    vs = fromDdhh(vm[1], S.start || Date.now()); ve = fromDdhh(vm[2], vs + 30*H);
+    if (vs != null && ve != null){ const hrs = Math.round((ve - vs)/H); if (!kind && hrs !== 30) add("warn", `Valid period is ${hrs} hours; a routine KCOF TAF is 30.`); }
+  }
+  p++;
+  /* split into groups */
+  const groups = [{ kind:"INIT", tokens:[] }];
+  for (; p < tok.length; p++){
+    if (tok[p] === "BECMG" || tok[p] === "TEMPO"){ groups.push({ kind:tok[p], time:tok[p + 1], tokens:[] }); p++; continue; }
+    groups[groups.length - 1].tokens.push(tok[p]);
+  }
+  let lastB = vs, tx = false, tn = false;
+  groups.forEach((g, gi) => {
+    const label = g.kind === "INIT" ? "Initial group" : `${g.kind} ${g.time || ""}`;
+    if (g.kind !== "INIT"){
+      const m = (g.time || "").match(/^(\d{4})\/(\d{4})$/);
+      if (!m) add("err", `${g.kind} needs a <code>ddhh/ddhh</code> time.`);
+      else if (vs != null){
+        const a = fromDdhh(m[1], vs), b = fromDdhh(m[2], a ?? vs);
+        if (a == null || b == null || b <= a) add("err", `${label}: end time must be after start.`);
+        else {
+          const hrs = (b - a)/H;
+          if (g.kind === "BECMG" && hrs > 2) add("warn", `${label}: BECMG transitions should be 2 hours or less.`);
+          if (g.kind === "TEMPO" && hrs > 4) add("warn", `${label}: TEMPO periods should be 4 hours or less.`);
+          if (a < vs || (ve != null && b > ve)) add("err", `${label} falls outside the valid period.`);
+          if (g.kind === "BECMG"){ if (lastB != null && a < lastB) add("warn", `${label} starts before the previous BECMG.`); lastB = a; }
+        }
+      }
+    }
+    const tks = g.tokens;
+    if (tks.some(t => /^TXM?\d{2}\/\d{4}Z$/.test(t))) tx = true;
+    if (tks.some(t => /^TNM?\d{2}\/\d{4}Z$/.test(t))) tn = true;
+    const wind = tks.find(t => /KT$/.test(t));
+    if (g.kind === "INIT" && !wind) add("err", "Initial group needs a wind (<code>dddffKT</code>).");
+    if (wind && !/^((\d{3}|VRB)\d{2,3}(G\d{2,3})?|00000)KT$/.test(wind)) add("err", `${label}: wind <code>${wind}</code> isn't in <code>dddff(Ggg)KT</code> form.`);
+    if (wind){ const m = wind.match(/^(\d{3}|VRB)(\d{2,3})(?:G(\d{2,3}))?KT$/); if (m && m[1] !== "VRB" && (+m[1] % 10 !== 0 || +m[1] > 360)) add("warn", `${label}: wind direction should be to the nearest 10 degrees.`); if (m && m[3] && +m[3] - +m[2] < 10) add("warn", `${label}: gust is less than 10 kt above the mean.`); }
+    const vis = tks.find(t => /^\d{4}$/.test(t));
+    if ((g.kind === "INIT" || g.kind === "BECMG") && !vis) add("err", `${label} needs a visibility.`);
+    if (vis && !AF_VIS.includes(+vis)) add("warn", `${label}: <code>${vis}</code> isn't a standard reportable visibility.`);
+    const wxs = tks.filter(t => !/KT$|^\d{4}$|^(FEW|SCT|BKN|OVC|VV)\d{3}|^SKC$|^NSW$|^QNH|^T[XN]|^WS|^[56]\d{5}$/.test(t));
+    wxs.forEach(t => { if (!WX_RE.test(t)) add("warn", `${label}: <code>${t}</code> isn't a recognised weather code.`); });
+    if (vis && +vis < 9999 && !wxs.length) add("warn", `${label}: visibility below 9999 needs a weather or obscuration.`);
+    if (wxs.some(t => /TS/.test(t)) && !tks.some(t => /CB$/.test(t))) add("warn", `${label}: thunderstorms forecast without a CB layer.`);
+    const cl = tks.filter(t => /^(FEW|SCT|BKN|OVC|VV)\d{3}/.test(t));
+    if ((g.kind === "INIT" || g.kind === "BECMG") && !cl.length && !tks.includes("SKC")) add("err", `${label} needs clouds or <code>SKC</code>.`);
+    for (let k = 1; k < cl.length; k++){ const a = cl[k - 1].slice(0, 3), b = cl[k].slice(0, 3); if (+cl[k].slice(3, 6) <= +cl[k - 1].slice(3, 6)) add("warn", `${label}: cloud layers should go from lowest to highest.`); if (RANK[b] < RANK[a]) add("warn", `${label}: <code>${cl[k]}</code> is less than the layer below it (summation).`); }
+    if ((g.kind === "INIT" || g.kind === "BECMG") && !tks.some(t => /^QNH\d{4}INS$/.test(t))) add("warn", `${label} is missing <code>QNHxxxxINS</code>.`);
+  });
+  if (!tx || !tn) add("warn", "Add the max and min temperature groups (<code>TXtt/ddhhZ TNtt/ddhhZ</code>).");
+  if (!out.length) add("ok", "No format problems found.");
+  return out;
+}
+
+/* ============================================================
+   UI
+   ============================================================ */
+function fitTaf(){ const ta = $("taf"); ta.rows = Math.max(6, ta.value.split("\n").length + 1); }
+function renderLint(){ fitTaf(); $("lint").innerHTML = lint($("taf").value).map(x => `<li class="${x.lvl === "ok" ? "ok" : x.lvl === "err" ? "err" : x.lvl === "info" ? "info" : ""}">${x.msg}</li>`).join(""); }
+function edited(){ return $("taf").value.trim() !== S.gen.trim(); }
+function renderNote(){ const n = $("tafnote"); if (edited()){ n.textContent = "Edited by hand. Regenerate to start over from guidance."; n.classList.add("edited"); } else { n.textContent = "Generated from guidance. Edit freely; the checks below update as you type."; n.classList.remove("edited"); } }
+function saveDraft(){ store.set(LSD, { text:$("taf").value, gen:S.gen, start:S.start, issue:S.issue, kind:T.kind, saved:Date.now() }); }
+function generate(force){
+  if (!S.G) return;
+  if (!force && edited() && !confirm("Replace your edited TAF with a fresh one from guidance?")) return;
+  S.gen = buildTAF(); $("taf").value = S.gen; saveDraft(); renderLint(); renderNote(); renderGrid();
+}
+function renderGrid(){
+  if (!S.states.length){ $("grid").innerHTML = ""; return; }
+  const st = S.states, P = S.plan, n = st.length;
+  const segOf = i => P.seg.findIndex(s => s.a <= i && i < s.b);
+  const dayB = i => i > 0 && new Date(st[i].t).getUTCDate() !== new Date(st[i - 1].t).getUTCDate();
+  let h = `<table class="hr"><thead><tr><th class="rl">Hour (UTC)</th>${st.map((s, i) => `<th class="${dayB(i) ? "day" : ""}">${p2(new Date(s.t).getUTCHours())}Z<small>${p2(lp(s.t).h)}L</small></th>`).join("")}</tr></thead><tbody>`;
+  h += `<tr class="groups"><th class="rl">Prevailing</th>`;
+  P.seg.forEach((sg, j) => { h += `<td colspan="${sg.b - sg.a}" class="${dayB(sg.a) ? "day" : ""}"><span class="g ${j ? "becmg" : "init"}">${j ? "BECMG " + ddhh(st[sg.a].t - H) + "/" + ddhh(st[sg.a].t, true) : "Initial"}</span></td>`; });
+  h += `</tr><tr class="groups"><th class="rl">TEMPO</th>`;
+  for (let i = 0; i < n;){ const tp = P.tempo.find(x => x.a === i); if (tp){ h += `<td colspan="${tp.b - tp.a}" class="${dayB(i) ? "day" : ""}"><span class="g tempo">TEMPO ${tp.kind === "TS" ? "TS" : "SHRA"}</span></td>`; i = tp.b; } else { h += `<td class="${dayB(i) ? "day" : ""}"></td>`; i++; } }
+  h += `</tr>`;
+  const row = (label, f, cls) => `<tr><th class="rl">${label}</th>${st.map((s, i) => { const r = f(s, i); return `<td class="${dayB(i) ? "day " : ""}${(cls ? cls(s) : "")}">${r ?? ""}</td>`; }).join("")}</tr>`;
+  const pc = v => v == null ? "–" : Math.round(v*100);
+  const ptint = v => v == null ? "" : `p" style="background:rgba(var(--p),${Math.min(.6, v*.6).toFixed(3)})`;
+  h += row("Wind", s => s.wind.replace("KT", ""), () => "mono");
+  h += row("Visibility (m)", s => v4(s.vis), s => "mono " + (s.visCat ? "c" + Math.min(5, s.visCat) : ""));
+  h += row("Weather", s => s.wx || "", () => "mono");
+  h += row("Ceiling (ft)", s => s.ceil == null ? "none" : s.ceil, s => s.cigCat ? "c" + Math.min(5, s.cigCat) : "");
+  h += row("Clouds", s => s.layers.length ? s.layers.map(l => l.amt + hhh(l.h)).join("<br>") : "SKC", () => "mono");
+  h += `<tr><th class="rl">Precip (1 h %)</th>${st.map((s, i) => `<td class="${dayB(i) ? "day " : ""}${ptint(s.b.pop)}">${pc(s.b.pop)}</td>`).join("")}</tr>`;
+  h += `<tr><th class="rl">Lightning (1 h %)</th>${st.map((s, i) => `<td class="${dayB(i) ? "day " : ""}${ptint(s.b.ltg)}">${pc(s.b.ltg)}</td>`).join("")}</tr>`;
+  h += row("QNH (in)", s => s.qnh == null ? "–" : s.qnh.toFixed(2), () => "mono");
+  h += row("Temp / dew pt (°C)", s => s.tc == null ? "–" : `${Math.round(s.tc)} / ${s.b.td == null ? "–" : Math.round((s.b.td - 32)*5/9)}`);
+  h += `</tbody></table>`;
+  $("grid").innerHTML = h;
+}
+function renderCfg(){
+  $("cfggrid").innerHTML = CFG_UI.map(([title, items]) => `<div><h3>${title}</h3>${items.map(([k, l]) => typeof DEF[k] === "boolean" ? `<label>${l}<input type="checkbox" data-c="${k}" ${T.cfg[k] ? "checked" : ""}></label>` : `<label>${l}<input data-c="${k}" value="${T.cfg[k]}"></label>`).join("")}</div>`).join("") + `<div><h3>Defaults</h3><button class="btn" id="cfgReset" type="button">Restore default settings</button></div>`;
+}
+function renderSources(){
+  const fams = Object.keys(FAMILIES); let ok = 0;
+  $("srcgrid").innerHTML = fams.map(f => `<div><h3>${FAMILIES[f].label}</h3>${ALL_SOURCES.filter(s => s.fam === f).map(s => { const st = S.status[s.id] || {}; if (st.ok) ok++; return `<div class="srow ${st.ok ? "" : "na"}"><input type="checkbox" data-src="${s.id}" ${T.enabled[s.id] !== false ? "checked" : ""} aria-label="Use ${s.name}"><span>${s.name} <span class="st">${st.loading ? "loading" : st.ok ? st.note : st.err || "not available"}</span></span></div>`; }).join("")}</div>`).join("");
+  $("srcSum").textContent = `${ok} available`;
+}
+function renderStatus(){
+  const ok = Object.values(S.status).filter(s => s.ok).length, pend = Object.values(S.status).filter(s => s.loading).length;
+  const live = $("live"); live.classList.toggle("err", !S.loading && !ok);
+  live.textContent = DEMO ? "Demo guidance (synthetic data)" : pend ? `Loading guidance, ${ok} sources in` : ok ? `Guidance from ${ok} sources, fetched ${ddhhmm(S.fetchedAt)}Z` : "No guidance loaded";
+  const b = $("banner");
+  if (DEMO){ b.className = "banner show demo"; b.textContent = "Demo mode: the guidance is synthetic. Remove ?demo=1 from the address for real guidance."; }
+  else if (!S.loading && !ok){ b.className = "banner show"; b.textContent = "Couldn't load any guidance. Check the connection and press Refresh guidance; you can still write the TAF by hand."; }
+  else b.className = "banner";
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === T.kind));
+  $("issue").value = ddhhmm(S.issue) + "Z"; $("vstart").value = ddhh(S.start); $("vend").textContent = ddhh(S.start + 30*H, true) + "Z";
+}
+let toastT = null;
+function toast(m){ const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2400); }
+
+/* ---------- loading ---------- */
+let buildT = null;
+function scheduleBuild(){ if (buildT) return; buildT = setTimeout(() => { buildT = null; renderSources(); renderStatus(); if (!edited() || !$("taf").value.trim()) generate(true); else { S.hours = Array.from({ length:30 }, (_, k) => S.start + k*H); S.states = S.hours.map(t => hourState(t, blendHour(t))); S.plan = plan(S.states); renderGrid(); } }, 200); }
+async function loadAll(){
+  S.loading = true; S.TL = makeTimeline(Date.now()); S.G = new SiteGuidance(SITE, S.TL, []); S.status = {}; S.fetchedAt = Date.now();
+  ALL_SOURCES.forEach(d => S.status[d.id] = { loading:true }); renderSources(); renderStatus();
+  const tasks = [];
+  const om = (d, ens) => (DEMO ? demoOM(d, ens) : fetchOM(d, ens, S.TL)).then(per => { const ms = per[SI] || []; if (ms.length){ S.G.addSource(d, ms); S.status[d.id] = { ok:true, note: ens ? `${ms.length} members` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not available" }; }).finally(scheduleBuild);
+  OM_DET.forEach(d => tasks.push(om(d, false))); OM_ENS.forEach(d => tasks.push(om(d, true)));
+  MOS.forEach(d => tasks.push((DEMO ? demoMOS(d) : fetchMOS(d, S.TL)).then(per => { const x = per[SITE.stn]; if (x && x.members[0].t.some(v => v != null)){ S.G.addSource(d, x.members, { iv:x.iv, run:x.run }); S.status[d.id] = { ok:true, note: x.run ? `${p2(new Date(x.run).getUTCHours())}Z run` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleBuild)));
+  tasks.push((DEMO ? demoPipe() : fetchPipeline(S.TL)).then(res => { for (const d of PIPE){ const x = res[d.id], p = x && x.per[SITE.id]; if (!p){ S.status[d.id] = { err:"not in this run" }; continue; } S.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); S.status[d.id] = { ok:true, note:`${p2(new Date(x.run).getUTCHours())}Z run${p.members.length > 1 ? `, ${p.members.length} members` : ""}` }; } }).catch(() => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleBuild));
+  await Promise.allSettled(tasks);
+  S.loading = false; S.fetchedAt = Date.now(); scheduleBuild();
+}
+
+/* ---------- demo data (only with ?demo=1) ---------- */
+function drng(seed){ let x = seed >>> 0 || 1; return () => (x = (x*1664525 + 1013904223) >>> 0)/4294967296; }
+function dseries(r, bias){
+  const TL = S.TL, m = {}; ["t","td","sky","s10","d10","g10","s80","vis","sw","pr","pp","cl","cm","ch","slp","cig","lcb"].forEach(k => m[k] = new Array(TL.n).fill(null));
+  for (let i = 0; i < TL.n; i++){
+    const t = TL.t0 + i*H, h = lp(t).h, diur = Math.sin((h - 9)/24*2*Math.PI), storm = h >= 14 && h <= 19, night = h <= 7;
+    m.t[i] = 80 + bias + 6*diur; m.td[i] = 71 + bias*.5 - (storm ? 0 : 1); m.s10[i] = Math.max(1, 8 + 4*diur + (r() - .5)*3 + (storm ? 4 : 0));
+    m.d10[i] = (storm ? 250 : 110) + (r() - .5)*20; m.g10[i] = m.s10[i]*(storm ? 1.9 : 1.35); m.sw[i] = Math.max(0, 850*Math.sin((h - 6)/12*Math.PI));
+    m.cl[i] = storm ? 65 + r()*20 : 20 + r()*15; m.cm[i] = storm ? 50 : 10; m.ch[i] = 40; m.sky[i] = Math.max(m.cl[i], m.cm[i], m.ch[i]);
+    m.vis[i] = night && h >= 4 ? 6000 + r()*2000 : storm ? 7000 : 16000; m.slp[i] = 1015.5 + Math.sin((h - 10)/12*Math.PI)*1.2 + bias*.2;
+    m.pr[i] = storm && r() < .3 ? .12 : 0; m.cig[i] = storm ? 3200 : 30000; m.lcb[i] = storm ? 3000 : 3500;
+  }
+  m.gap = 3; return deriveMember(m, TL.n);
+}
+async function demoOM(d, ens){ await new Promise(r => setTimeout(r, 80 + Math.random()*200)); const r = drng(d.id.length*37 + d.model.length); const out = []; out[SI] = Array.from({ length: ens ? 10 : 1 }, () => { const m = dseries(r, (r() - .5)*3); m.cig = new Array(S.TL.n).fill(null); m.lcb = new Array(S.TL.n).fill(null); return m; }); return out; }
+async function demoMOS(d){
+  await new Promise(r => setTimeout(r, 120));
+  const r = drng(d.model.charCodeAt(0)*7), m = dseries(r, 0); const iv = { pop:[], tst:[] };
+  for (let t = S.TL.t0; t < S.TL.t0 + 72*H; t += H){ const h = lp(t + H).h; const storm = h >= 14 && h <= 19; iv.pop.push({ a:t, b:t + H, p: storm ? .35 : .05 }); iv.tst.push({ a:t, b:t + H, p: storm ? .3 : .02 }); }
+  return { [SITE.stn]: { members:[m], iv, run: Math.floor(Date.now()/(6*H))*6*H } };
+}
+async function demoPipe(){
+  const run = Math.floor(Date.now()/(6*H))*6*H - 6*H, tst = [], tst4 = [];
+  for (let h = 1; h <= 48; h++){ const b = run + h*H, lh = lp(b).h; const p = lh >= 15 && lh <= 19 ? .45 : .02; tst.push({ a:b - H, b, p }); if (h >= 4) tst4.push({ a:b - 4*H, b, p: Math.min(.9, p*1.8) }); }
+  return { hrefct:{ run, per:{ [SITE.id]:{ members:[], iv:{ tst, tst4 } } } } };
+}
+
+/* ---------- events ---------- */
+function init(){
+  const now = Date.now();
+  const draft = store.get(LSD, null);
+  S.issue = now;
+  S.start = Math.ceil(now/H)*H;
+  if (T.kind === "AMD") S.start = Math.floor(now/H)*H;
+  if (draft && draft.start && draft.start + 6*H > now && draft.text){ S.start = draft.start; S.issue = draft.issue || now; S.gen = draft.gen || ""; $("taf").value = draft.text; }
+  renderCfg(); renderStatus(); renderLint(); renderNote();
+  $("taf").addEventListener("input", () => { renderLint(); renderNote(); saveDraft(); });
+  $("regen").onclick = () => { S.issue = Date.now(); generate(false); renderStatus(); };
+  $("refresh").onclick = () => { if (!S.loading) loadAll(); };
+  $("copy").onclick = async () => { const v = $("taf").value; try { await navigator.clipboard.writeText(v); } catch (e) { $("taf").select(); document.execCommand("copy"); } toast("TAF copied"); };
+  $("download").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([$("taf").value.trim() + "\n"], { type:"text/plain" })); a.download = `${SITE.stn}_TAF_${ddhhmm(S.issue)}Z.txt`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
+  document.querySelector(".seg").addEventListener("click", ev => { const b = ev.target.closest("[data-k]"); if (!b) return; T.kind = b.dataset.k; saveT(); if (T.kind === "AMD"){ S.issue = Date.now(); S.start = Math.floor(S.issue/H)*H; } renderStatus(); generate(false); });
+  $("issue").addEventListener("change", e => { const m = e.target.value.trim().match(/^(\d{2})(\d{2})(\d{2})Z?$/); if (!m){ toast("Issue time is ddhhmmZ"); renderStatus(); return; } const t = fromDdhh(m[1] + m[2], Date.now()); if (t != null){ S.issue = t + (+m[3])*60e3; generate(false); } renderStatus(); });
+  $("vstart").addEventListener("change", e => { const t = fromDdhh(e.target.value.trim(), Date.now()); if (t == null){ toast("Valid start is ddhh"); renderStatus(); return; } S.start = t; renderStatus(); generate(false); });
+  $("cfggrid").addEventListener("change", ev => { const k = ev.target.dataset.c; if (!k) return; T.cfg[k] = typeof DEF[k] === "boolean" ? ev.target.checked : typeof DEF[k] === "number" ? (parseFloat(ev.target.value) || DEF[k]) : ev.target.value; saveT(); generate(false); });
+  $("cfggrid").addEventListener("click", ev => { if (ev.target.id !== "cfgReset") return; T.cfg = { ...DEF }; saveT(); renderCfg(); generate(false); });
+  $("srcgrid").addEventListener("change", ev => { const id = ev.target.dataset.src; if (!id) return; T.enabled[id] = ev.target.checked; saveT(); generate(false); });
+  loadAll();
+}
+init();
+
+</script>
+</body>
+</html>
