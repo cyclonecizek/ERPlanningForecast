@@ -190,7 +190,21 @@ table.mx{ border-collapse:separate; border-spacing:0; width:max-content; min-wid
 .mx td.c.ed::after{ content:""; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent var(--edit) transparent transparent; }
 .mx td.c.bad{ box-shadow:inset 0 -2px 0 var(--warn); color:var(--warn); }
 .mx td.c.cur{ outline:2px solid var(--accent); outline-offset:-2px; z-index:1; }
-.mx tr.hov td{ background-image:linear-gradient(rgba(var(--p),.07),rgba(var(--p),.07)); }
+.mx tr.hov td, .mx td.hov, .mx th.hov{ box-shadow:inset 0 0 0 999px rgba(var(--p),.08); }
+.mx th.hov{ color:var(--accent); }
+/* time across */
+.mx.across thead tr.g th{ text-align:left; padding-left:8px; }
+.mx.across thead tr.g th.stick{ text-align:left; color:var(--ink-3); font-weight:600; }
+.mx.across thead tr.c th.tcol{ min-width:44px; padding:4px 3px; font:600 12.5px/1.1 var(--cond); color:var(--ink-2); cursor:default; }
+.mx.across thead tr.c th.tcol small{ font-size:10.5px; }
+.mx.across .dcol{ border-left:2px solid var(--ink-3); }
+.mx.across th.grp{ width:118px; min-width:118px; max-width:118px; white-space:normal; text-align:left; vertical-align:top; padding:6px 10px; font:700 12.5px/1.2 var(--cond); color:var(--ink); background:var(--panel-2); border-right:1px solid var(--rule); }
+.mx.across th.plab{ left:118px; min-width:104px; text-align:left; padding:0 10px; font:600 13px/1.15 var(--cond); color:var(--ink-2); cursor:pointer; white-space:nowrap; }
+.mx.across th.plab small{ font-weight:500; color:var(--ink-3); font-size:11px; }
+.mx.across th.plab.sel{ color:var(--accent); box-shadow:inset -3px 0 0 var(--accent); }
+.mx.across tr.gfirst > *{ border-top:2px solid var(--rule); }
+.mx.across thead tr.c th{ border-bottom:2px solid var(--ink); }
+.mx.across td.c{ min-width:44px; padding:0 3px; }
 .mx td.c input,.mx td.c select{ position:absolute; inset:0; width:100%; height:100%; border:0; text-align:center; background:var(--panel); font-weight:700; outline:2px solid var(--edit); outline-offset:-2px; padding:0 2px; }
 .mx td.sev{ min-width:84px; }
 .foot{ color:var(--ink-3); font-size:12.5px; max-width:100ch; padding:0 2px; }
@@ -255,6 +269,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   <span><span class="k">Last published</span><span id="lastPub">not yet</span></span>
   <span><span class="k">Edits</span><span id="editCount">0</span></span>
   <span class="spacer"></span>
+  <span class="seg" role="group" aria-label="Matrix layout"><button id="orD" aria-pressed="false" title="Time runs down the rows">Time down</button><button id="orA" aria-pressed="true" title="Time runs across the columns">Time across</button></span>
   <span class="seg" role="group" aria-label="Time zone"><button id="tzL" aria-pressed="true">Local</button><button id="tzZ" aria-pressed="false">Zulu</button></span>
   <button class="btn" id="refresh" style="padding:4px 10px;font-size:13px">Refresh guidance</button>
   <label>Forecaster <input type="text" id="initials" maxlength="5" placeholder="Init" autocomplete="off"></label>
@@ -297,7 +312,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
 
   <div class="foot">
-    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. In longer blocks, the 1 hr and 3 hr precipitation and lightning columns show the highest hour or 3-hour period inside the block.</p>
+    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. The 1 hr precipitation and lightning columns show a dash in 3- and 6-hour blocks, and the 3 hr columns show a dash in 6-hour blocks.</p>
     <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
   </div>
 </main>
@@ -328,7 +343,7 @@ const store = {
   set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
 };
 const DEMO = /[?&]demo=1\b/.test(location.search);
-const prefs = Object.assign({ enabled:{}, weight:{}, tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param:"t" }, store.get(LS.prefs, {}));
+const prefs = Object.assign({ enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param:"t" }, store.get(LS.prefs, {}));
 let edits = store.get(LS.edits, {});
 if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
 if (["s200","g200"].includes(prefs.param)) prefs.param = "w200";
@@ -514,6 +529,7 @@ function renderStatus(){
   $("lastPub").textContent = pb ? `${hhmm(pb.t, zulu())}${zulu() ? "Z" : ""} ${new Date(pb.t).toDateString().slice(4,10)} by ${pb.by}` : "not yet";
   $("editCount").textContent = editCount(prefs.site);
   $("undo").disabled = !S.undo.length; $("redo").disabled = !S.redo.length;
+  $("orD").setAttribute("aria-pressed", !across()); $("orA").setAttribute("aria-pressed", across());
   $("tzL").setAttribute("aria-pressed", !zulu()); $("tzZ").setAttribute("aria-pressed", zulu());
   const b = $("banner");
   if (DEMO){ b.className = "banner show demo"; b.textContent = "Demo mode: every value on this page is synthetic. Remove ?demo=1 from the address to load real guidance."; }
@@ -551,7 +567,7 @@ function renderTable(){
       const bad = QC.bad[p.k] && QC.bad[p.k][i];
       const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
       const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
-      h += `<td class="${c}" data-k="${p.k}" data-i="${i}" style="${na ? "" : tint(p, v)}"${bad ? ` title="${bad}"` : ""}>${na ? "·" : fmt(p, v)}</td>`;
+      h += `<td class="${c}" data-k="${p.k}" data-i="${i}" style="${na ? "" : tint(p, v)}"${bad ? ` title="${bad}"` : ""}>${na ? "–" : fmt(p, v)}</td>`;
     }
     h += `</tr>`;
   });
@@ -559,7 +575,48 @@ function renderTable(){
   const m = $("matrix"), st = m.scrollTop, sl = m.scrollLeft;
   m.innerHTML = h; m.scrollTop = st; m.scrollLeft = sl;
 }
-function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderTable(); renderChart(); }
+function renderTableAcross(){
+  const s = site(), rows = S.rows, { o } = OF, e = edits[s.id] || {}, z = zulu();
+  const days = []; rows.forEach((r, i) => { const dk = dayKey(r.a, z); const d = days[days.length - 1]; if (d && d.dk === dk) d.n++; else days.push({ dk, n:1, i }); });
+  const dstart = new Set(days.map(d => d.i));
+  const tlab = r => { const a = hhmm(r.a, z).slice(0, 2); return r.len === 1 ? a : `${a}–${hhmm(r.b, z).slice(0, 2)}`; };
+  let h = `<table class="mx across"><thead><tr class="g"><th class="stick" colspan="2">${tzLabel()}</th>`;
+  days.forEach((d, j) => { const L = dayLabel(rows[d.i].a, z); const nm = j === 0 ? "Today" : (d.dk === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<th colspan="${d.n}" class="dcol">${d.n >= 3 ? `${nm}, ${L.dt}` : L.dt}</th>`; });
+  h += `</tr><tr class="c"><th class="stick">Parameter</th><th class="stick2"></th>`;
+  rows.forEach((r, i) => { h += `<th data-i="${i}" class="tcol ${dstart.has(i) ? "dcol" : ""} ${S.hoverRow === i ? "hov" : ""}">${tlab(r)}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</th>`; });
+  h += `</tr></thead><tbody>`;
+  const gcount = {}; PARAMS.forEach(p => gcount[p.g] = (gcount[p.g] || 0) + 1);
+  let lastG = null;
+  for (const p of PARAMS){
+    const gs = p.g !== lastG; lastG = p.g;
+    h += `<tr class="${gs ? "gfirst" : ""}">`;
+    if (gs) h += `<th class="stick grp" rowspan="${gcount[p.g]}">${p.g}</th>`;
+    h += `<th class="stick2 plab ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" data-p="${p.k}" title="${p.title}">${colLabel(p, s)}${p.s ? ` <small>${p.s}</small>` : ""}</th>`;
+    rows.forEach((r, i) => {
+      const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
+      const bad = QC.bad[p.k] && QC.bad[p.k][i], cur = S.cur && S.cur.i === i && S.cur.k === p.k;
+      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
+      h += `<td class="${c}" data-k="${p.k}" data-i="${i}" style="${na ? "" : tint(p, v)}"${bad ? ` title="${bad}"` : ""}>${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
+    });
+    h += `</tr>`;
+  }
+  h += `</tbody></table>`;
+  const m = $("matrix"), st = m.scrollTop, sl = m.scrollLeft;
+  m.innerHTML = h; m.scrollTop = st; m.scrollLeft = sl;
+}
+const across = () => prefs.orient === "across";
+function renderMatrix(){ across() ? renderTableAcross() : renderTable(); }
+/* hover highlight for the hovered time, in either orientation */
+function markHover(i){
+  const mx = $("matrix");
+  mx.querySelectorAll(".hov").forEach(x => x.classList.remove("hov"));
+  if (i == null) return;
+  if (across()) mx.querySelectorAll(`[data-i="${i}"]`).forEach(x => x.classList.add("hov"));
+  else { const tr = mx.querySelector(`tr[data-r="${i}"]`); if (tr) tr.classList.add("hov"); }
+}
+/* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
+const visStep = (down, right) => across() ? [right, down] : [down, right];
+function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); }
 
 /* ---------- editing ---------- */
 function parseInput(p, txt){
@@ -610,7 +667,7 @@ function selectCell(i, k, scroll){
   S.cur = { i, k };
   $("matrix").querySelectorAll("td.cur").forEach(x => x.classList.remove("cur"));
   const el = cellEl(i, k); if (el){ el.classList.add("cur"); if (scroll) el.scrollIntoView({ block:"nearest", inline:"nearest" }); }
-  if (viewOf(k) !== prefs.param && P[k].kind !== "sev"){ prefs.param = viewOf(k); savePrefs(); renderParams(); renderChart(); $("matrix").querySelectorAll("thead th.sel").forEach(x => x.classList.remove("sel")); keysOf(prefs.param).forEach(q => { const th = $("matrix").querySelector(`thead th[data-p="${q}"]`); if (th) th.classList.add("sel"); }); }
+  if (viewOf(k) !== prefs.param && P[k].kind !== "sev"){ prefs.param = viewOf(k); savePrefs(); renderParams(); renderChart(); $("matrix").querySelectorAll("th.sel").forEach(x => x.classList.remove("sel")); keysOf(prefs.param).forEach(q => { const th = $("matrix").querySelector(`th[data-p="${q}"]`); if (th) th.classList.add("sel"); }); }
 }
 function openEditor(i, k, initial){
   const el = cellEl(i, k); if (!el || el.classList.contains("na")) return;
@@ -629,8 +686,8 @@ function openEditor(i, k, initial){
   el.appendChild(inp); editor = { i, k, inp };
   inp.focus(); if (initial == null && inp.select) inp.select();
   inp.addEventListener("keydown", ev => {
-    if (ev.key === "Enter"){ ev.preventDefault(); finishEditor(true, 1); }
-    else if (ev.key === "Tab"){ ev.preventDefault(); finishEditor(true, 0, ev.shiftKey ? -1 : 1); }
+    if (ev.key === "Enter"){ ev.preventDefault(); finishEditor(true, ...visStep(1, 0)); }
+    else if (ev.key === "Tab"){ ev.preventDefault(); finishEditor(true, ...visStep(0, ev.shiftKey ? -1 : 1)); }
     else if (ev.key === "Escape"){ ev.preventDefault(); closeEditor(false); $("matrix").focus(); }
     ev.stopPropagation();
   });
@@ -647,9 +704,9 @@ function finishEditor(save, down, right){
   if (inp.parentNode) inp.remove();
   if (!save) return;
   let ni = i, kidx = PARAMS.findIndex(p => p.k === k);
-  if (down) ni = Math.min(S.rows.length - 1, i + down);
+  if (down) ni = Math.max(0, Math.min(S.rows.length - 1, i + down));
   if (right) kidx = Math.max(0, Math.min(PARAMS.length - 1, kidx + right));
-  renderTable(); selectCell(ni, PARAMS[kidx].k, true); $("matrix").focus({ preventScroll:true });
+  renderMatrix(); selectCell(ni, PARAMS[kidx].k, true); $("matrix").focus({ preventScroll:true });
 }
 function closeEditor(){ if (editor){ editor.inp.remove(); editor = null; } }
 
@@ -770,7 +827,7 @@ function paintRange(k, i0, v0, i1, v1, erase){
   }
 }
 let tableTimer = null;
-function liveRefresh(){ recompute(); renderChart(); if (!tableTimer) tableTimer = setTimeout(() => { tableTimer = null; renderTable(); }, 140); }
+function liveRefresh(){ recompute(); renderChart(); if (!tableTimer) tableTimer = setTimeout(() => { tableTimer = null; renderMatrix(); }, 140); }
 function chartPos(ev){ const r = $("chart").getBoundingClientRect(); return { px: (ev.clientX - r.left) * (CH.w / r.width), py: (ev.clientY - r.top) * (CH.h / r.height) }; }
 function bindChart(){
   const svg = $("chart");
@@ -795,8 +852,7 @@ function bindChart(){
 function hover(i, ev){
   const tip = $("tip");
   if (S.hoverRow !== i){
-    const tb = $("matrix"); tb.querySelectorAll("tr.hov").forEach(x => x.classList.remove("hov"));
-    S.hoverRow = i; if (i != null){ const tr = tb.querySelector(`tr[data-r="${i}"]`); if (tr) tr.classList.add("hov"); }
+    S.hoverRow = i; markHover(i);
     renderChart();
   }
   if (i == null || !ev){ tip.style.display = "none"; return; }
@@ -924,7 +980,8 @@ function siteSheet(s, OFs, issued, by){
     const row = [{ v: top ? `${L.wd.slice(0,3)} ${L.dt}` : "", s: st(8) }, { v: rowTime(r), s: st(5) }, { v: `${r.len} h`, s: st(5) }];
     for (const k of XCOLS.slice(3)){
       const p = P[k], v = o[k][i];
-      if (v === undefined || v === null){ row.push({ v:"", s: st(5) }); continue; }
+      if (v === undefined){ row.push({ v:"-", s: st(5) }); continue; }
+      if (v === null){ row.push({ v:"", s: st(5) }); continue; }
       if (p.kind === "prob") row.push({ v: Math.round(v)/100, s: st(7) });
       else if (p.kind === "sky") row.push({ v: skyCat(v), s: st(5) });
       else if (p.kind === "dir") row.push({ v: compass(v), s: st(5) });
@@ -1100,7 +1157,7 @@ async function demoSPC(){ const t = Date.now(); const d = new Date(t); const v =
 function bind(){
   $("sites").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; renderAll(); });
   $("locator").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); renderAll(); });
-  $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderTable(); });
+  $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderMatrix(); });
   $("undo").onclick = undo; $("redo").onclick = redo;
   $("drawSel").addEventListener("click", ev => { const b = ev.target.closest("[data-d]"); if (!b) return; prefs.draw = b.dataset.d; savePrefs(); renderChart(); });
   $("resetSite").onclick = () => {
@@ -1124,6 +1181,8 @@ function bind(){
   $("publish").onclick = openPublish;
   $("pubDlg").addEventListener("close", () => { if ($("pubDlg").returnValue === "ok") doPublish(); });
   $("pubForm").addEventListener("submit", ev => { if (ev.submitter && ev.submitter.value === "ok" && !$("pubInit").value.trim()){ ev.preventDefault(); $("pubInit").focus(); } });
+  $("orD").onclick = () => { prefs.orient = "down"; savePrefs(); renderAll(); };
+  $("orA").onclick = () => { prefs.orient = "across"; savePrefs(); renderAll(); };
   $("tzL").onclick = () => { prefs.tz = "L"; savePrefs(); renderAll(); };
   $("tzZ").onclick = () => { prefs.tz = "Z"; savePrefs(); renderAll(); };
   $("refresh").onclick = () => { if (S.loading) return; loadAll(); };
@@ -1140,23 +1199,27 @@ function bind(){
   /* matrix */
   const mx = $("matrix");
   mx.addEventListener("click", ev => {
-    const th = ev.target.closest("thead th[data-p]"); if (th){ if (P[th.dataset.p].kind !== "sev"){ prefs.param = viewOf(th.dataset.p); savePrefs(); renderParams(); renderChart(); renderTable(); $("chart").scrollIntoView({ block:"nearest", behavior:"smooth" }); } return; }
+    const th = ev.target.closest("th[data-p]"); if (th){ if (P[th.dataset.p].kind !== "sev"){ prefs.param = viewOf(th.dataset.p); savePrefs(); renderParams(); renderChart(); renderMatrix(); $("chart").scrollIntoView({ block:"nearest", behavior:"smooth" }); } return; }
     const td = ev.target.closest("td.c"); if (!td || ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
     const i = +td.dataset.i, k = td.dataset.k;
     if (S.cur && S.cur.i === i && S.cur.k === k && !td.classList.contains("na")) openEditor(i, k);
     else { selectCell(i, k); mx.focus({ preventScroll:true }); }
   });
   mx.addEventListener("dblclick", ev => { const td = ev.target.closest("td.c"); if (td) openEditor(+td.dataset.i, td.dataset.k); });
-  mx.addEventListener("mouseover", ev => { const tr = ev.target.closest("tbody tr"); if (!tr) return; const i = +tr.dataset.r; if (S.hoverRow !== i){ mx.querySelectorAll("tr.hov").forEach(x => x.classList.remove("hov")); tr.classList.add("hov"); S.hoverRow = i; renderChart(); } });
-  mx.addEventListener("mouseleave", () => { mx.querySelectorAll("tr.hov").forEach(x => x.classList.remove("hov")); S.hoverRow = null; renderChart(); });
+  mx.addEventListener("mouseover", ev => {
+    const el = across() ? ev.target.closest("[data-i]") : ev.target.closest("tbody tr");
+    if (!el) return; const i = across() ? +el.dataset.i : +el.dataset.r;
+    if (!isFinite(i) || S.hoverRow === i) return; S.hoverRow = i; markHover(i); renderChart();
+  });
+  mx.addEventListener("mouseleave", () => { S.hoverRow = null; markHover(null); renderChart(); });
   mx.addEventListener("keydown", ev => {
     if (editor || !S.cur) return;
     const ks = PARAMS.map(p => p.k); let { i, k } = S.cur; let ki = ks.indexOf(k);
     const mv = (di, dk) => { i = Math.max(0, Math.min(S.rows.length - 1, i + di)); ki = Math.max(0, Math.min(ks.length - 1, ki + dk)); selectCell(i, ks[ki], true); ev.preventDefault(); };
-    if (ev.key === "ArrowDown") return mv(1, 0);
-    if (ev.key === "ArrowUp") return mv(-1, 0);
-    if (ev.key === "ArrowRight" || (ev.key === "Tab" && !ev.shiftKey)) return mv(0, 1);
-    if (ev.key === "ArrowLeft" || (ev.key === "Tab" && ev.shiftKey)) return mv(0, -1);
+    if (ev.key === "ArrowDown") return mv(...visStep(1, 0));
+    if (ev.key === "ArrowUp") return mv(...visStep(-1, 0));
+    if (ev.key === "ArrowRight" || (ev.key === "Tab" && !ev.shiftKey)) return mv(...visStep(0, 1));
+    if (ev.key === "ArrowLeft" || (ev.key === "Tab" && ev.shiftKey)) return mv(...visStep(0, -1));
     if (ev.key === "Enter" || ev.key === "F2"){ ev.preventDefault(); return openEditor(i, k); }
     if (ev.key === "Delete" || ev.key === "Backspace"){ ev.preventDefault(); const g = []; writeCell(k, i, null, g); commit(g); selectCell(i, k); return; }
     if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey && /[0-9a-zA-Z.\-]/.test(ev.key)){ ev.preventDefault(); openEditor(i, k, P[k].kind === "sky" || P[k].kind === "sev" ? null : ev.key); }
@@ -1167,6 +1230,20 @@ function bind(){
     ev.preventDefault();
     const lines = txt.replace(/\r/g, "").split("\n"); if (lines[lines.length - 1] === "") lines.pop();
     const ks = PARAMS.map(p => p.k), k0 = ks.indexOf(S.cur.k), g = []; let bad = 0, ri = S.cur.i;
+    if (across()){
+      /* lines are parameters, tab-separated cells run along time */
+      lines.forEach((ln, li) => {
+        const k = ks[k0 + li]; if (!k) return; let i = S.cur.i;
+        for (const cell of ln.split("\t")){
+          while (i < S.rows.length && OF.o[k][i] === undefined) i++;
+          if (i >= S.rows.length) break;
+          const v = parseInput(P[k], cell); if (v === undefined){ if (cell.trim()) bad++; } else writeCell(k, i, v, g);
+          i++;
+        }
+      });
+      commit(g); toast(`Pasted ${g.length} value${g.length === 1 ? "" : "s"}${bad ? `, skipped ${bad} unreadable` : ""}`);
+      return;
+    }
     for (const ln of lines){
       while (ri < S.rows.length && OF.o[S.cur.k][ri] === undefined) ri++;
       if (ri >= S.rows.length) break;
