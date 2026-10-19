@@ -523,13 +523,14 @@ function aggregate(G, prefs){
   return { val, srcv, band };
 }
 /* which window a precip/lightning cell represents */
+/* which window a precip/lightning cell represents:
+   "win" = the probability for [A,B); "max" = highest 1 h (or 3 h) period inside a longer block;
+   null = covered by an earlier cell's window, or before the first aligned window */
 function probCell(r, win){
   if (win === 1) return r.len === 1 ? { mode:"win", A:r.a, B:r.b } : { mode:"max" };
-  if (r.len === 1) return r.lh % win === 0 ? { mode:"win", A:r.a, B:r.a + win*H } : null;
   if (r.len === win) return { mode:"win", A:r.a, B:r.b };
   if (r.len > win) return { mode:"max" };
-  if (r.len < win) return r.lh % win === 0 ? { mode:"win", A:r.a, B:r.a + win*H } : null;
-  return null;
+  return r.lh % win === 0 ? { mode:"win", A:r.a, B:r.a + win*H } : null;
 }
 /* exceedance probability for one row given a delta shift */
 function exceed(G, pk, ri, delta, hot){

@@ -113,7 +113,8 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .legend i.src{ border-color:var(--ink-3); border-top-width:1px; }
 .legend i.bd{ border:0; height:9px; background:var(--band); }
 .chartwrap{ position:relative; }
-#chart{ display:block; width:100%; height:300px; touch-action:none; user-select:none; cursor:crosshair; }
+#chart{ display:block; width:100%; height:300px; touch-action:none; user-select:none; cursor:default; outline:none; }
+#chart:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
 #chart .grid{ stroke:var(--rule-2); }
 #chart .dayband{ fill:var(--panel-2); }
 #chart .axis{ font:500 11px var(--font); fill:var(--ink-3); }
@@ -129,6 +130,12 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 #chart .off.pk{ stroke:var(--peak); }
 #chart .h.pk{ stroke:var(--peak); }
 #chart .h.e{ fill:var(--edit); stroke:var(--edit); }
+#chart .h.s{ fill:var(--accent); stroke:var(--panel); stroke-width:1.5; }
+#chart .h.pk.s{ fill:var(--peak); }
+#chart .selring{ fill:rgba(var(--p),.14); stroke:var(--accent); stroke-width:1.5; }
+#chart .marq{ fill:rgba(var(--p),.08); stroke:var(--accent); stroke-dasharray:4 3; }
+#chart .spanbar{ stroke:var(--accent); stroke-width:3; stroke-linecap:round; opacity:.28; }
+#chart .spanbar.pk{ stroke:var(--peak); }
 #chart .band.pk{ fill:var(--band-pk); }
 #chart .serlab{ font:700 11px var(--cond); fill:var(--accent); }
 #chart .serlab.pk{ fill:var(--peak); }
@@ -141,6 +148,10 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .tip .mut{ opacity:.65; }
 .tools{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; padding-top:10px; border-top:1px solid var(--rule-2); font-size:13px; color:var(--ink-2); }
 .tools .sp{ flex:1; }
+.selinfo{ font-weight:600; color:var(--accent); }
+.setv{ display:inline-flex; gap:0; }
+.setv input{ width:66px; border:1px solid var(--rule); border-right:0; border-radius:8px 0 0 8px; padding:6px 8px; background:var(--panel); }
+.setv .btn{ border-radius:0 8px 8px 0; }
 #drawWrap{ display:inline-flex; gap:8px; align-items:center; margin-right:10px; }
 #drawWrap[hidden]{ display:none; }
 .kbd{ font:600 11px var(--font); border:1px solid var(--rule); border-bottom-width:2px; border-radius:4px; padding:0 5px; color:var(--ink-2); background:var(--panel-2); }
@@ -187,6 +198,8 @@ table.mx{ border-collapse:separate; border-spacing:0; width:max-content; min-wid
 .mx td.c{ height:30px; min-width:46px; cursor:cell; position:relative; padding:0 6px; }
 .mx td.c.na{ color:var(--ink-3); cursor:default; }
 .mx td.c.lo{ color:var(--ink-3); }
+.mx.across td.c.span{ box-shadow:inset 0 -2px 0 rgba(var(--p),.35); }
+.mx td.c[rowspan]{ box-shadow:inset 3px 0 0 rgba(var(--p),.35); }
 .mx td.c.ed{ font-weight:700; }
 .mx td.c.ed::after{ content:""; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent var(--edit) transparent transparent; }
 .mx td.c.bad{ box-shadow:inset 0 -2px 0 var(--warn); color:var(--warn); }
@@ -286,17 +299,19 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
       <div class="legend"><span><i class="off"></i><span id="lgOff">Official</span></span><span id="lgPeak" hidden><i class="off pk"></i>Peak</span><span><i class="gd"></i>Guidance blend</span><span><i class="src"></i>Sources</span><span><i class="bd"></i>Member 10th to 90th</span></div>
     </div>
     <div class="chartwrap" id="chartwrap">
-      <svg id="chart" role="img" aria-label="Forecast graph"></svg>
+      <svg id="chart" tabindex="0" role="application" aria-label="Forecast graph editor. Select points, then use the up and down arrow keys to move them."></svg>
       <div class="tip" id="tip"></div>
     </div>
     <div class="tools">
-      <span id="drawWrap" hidden>Draw <span class="seg" id="drawSel" role="group" aria-label="Line to draw"><button type="button" data-d="n" title="Draw whichever line you start nearest">Nearest line</button><button type="button" data-d="s">Sustained</button><button type="button" data-d="p">Peak</button></span></span>
-      <button class="btn" id="smooth" title="Soften jumps between neighbouring edited points">Smooth edits</button>
-      <button class="btn" id="nudgeDn" title="Lower every point by one step">Shift down</button>
-      <button class="btn" id="nudgeUp" title="Raise every point by one step">Shift up</button>
-      <button class="btn" id="resetParam">Reset this parameter</button>
+      <span class="seg" id="modeSel" role="group" aria-label="Editing mode"><button type="button" data-m="select" title="Select points, then drag or nudge them">Select and drag</button><button type="button" data-m="draw" title="Paint the line by dragging across the graph">Draw</button></span>
+      <span id="drawWrap" hidden>Line <span class="seg" id="drawSel" role="group" aria-label="Line to draw"><button type="button" data-d="n" title="Draw whichever line you start nearest">Nearest</button><button type="button" data-d="s">Sustained</button><button type="button" data-d="p">Peak</button></span></span>
+      <span class="selinfo" id="selinfo"></span>
       <span class="sp"></span>
-      <span>Table: <span class="kbd">Enter</span> edit, <span class="kbd">Del</span> back to guidance, paste a column from Excel</span>
+      <button class="btn" id="nudgeDn">Lower all</button>
+      <button class="btn" id="nudgeUp">Raise all</button>
+      <span class="setv"><input id="setVal" inputmode="decimal" placeholder="Value" aria-label="Value to set"><button class="btn" id="setGo">Set all</button></span>
+      <button class="btn" id="smooth">Smooth</button>
+      <button class="btn" id="resetParam">Reset parameter to guidance</button>
     </div>
   </section>
 
@@ -313,7 +328,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
 
   <div class="foot">
-    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. The 1 hr precipitation and lightning columns show a dash in 3- and 6-hour blocks, and the 3 hr columns show a dash in 6-hour blocks. Any probability below 2% also shows as a dash.</p>
+    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Probabilities of 0 or 1% show as a dash. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
     <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
   </div>
 </main>
@@ -321,11 +336,13 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
 <dialog id="pubDlg">
   <form method="dialog" class="dlg" id="pubForm">
     <h2>Save and publish</h2>
-    <p class="sub">Downloads the official forecast. Points you haven't edited go out as guidance.</p>
+    <p class="sub">Downloads the official forecast. Points you haven't edited go out as guidance. The PDF and HTML show the table with time across, one page per few days.</p>
     <fieldset><legend>Forecast points</legend><div class="opts" id="pubSites"></div></fieldset>
     <fieldset><legend>Files</legend><div class="opts">
       <label><input type="checkbox" id="fmtX" checked> Excel workbook</label>
       <label><input type="checkbox" id="fmtC" checked> CSV</label>
+      <label><input type="checkbox" id="fmtP" checked> PDF</label>
+      <label><input type="checkbox" id="fmtH" checked> HTML page</label>
     </div></fieldset>
     <fieldset><legend>Forecaster</legend><input type="text" id="pubInit" maxlength="5" placeholder="Init" required></fieldset>
     <div class="qc" id="qc"></div>
@@ -349,6 +366,7 @@ let edits = store.get(LS.edits, {});
 if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
 if (["s200","g200"].includes(prefs.param)) prefs.param = "w200";
 if (!prefs.draw) prefs.draw = "n";
+if (!prefs.cmode) prefs.cmode = "select";
 if (!SITES.some(x => x.id === prefs.site)) prefs.site = SITES[0].id;
 delete edits["cape-pad"];   /* old SLC-40 point */
 let published = store.get(LS.pub, {});
@@ -546,6 +564,33 @@ function renderStatus(){
    Matrix
    ============================================================ */
 let OF = null, QC = null;
+/* how many rows each 3 h / 6 h probability cell covers; {cov:true} = inside an earlier cell */
+function spanMap(k){
+  S.spanCache = S.spanCache || {};
+  if (S.spanCache[k]) return S.spanCache[k];
+  const p = P[k], rows = S.rows, res = rows.map(() => ({ s:1 }));
+  if (p.win && p.win > 1){
+    let start = -1, until = -Infinity, naStart = -1;
+    rows.forEach((r, i) => {
+      if (start >= 0 && r.a < until){ res[i] = { cov:true }; res[start].s++; naStart = -1; return; }
+      start = -1;
+      const c = probCell(r, p.win);
+      if (c && c.mode === "win"){ start = i; until = c.B; naStart = -1; return; }
+      if (!c){ if (naStart >= 0){ res[i] = { cov:true }; res[naStart].s++; } else { naStart = i; res[i] = { s:1, na:true }; } return; }
+      naStart = -1;
+    });
+  }
+  return (S.spanCache[k] = res);
+}
+const ownerIdx = (k, i) => { const m = spanMap(k); while (i > 0 && m[i] && m[i].cov) i--; return i; };
+function cellTitle(p, r, i){
+  if (!p.win) return p.title;
+  const c = probCell(r, p.win);
+  if (c && c.mode === "max") return `Highest ${p.win}-hour chance inside this ${r.len}-hour block`;
+  const sp = spanMap(p.k)[i]; if (!sp || sp.na) return p.title;
+  const end = S.rows[i + sp.s - 1].b, z = zulu();
+  return `${p.win}-hour chance, ${hhmm(r.a, z)} to ${hhmm(end, z)}${z ? "Z" : " " + tzAbbr(r.a)}`;
+}
 function recompute(){ OF = officialFor(prefs.site); QC = qcIssues(prefs.site, OF); }
 function renderTable(){
   const s = site(), rows = S.rows, { o } = OF, e = edits[s.id] || {}, z = zulu();
@@ -566,11 +611,12 @@ function renderTable(){
     lastG = null;
     for (const p of PARAMS){
       const gs = p.g !== lastG; lastG = p.g;
+      const sp = spanMap(p.k)[i]; if (sp.cov) continue;
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i];
       const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
       const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${!na && p.kind === "prob" && v != null && v < LOW_PROB ? "lo" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
-      h += `<td class="${c}" data-k="${p.k}" data-i="${i}" style="${na ? "" : tint(p, v)}"${bad ? ` title="${bad}"` : ""}>${na ? "–" : fmt(p, v)}</td>`;
+      h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : fmt(p, v)}</td>`;
     }
     h += `</tr>`;
   });
@@ -595,11 +641,13 @@ function renderTableAcross(){
     h += `<tr class="${gs ? "gfirst" : ""}">`;
     if (gs) h += `<th class="stick grp" rowspan="${gcount[p.g]}">${p.g}</th>`;
     h += `<th class="stick2 plab ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" data-p="${p.k}" title="${p.title}">${colLabel(p, s)}${p.s ? ` <small>${p.s}</small>` : ""}</th>`;
+    const spm = spanMap(p.k);
     rows.forEach((r, i) => {
+      const sp = spm[i]; if (sp.cov) return;
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i], cur = S.cur && S.cur.i === i && S.cur.k === p.k;
       const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${!na && p.kind === "prob" && v != null && v < LOW_PROB ? "lo" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
-      h += `<td class="${c}" data-k="${p.k}" data-i="${i}" style="${na ? "" : tint(p, v)}"${bad ? ` title="${bad}"` : ""}>${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
+      h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
     });
     h += `</tr>`;
   }
@@ -670,7 +718,7 @@ function selectCell(i, k, scroll){
   S.cur = { i, k };
   $("matrix").querySelectorAll("td.cur").forEach(x => x.classList.remove("cur"));
   const el = cellEl(i, k); if (el){ el.classList.add("cur"); if (scroll) el.scrollIntoView({ block:"nearest", inline:"nearest" }); }
-  if (viewOf(k) !== prefs.param && P[k].kind !== "sev"){ prefs.param = viewOf(k); savePrefs(); renderParams(); renderChart(); $("matrix").querySelectorAll("th.sel").forEach(x => x.classList.remove("sel")); keysOf(prefs.param).forEach(q => { const th = $("matrix").querySelector(`th[data-p="${q}"]`); if (th) th.classList.add("sel"); }); }
+  if (viewOf(k) !== prefs.param && P[k].kind !== "sev"){ clearSel(); prefs.param = viewOf(k); savePrefs(); renderParams(); renderChart(); $("matrix").querySelectorAll("th.sel").forEach(x => x.classList.remove("sel")); keysOf(prefs.param).forEach(q => { const th = $("matrix").querySelector(`th[data-p="${q}"]`); if (th) th.classList.add("sel"); }); }
 }
 function openEditor(i, k, initial){
   const el = cellEl(i, k); if (!el || el.classList.contains("na")) return;
@@ -707,8 +755,10 @@ function finishEditor(save, down, right){
   if (inp.parentNode) inp.remove();
   if (!save) return;
   let ni = i, kidx = PARAMS.findIndex(p => p.k === k);
-  if (down) ni = Math.max(0, Math.min(S.rows.length - 1, i + down));
+  if (down > 0){ const sp = spanMap(k)[i]; ni = i + (sp && sp.s ? sp.s : 1); } else if (down < 0) ni = i - 1;
+  ni = Math.max(0, Math.min(S.rows.length - 1, ni));
   if (right) kidx = Math.max(0, Math.min(PARAMS.length - 1, kidx + right));
+  ni = ownerIdx(PARAMS[kidx].k, ni);
   renderMatrix(); selectCell(ni, PARAMS[kidx].k, true); $("matrix").focus({ preventScroll:true });
 }
 function closeEditor(){ if (editor){ editor.inp.remove(); editor = null; } }
@@ -751,7 +801,12 @@ function renderChart(){
   const svg = $("chart"), view = prefs.param, ks = keysOf(view), combo = ks.length > 1, p = P[ks[0]] || P.t, s = site();
   $("ptitle").textContent = combo ? VIEWS[view].title : p.k === "xhot" ? `Temperature above ${hotOf(s)}°F` : p.title;
   $("punit").textContent = p.kind === "prob" ? "percent chance" : p.kind === "sky" ? "percent cloud cover (categories at right)" : p.kind === "dir" ? "degrees true, toward the points" : p.unit || "";
-  $("drawWrap").hidden = !combo; $("lgPeak").hidden = !combo;
+  $("drawWrap").hidden = !(combo && prefs.cmode === "draw"); $("lgPeak").hidden = !combo;
+  $("modeSel").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === prefs.cmode));
+  $("phint").textContent = prefs.cmode === "draw"
+    ? "Drag across the graph to draw the forecast. Alt-drag erases back to guidance. Hold Ctrl to see the guidance values."
+    : "Click a point to select it, or drag across the graph to select several. Then drag a selected point, or use the arrow keys, to move them. Shift-click adds points. Hold Ctrl to see the guidance values.";
+  updateSelInfo();
   $("lgOff").textContent = combo ? "Sustained" : "Official";
   $("drawSel").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.d === (prefs.draw || "n")));
   const W = svg.clientWidth || 900, Hh = CH.h; CH.w = W;
@@ -759,7 +814,7 @@ function renderChart(){
   const rows = S.rows, n = rows.length, { o, g } = OF;
   const srcOf = k => k.startsWith("x") ? OF.xsrc[k] : A.srcv[k] || {};
   const ptsOf = k => rows.map((r, i) => ({ i, v:o[k][i], g:g[k] ? g[k][i] : null, ed: ((edits[s.id] || {})[k] || {})[r.key] !== undefined })).filter(q => q.v !== undefined);
-  const allPts = ks.flatMap(ptsOf); CH.pts = allPts;
+  const allPts = ks.flatMap(ptsOf); CH.pts = allPts; CH.hits = [];
   const na = rows.map((r, i) => o[ks[0]][i] === undefined);   /* rows where this window doesn't apply: draw across them */
   /* domain across every series in the view */
   const merged = {}; ks.forEach((k, j) => { const sv = srcOf(k); for (const id in sv) merged[id + "_" + j] = sv[id]; });
@@ -767,6 +822,10 @@ function renderChart(){
   const [y0, y1] = chartDomain(p, allPts, bandAll, merged);
   const L = CH.m.l, R = W - CH.m.r, T = CH.m.t, B = Hh - CH.m.b;
   const x = i => L + (i + 0.5) * (R - L)/n, y = v => B - (v - y0)/(y1 - y0)*(B - T);
+  const colW = (R - L)/n;
+  const spanOf = (k, i) => { const sp = spanMap(k)[i]; return sp && sp.s ? sp.s : 1; };
+  const xk = k => i => L + (i + spanOf(k, i)/2) * colW;   /* centre of the period a value covers */
+  CH.xk = xk;
   CH.x = x; CH.y = y; CH.inv = py => y0 + (B - py)/(B - T)*(y1 - y0); CH.ix = px => Math.max(0, Math.min(n - 1, Math.floor((px - L)/((R - L)/n)))); CH.y0 = y0; CH.y1 = y1;
   let h = "";
   const z = zulu(); let start = 0, band = 0;
@@ -784,7 +843,7 @@ function renderChart(){
   const thr = combo ? [18, 25, 35, 50] : p.thr ? p.thr.slice() : p.k === "t" ? [hotOf(s), 40, 32] : p.k === "wbgt" ? [82, 85, 88, 90] : [];
   thr.filter(v => v > y0 && v < y1).forEach(v => { h += `<line class="thr" x1="${L}" x2="${R}" y1="${y(v)}" y2="${y(v)}"/><text class="thrlab" x="${R - 3}" y="${y(v) - 4}" text-anchor="end">${v}${p.unit === "kt" ? " kt" : "°"}</text>`; });
   if (p.kind === "sky") SKY.forEach(([c, a, b]) => { const yy = y(Math.min(100, (a + Math.min(b, 100))/2)); h += `<text class="thrlab" style="fill:var(--ink-3)" x="${R - 3}" y="${yy + 4}" text-anchor="end">${c}</text>`; if (a > 0) h += `<line class="grid" x1="${L}" x2="${R}" y1="${y(a)}" y2="${y(a)}" style="stroke-dasharray:2 3"/>`; });
-  const line = (arr, cls, style) => { let d = "", pen = false; arr.forEach((v, i) => { if (v === undefined && na[i]) return; if (v == null || !isFinite(v)){ pen = false; return; } d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(Math.max(y0, Math.min(y1, v))).toFixed(1); pen = true; }); return d ? `<path class="${cls}" d="${d}" style="${style || ""}"/>` : ""; };
+  const line = (arr, cls, style, xf) => { xf = xf || x; let d = "", pen = false; arr.forEach((v, i) => { if (v === undefined && na[i]) return; if (v == null || !isFinite(v)){ pen = false; return; } d += (pen ? "L" : "M") + xf(i).toFixed(1) + "," + y(Math.max(y0, Math.min(y1, v))).toFixed(1); pen = true; }); return d ? `<path class="${cls}" d="${d}" style="${style || ""}"/>` : ""; };
   ks.forEach((k, j) => {
     const bnd = A.band[k] || [];
     if (p.kind !== "dir" && bnd.some(b => b)){
@@ -798,16 +857,25 @@ function renderChart(){
     for (const id in srcv){
       const arr = rows.map((r, i) => srcv[id][i]);
       if (p.kind === "dir"){ arr.forEach((v, i) => { if (v != null) h += `<circle cx="${x(i)}" cy="${y(v)}" r="1.8" fill="${srcColor(id)}" opacity=".45"/>`; }); }
-      else h += line(arr, "src", `stroke:${srcColor(id)}${j ? ";stroke-dasharray:3 2" : ""}`);
+      else h += line(arr, "src", `stroke:${srcColor(id)}${j ? ";stroke-dasharray:3 2" : ""}`, xk(k));
     }
   });
   ks.forEach((k, j) => {
     const garr = rows.map((r, i) => g[k] ? g[k][i] : null), oarr = rows.map((r, i) => o[k][i]);
-    if (p.kind !== "dir"){ h += line(garr, "guide"); h += line(oarr, "off" + (j ? " pk" : "")); }
-    ptsOf(k).forEach(q => { if (q.v == null) return; h += `<circle class="h ${j ? "pk" : ""} ${q.ed ? "e" : ""}" cx="${x(q.i)}" cy="${y(Math.max(y0, Math.min(y1, q.v)))}" r="${n > 90 ? 2.6 : 3.4}"/>`; });
+    const xf = xk(k);
+    if (P[k].win > 1) ptsOf(k).forEach(q => { if (q.v == null) return; const sp = spanOf(k, q.i); if (sp > 1) h += `<line class="spanbar ${j ? "pk" : ""}" x1="${(L + q.i*colW + 2).toFixed(1)}" x2="${(L + (q.i + sp)*colW - 2).toFixed(1)}" y1="${y(q.v)}" y2="${y(q.v)}"/>`; });
+    if (p.kind !== "dir"){ h += line(garr, "guide", "", xf); h += line(oarr, "off" + (j ? " pk" : ""), "", xf); }
+    ptsOf(k).forEach(q => {
+      if (q.v == null) return;
+      const cx = xf(q.i), cy = y(Math.max(y0, Math.min(y1, q.v))), id = k + "|" + q.i;
+      CH.hits.push({ k, i:q.i, x:cx, y:cy });
+      if (CH.sel.has(id)) h += `<circle class="selring" cx="${cx}" cy="${cy}" r="7.5"/>`;
+      h += `<circle class="h ${j ? "pk" : ""} ${q.ed ? "e" : ""} ${CH.sel.has(id) ? "s" : ""}" cx="${cx}" cy="${cy}" r="${CH.sel.has(id) ? 4.6 : n > 90 ? 2.6 : 3.4}"/>`;
+    });
     if (combo){ const last = ptsOf(k).filter(q => q.v != null).pop(); if (last) h += `<text class="serlab ${j ? "pk" : ""}" x="${x(last.i) + 6}" y="${y(last.v) + 4}">${j ? "Pk" : "Sus"}</text>`; }
   });
   if (S.hoverRow != null) h += `<line class="cursor" x1="${x(S.hoverRow)}" x2="${x(S.hoverRow)}" y1="${T}" y2="${B}"/>`;
+  if (CH.drag && CH.drag.kind === "marq"){ const d = CH.drag; h += `<rect class="marq" x="${Math.min(d.x0, d.x1)}" y="${Math.min(d.y0, d.y1)}" width="${Math.abs(d.x1 - d.x0)}" height="${Math.abs(d.y1 - d.y0)}"/>`; }
   if (!allPts.some(q => q.v != null)) h += `<text class="axis" x="${(L + R)/2}" y="${(T + B)/2}" text-anchor="middle" style="font-size:14px">${S.loading ? "Loading guidance" : "No guidance for this parameter. Drag on the graph to draw a forecast."}</text>`;
   svg.setAttribute("viewBox", `0 0 ${W} ${Hh}`); svg.style.height = Hh + "px";
   svg.innerHTML = h;
@@ -832,24 +900,126 @@ function paintRange(k, i0, v0, i1, v1, erase){
 let tableTimer = null;
 function liveRefresh(){ recompute(); renderChart(); if (!tableTimer) tableTimer = setTimeout(() => { tableTimer = null; renderMatrix(); }, 140); }
 function chartPos(ev){ const r = $("chart").getBoundingClientRect(); return { px: (ev.clientX - r.left) * (CH.w / r.width), py: (ev.clientY - r.top) * (CH.h / r.height) }; }
+/* ---------- selection helpers ---------- */
+CH.sel = new Set();
+function clearSel(){ CH.sel = new Set(); }
+function selList(){ return [...CH.sel].map(id => { const [k, i] = id.split("|"); return { k, i:+i }; }).filter(q => OF.o[q.k] && OF.o[q.k][q.i] != null); }
+const rawEdit = (k, key) => ((edits[prefs.site] || {})[k] || {})[key];
+function hitTest(px, py){
+  let best = null, d = Infinity;
+  for (const h of CH.hits){ const dd = Math.hypot((h.x - px)*1.0, (h.y - py)*0.8); if (dd < d){ d = dd; best = h; } }
+  return d <= 14 ? best : null;
+}
+function updateSelInfo(){
+  const n = CH.sel.size, el = $("selinfo"); if (!el) return;
+  el.textContent = n ? `${n} point${n > 1 ? "s" : ""} selected` : "";
+  const scope = n ? `${n} point${n > 1 ? "s" : ""}` : "all";
+  $("nudgeUp").textContent = `Raise ${scope}`; $("nudgeDn").textContent = `Lower ${scope}`;
+  $("resetParam").textContent = n ? "Reset selected to guidance" : "Reset parameter to guidance";
+  $("setGo").textContent = n ? `Set ${scope}` : "Set all";
+}
+/* apply f(value, k) -> new value to the selection (or every point of the view) as one undo step */
+function applyToPoints(f, list){
+  const g = [];
+  for (const q of list){ const v = OF.o[q.k][q.i]; if (v == null || v === undefined) continue; writeCell(q.k, q.i, f(v, q.k), g); }
+  commit(g); return g.length;
+}
+function scopePoints(){
+  if (CH.sel.size) return selList();
+  const out = []; for (const k of toolKeysG()) S.rows.forEach((r, i) => { if (OF.o[k][i] != null) out.push({ k, i }); });
+  return out;
+}
+const toolKeysG = () => { const ks = keysOf(prefs.param); return ks.length > 1 && prefs.cmode === "draw" && prefs.draw === "s" ? [ks[0]] : ks.length > 1 && prefs.cmode === "draw" && prefs.draw === "p" ? [ks[1]] : ks; };
+const clampV = (k, v) => { const p = P[k], st = p.step || 1; v = Math.round(v/st)*st; if (p.kind === "dir") return ((v % 360) + 360) % 360; if (p.lo != null) v = Math.max(p.lo, v); if (p.hi != null) v = Math.min(p.hi, v); return v; };
+function nudgeSel(d){ const n = applyToPoints((v, k) => clampV(k, v + d*(P[k].step || 1)), scopePoints()); if (!n) toast("Nothing to move"); }
+
+/* ---------- chart interaction ---------- */
+const MOUSE = { x:0, y:0, i:null, in:false, ctrl:false };
 function bindChart(){
   const svg = $("chart");
   svg.addEventListener("pointerdown", ev => {
     if (ev.button !== 0 || P[keysOf(prefs.param)[0]].kind === "sev") return;
+    svg.focus({ preventScroll:true });
     svg.setPointerCapture(ev.pointerId);
-    const { px, py } = chartPos(ev); const i = CH.ix(px), k = pickKey(i, py), v = chartValue(py, k);
-    CH.drag = { k, i, v, erase: ev.altKey, group: [] };
-    paintRange(k, i, v, i, v, ev.altKey); liveRefresh();
+    const { px, py } = chartPos(ev);
+    $("tip").style.display = "none";
+    if (prefs.cmode === "draw"){
+      const i = CH.ix(px), k = pickKey(i, py), v = chartValue(py, k);
+      CH.drag = { kind:"paint", k, i, v, erase: ev.altKey, group: [] };
+      paintRange(k, i, v, i, v, ev.altKey); liveRefresh(); return;
+    }
+    const hit = hitTest(px, py);
+    if (hit){
+      const id = hit.k + "|" + hit.i;
+      if (ev.shiftKey){ if (CH.sel.has(id)) CH.sel.delete(id); else CH.sel.add(id); }
+      else if (!CH.sel.has(id)) CH.sel = new Set([id]);
+      const snap = selList().map(q => ({ ...q, key:S.rows[q.i].key, val:OF.o[q.k][q.i], raw:rawEdit(q.k, S.rows[q.i].key) }));
+      CH.drag = { kind:"move", py0:py, moved:false, snap };
+      svg.style.cursor = "ns-resize";
+    } else {
+      CH.drag = { kind:"marq", x0:px, y0:py, x1:px, y1:py, base: ev.shiftKey ? new Set(CH.sel) : new Set() };
+    }
+    renderChart();
   });
   svg.addEventListener("pointermove", ev => {
     const { px, py } = chartPos(ev); const i = CH.ix(px);
-    if (CH.drag){ const d = CH.drag, v = chartValue(py, d.k); paintRange(d.k, d.i, d.v, i, v, d.erase || ev.altKey); d.i = i; d.v = v; liveRefresh(); }
+    MOUSE.x = ev.clientX; MOUSE.y = ev.clientY; MOUSE.i = i; MOUSE.in = true;
+    const d = CH.drag;
+    if (d && d.kind === "paint"){ const v = chartValue(py, d.k); paintRange(d.k, d.i, d.v, i, v, d.erase || ev.altKey); d.i = i; d.v = v; liveRefresh(); }
+    else if (d && d.kind === "move"){
+      const dv = CH.inv(py) - CH.inv(d.py0);
+      if (!d.moved && Math.abs(py - d.py0) < 3) return;
+      d.moved = true;
+      const tmp = [];
+      for (const q of d.snap){ writeCell(q.k, q.i, clampV(q.k, q.val + dv), tmp); }
+      liveRefresh();
+    }
+    else if (d && d.kind === "marq"){
+      d.x1 = px; d.y1 = py;
+      const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1), y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1);
+      const sel = new Set(d.base);
+      /* a thin drag selects every point in those columns; a box selects only the points inside it */
+      const tall = y1 - y0 < 6;
+      for (const h of CH.hits) if (h.x >= x0 && h.x <= x1 && (tall || (h.y >= y0 && h.y <= y1))) sel.add(h.k + "|" + h.i);
+      CH.sel = sel; renderChart();
+    }
+    else {
+      const hit = prefs.cmode === "select" ? hitTest(px, py) : null;
+      svg.style.cursor = hit ? (CH.sel.has(hit.k + "|" + hit.i) ? "ns-resize" : "pointer") : prefs.cmode === "draw" ? "crosshair" : "default";
+    }
     hover(i, ev);
   });
-  const end = () => { if (!CH.drag) return; const g = CH.drag.group; CH.drag = null; if (g.length){ S.undo.push(g); S.redo = []; saveEdits(); } renderAll(); };
+  const end = () => {
+    const d = CH.drag; if (!d) return; CH.drag = null;
+    if (d.kind === "paint"){ if (d.group.length){ S.undo.push(d.group); S.redo = []; saveEdits(); } renderAll(); return; }
+    if (d.kind === "move"){
+      if (d.moved){
+        const g = [];
+        for (const q of d.snap){ const nw = rawEdit(q.k, q.key); if (nw !== q.raw) g.push({ sid:prefs.site, k:q.k, key:q.key, old:q.raw, nw }); }
+        if (g.length){ S.undo.push(g); S.redo = []; saveEdits(); }
+      }
+      renderAll(); return;
+    }
+    if (d.kind === "marq"){ if (Math.abs(d.x1 - d.x0) < 4 && Math.abs(d.y1 - d.y0) < 4 && !d.base.size) clearSel(); renderChart(); }
+  };
   svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", end);
-  svg.addEventListener("pointerleave", () => { if (!CH.drag){ hover(null); } });
-  svg.addEventListener("dblclick", ev => { const { px, py } = chartPos(ev); const i = CH.ix(px); const g = []; writeCell(pickKey(i, py), i, null, g); commit(g); });
+  svg.addEventListener("pointerleave", () => { MOUSE.in = false; if (!CH.drag){ hover(null); } });
+  svg.addEventListener("dblclick", ev => { const { px, py } = chartPos(ev); const hit = hitTest(px, py); if (!hit) return; const g = []; writeCell(hit.k, hit.i, null, g); commit(g); });
+  svg.addEventListener("keydown", ev => {
+    if (ev.key === "ArrowUp" || ev.key === "ArrowDown"){ ev.preventDefault(); if (!CH.sel.size){ toast("Select points first (click, or drag across the graph)"); return; } nudgeSel((ev.key === "ArrowUp" ? 1 : -1)*(ev.shiftKey ? 5 : 1)); }
+    else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight"){
+      ev.preventDefault(); if (CH.sel.size !== 1) return;
+      const q = selList()[0]; if (!q) return; const pts = CH.hits.filter(h => h.k === q.k).sort((a, b) => a.i - b.i);
+      const j = pts.findIndex(h => h.i === q.i) + (ev.key === "ArrowRight" ? 1 : -1); if (pts[j]){ CH.sel = new Set([q.k + "|" + pts[j].i]); renderChart(); }
+    }
+    else if (ev.key === "Delete" || ev.key === "Backspace"){ ev.preventDefault(); if (CH.sel.size) applyToPoints(() => null, selList()); }
+    else if (ev.key === "Escape"){ clearSel(); renderChart(); }
+    else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a"){ ev.preventDefault(); CH.sel = new Set(CH.hits.map(h => h.k + "|" + h.i)); renderChart(); }
+  });
+  /* hold Ctrl (or Cmd) to see the values under the cursor */
+  const ctrlState = ev => { const on = ev.ctrlKey || ev.metaKey; if (on !== MOUSE.ctrl){ MOUSE.ctrl = on; if (MOUSE.in && MOUSE.i != null) hover(MOUSE.i, { clientX:MOUSE.x, clientY:MOUSE.y, ctrlKey:on, metaKey:false }); else $("tip").style.display = "none"; } };
+  window.addEventListener("keydown", ctrlState); window.addEventListener("keyup", ctrlState);
+  window.addEventListener("blur", () => { MOUSE.ctrl = false; $("tip").style.display = "none"; });
   window.addEventListener("resize", () => renderChart());
 }
 function hover(i, ev){
@@ -858,21 +1028,21 @@ function hover(i, ev){
     S.hoverRow = i; markHover(i);
     renderChart();
   }
-  if (i == null || !ev){ tip.style.display = "none"; return; }
-  const ks = keysOf(prefs.param), combo = ks.length > 1, p = P[ks[0]], s = site(), r = S.rows[i], A = S.agg[s.id] || { srcv:{} };
+  if (i == null || !ev || CH.drag || !(ev.ctrlKey || ev.metaKey)){ tip.style.display = "none"; return; }
+  const ks = keysOf(prefs.param), combo = ks.length > 1, p = P[ks[0]], s = site(), A = S.agg[s.id] || { srcv:{} };
+  i = ownerIdx(ks[0], i); const r = S.rows[i];
   const srcOf = k => k.startsWith("x") ? OF.xsrc[k] : (A.srcv[k] || {});
   const f = v => v == null || v === undefined ? "–" : p.kind === "sky" ? `${Math.round(v)}% ${skyCat(v)}` : p.kind === "dir" ? `${Math.round(v)}° ${compass(v)}` : p.kind === "prob" ? `${Math.round(v)}%` : `${Math.round(v)}${p.unit === "°F" ? "°" : ""}`;
   const fv = getter => ks.map(k => f(getter(k))).join(" / ");
-  const Ld = dayLabel(r.a, zulu());
-  let h = `<div><b>${Ld.wd.slice(0,3)} ${Ld.dt}, ${rowTime(r)}${zulu() ? "Z" : ""}</b></div>`;
+  const Ld = dayLabel(r.a, zulu()), sp = spanMap(ks[0])[i], end = S.rows[i + (sp.s || 1) - 1].b;
+  let h = `<div><b>${Ld.wd.slice(0,3)} ${Ld.dt}, ${hhmm(r.a, zulu())}${sp.s > 1 || r.len > 1 ? "–" + hhmm(end, zulu()) : ""}${zulu() ? "Z" : ""}</b></div>`;
   if (combo) h += `<div class="r mut"><span></span><span>sust / peak</span></div>`;
   h += `<div class="r"><span>Official</span><span>${fv(k => OF.o[k][i])}</span></div><div class="r mut"><span>Guidance</span><span>${fv(k => OF.g[k] ? OF.g[k][i] : null)}</span></div>`;
-  const s0 = srcOf(ks[0]);
   const ids = [...new Set(ks.flatMap(k => Object.keys(srcOf(k))))].filter(id => ks.some(k => (srcOf(k)[id] || [])[i] != null)).sort((a, b) => ALL_SOURCES.findIndex(x => x.id === a) - ALL_SOURCES.findIndex(x => x.id === b));
-  ids.slice(0, 14).forEach(id => { const d = ALL_SOURCES.find(x => x.id === id); h += `<div class="r mut"><span>${d ? d.name : id}</span><span>${fv(k => (srcOf(k)[id] || [])[i])}</span></div>`; });
+  ids.slice(0, 16).forEach(id => { const d = ALL_SOURCES.find(x => x.id === id); h += `<div class="r mut"><span>${d ? d.name : id}</span><span>${fv(k => (srcOf(k)[id] || [])[i])}</span></div>`; });
   tip.innerHTML = h; tip.style.display = "block";
-  const wrap = $("chartwrap").getBoundingClientRect(); let lx = ev.clientX - wrap.left + 14; if (lx + 200 > wrap.width) lx = ev.clientX - wrap.left - 214;
-  tip.style.left = lx + "px"; tip.style.top = Math.max(0, ev.clientY - wrap.top - 20) + "px";
+  const wrap = $("chartwrap").getBoundingClientRect(); let lx = ev.clientX - wrap.left + 16; if (lx + 210 > wrap.width) lx = ev.clientX - wrap.left - 226;
+  tip.style.left = lx + "px"; tip.style.top = Math.max(0, Math.min(wrap.height - tip.offsetHeight, ev.clientY - wrap.top - 20)) + "px";
 }
 
 /* ============================================================
@@ -979,10 +1149,13 @@ function siteSheet(s, OFs, issued, by){
   rows.forEach((r, i) => {
     const dk = dayKey(r.a, z), top = dk !== lastDay; lastDay = dk;
     const st = (base) => top ? base + 4 : base;
+    const rowNo = 8 + i;
     const L = dayLabel(r.a, z);
     const row = [{ v: top ? `${L.wd.slice(0,3)} ${L.dt}` : "", s: st(8) }, { v: rowTime(r), s: st(5) }, { v: `${r.len} h`, s: st(5) }];
     for (const k of XCOLS.slice(3)){
-      const p = P[k], v = o[k][i];
+      const p = P[k], v = o[k][i], sp = spanMap(k)[i];
+      if (sp.cov){ row.push({ v:"", s: st(5) }); continue; }
+      if (sp.s > 1){ const col = colName(XCOLS.indexOf(k)); merges.push(`${col}${rowNo}:${col}${rowNo + sp.s - 1}`); }
       if (v === undefined){ row.push({ v:"-", s: st(5) }); continue; }
       if (v === null){ row.push({ v:"", s: st(5) }); continue; }
       if (p.kind === "prob") row.push(v < LOW_PROB ? { v:"-", s: st(5) } : { v: Math.round(v)/100, s: st(7) });
@@ -1017,6 +1190,8 @@ function openPublish(){
   const dlg = $("pubDlg");
   $("pubSites").innerHTML = SITES.map(s => `<label><input type="checkbox" value="${s.id}" ${s.id === prefs.site || editCount(s.id) ? "checked" : ""}> ${s.name} <span style="color:var(--ink-3)">${s.point}</span></label>`).join("");
   $("pubInit").value = prefs.initials || "";
+  const fm = prefs.fmt || { x:true, c:true, p:true, h:true };
+  $("fmtX").checked = fm.x; $("fmtC").checked = fm.c; $("fmtP").checked = fm.p; $("fmtH").checked = fm.h;
   const qcRefresh = () => {
     const ids = [...$("pubSites").querySelectorAll("input:checked")].map(x => x.value);
     const msgs = [];
@@ -1039,10 +1214,187 @@ function doPublish(){
   let nfiles = 0;
   if ($("fmtX").checked){ download(workbook(list.map(([s, o]) => siteSheet(s, o, issued, by))), `Planning_Forecast${tag}_${stamp}.xlsx`); nfiles++; }
   if ($("fmtC").checked){ setTimeout(() => download(new Blob([csvFor(list, issued, by)], { type:"text/csv" }), `Planning_Forecast${tag}_${stamp}.csv`), 300); nfiles++; }
+  const wantP = $("fmtP").checked, wantH = $("fmtH").checked;
+  if (wantP || wantH){
+    const models = reportModel(list, issued, by);
+    if (wantP){ setTimeout(() => download(pdfReport(models), `Planning_Forecast${tag}_${stamp}.pdf`), 600); nfiles++; }
+    if (wantH){ setTimeout(() => download(new Blob([htmlReport(models, issued)], { type:"text/html" }), `Planning_Forecast${tag}_${stamp}.html`), 900); nfiles++; }
+  }
+  prefs.fmt = { x:$("fmtX").checked, c:$("fmtC").checked, p:wantP, h:wantH }; savePrefs();
   ids.forEach(id => published[id] = { t: issued, by }); store.set(LS.pub, published);
   renderStatus();
   toast(`Published ${hhmm(issued, zulu())}${zulu() ? "Z" : ""}, ${nfiles} file${nfiles === 1 ? "" : "s"} downloaded`);
 }
+/* ============================================================
+   Publish: PDF and HTML forecast tables (time across, paged by day)
+   ============================================================ */
+const MIX = (rgb, a) => rgb.map(c => Math.round(255 - (255 - c)*a));
+function tintRGB(p, v){
+  if (v == null || v === undefined) return null;
+  if (p.kind === "prob"){ if (v < LOW_PROB) return null; const a = Math.min(0.62, v/100*0.62); return a > 0.02 ? MIX([11,110,121], a) : null; }
+  if (p.k === "t" || p.k === "wbgt"){ if (v >= 85) return MIX([178,58,46], Math.min(0.32, (v - 84)/40)); if (v <= 50) return MIX([52,102,170], Math.min(0.3, (51 - v)/40)); return null; }
+  if (["s54","g54","s200","g200"].includes(p.k)){ const a = Math.max(0, Math.min(0.4, (v - 12)/45)); return a > 0.02 ? MIX([178,58,46], a) : null; }
+  if (p.kind === "sky"){ const a = Math.max(0, v)/100*0.16; return a > 0.02 ? MIX([120,135,150], a) : null; }
+  if (p.kind === "sev" && v !== "-") return MIX([178,58,46], 0.08 + SEV.indexOf(v)*0.06);
+  return null;
+}
+const MAXCOLS = 30;
+/* one model per site: header text plus pages of whole days, each with merged cells clipped to the page */
+function reportModel(list, issued, by){
+  const z = zulu(), tz = z ? "UTC" : tzAbbr(issued), rows = S.rows;
+  const iss = `${dayLabel(issued, z).wd}, ${dayLabel(issued, z).dt} ${new Date(issued).getUTCFullYear()} at ${hhmm(issued, z)} ${tz}`;
+  const days = []; rows.forEach((r, i) => { const dk = dayKey(r.a, z); const d = days[days.length - 1]; if (d && d.dk === dk) d.cols.push(i); else days.push({ dk, cols:[i] }); });
+  const pages = []; let cur = null;
+  for (const d of days){ if (!cur || cur.cols.length + d.cols.length > MAXCOLS){ cur = { days:[], cols:[] }; pages.push(cur); } cur.days.push(d); cur.cols.push(...d.cols); }
+  /* fold a short last page (day 7 on its own) into the one before */
+  if (pages.length > 1){ const L = pages[pages.length - 1], P2 = pages[pages.length - 2]; if (L.cols.length <= 8 && P2.cols.length + L.cols.length <= 36){ P2.days.push(...L.days); P2.cols.push(...L.cols); pages.pop(); } }
+  const tlab = r => { const a = hhmm(r.a, z).slice(0, 2); return r.len === 1 ? a : `${a}–${hhmm(r.b, z).slice(0, 2)}`; };
+  return list.map(([s, OFs]) => {
+    const o = OFs.o;
+    return {
+      site:s, title:`${s.name} Daily Planning Forecast`,
+      sub:`Issued ${iss} by ${by}. Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times ${tz}.`,
+      pages: pages.map(pg => {
+        const set = new Set(pg.cols);
+        const dayHdr = pg.days.map((d, j) => { const L = dayLabel(rows[d.cols[0]].a, z); const nm = d.dk === dayKey(issued, z) ? "Today" : d.dk === dayKey(issued + 24*H, z) ? "Tomorrow" : L.wd; return { label: d.cols.length >= 3 ? `${nm}, ${L.dt}` : L.dt, n:d.cols.length }; });
+        const times = pg.cols.map(i => ({ t:tlab(rows[i]), sub: rows[i].len > 1 ? rows[i].len + " h" : "", day: pg.days.some(d => d.cols[0] === i) }));
+        const groups = [];
+        for (const p of PARAMS){
+          let g = groups[groups.length - 1]; if (!g || g.g !== p.g){ g = { g:p.g, rows:[] }; groups.push(g); }
+          const spm = spanMap(p.k), cells = [];
+          pg.cols.forEach((i, ci) => {
+            const sp = spm[i];
+            if (sp.cov && ci > 0) return;             /* inside a merged cell already drawn */
+            const own = sp.cov ? ownerIdx(p.k, i) : i;
+            const len = sp.cov ? spm[own].s - (i - own) : sp.s;
+            let n = 1; while (n < len && set.has(i + n)) n++;
+            const v = o[p.k][own];
+            const txt = v === undefined ? "–" : p.kind === "sev" ? (v === "-" ? "-" : v) : fmt(p, v);
+            cells.push({ text: txt, span:n, fill: v === undefined ? null : tintRGB(p, v), muted: v === undefined || (p.kind === "prob" && v != null && v < LOW_PROB), day: times[ci].day });
+          });
+          g.rows.push({ label: p.kind === "sev" ? "SPC category" : colLabel(p, s), sub: p.s, cells });
+        }
+        return { dayHdr, times, groups };
+      }),
+    };
+  });
+}
+
+/* ---------- HTML ---------- */
+const hesc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function htmlReport(models, issued){
+  const css = `body{font:13px/1.35 "Segoe UI",Arial,sans-serif;color:#13202E;margin:24px;background:#fff}
+h1{font-size:20px;margin:0 0 4px}h1+p{margin:0 0 12px;color:#4B5A68;font-size:12px}
+section{margin-bottom:36px}table{border-collapse:collapse;margin:0 0 16px;font-variant-numeric:tabular-nums}
+th,td{border:1px solid #D4DBDF;padding:3px 4px;text-align:center;white-space:nowrap;font-size:12px}
+thead th{background:#F4F7F7;font-weight:600}th.grp{background:#F4F7F7;text-align:left;vertical-align:top;white-space:normal;width:110px}
+th.lab{text-align:left;font-weight:600;color:#4B5A68}th.lab small,thead small{color:#7D8B97;font-weight:400;display:block;font-size:10px}
+td.mut{color:#9AA6B0}.wrap{overflow-x:auto;margin-bottom:16px}.wrap table{margin:0}.d{border-left:2px solid #7D8B97}.note{color:#7D8B97;font-size:11px;max-width:110ch}
+@media print{body{margin:10mm}section{page-break-after:always}table{page-break-inside:avoid}}`;
+  let h = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Daily Planning Forecast</title><style>${css}</style></head><body>`;
+  for (const m of models){
+    h += `<section><h1>${hesc(m.title)}</h1><p>${hesc(m.sub)}</p>`;
+    for (const pg of m.pages){
+      h += `<div class="wrap"><table><thead><tr><th colspan="2"></th>${pg.dayHdr.map(d => `<th colspan="${d.n}" class="d" style="text-align:left">${hesc(d.label)}</th>`).join("")}</tr>`;
+      h += `<tr><th colspan="2" style="text-align:left">Parameter</th>${pg.times.map(t => `<th class="${t.day ? "d" : ""}">${t.t}${t.sub ? `<small>${t.sub}</small>` : ""}</th>`).join("")}</tr></thead><tbody>`;
+      for (const g of pg.groups){
+        g.rows.forEach((r, j) => {
+          h += `<tr>${j === 0 ? `<th class="grp" rowspan="${g.rows.length}">${hesc(g.g)}</th>` : ""}<th class="lab">${hesc(r.label)}${r.sub ? ` <small style="display:inline">${hesc(r.sub)}</small>` : ""}</th>`;
+          h += r.cells.map(c => `<td${c.span > 1 ? ` colspan="${c.span}"` : ""} class="${c.day ? "d " : ""}${c.muted ? "mut" : ""}"${c.fill ? ` style="background:rgb(${c.fill.join(",")})"` : ""}>${hesc(c.text)}</td>`).join("") + `</tr>`;
+        });
+      }
+      h += `</tbody></table></div>`;
+    }
+    h += `</section>`;
+  }
+  h += `<p class="note">${hesc(document.querySelector(".foot p").textContent)}</p></body></html>`;
+  return h;
+}
+
+/* ---------- PDF (hand-built, Helvetica, US Letter landscape) ---------- */
+const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const textW = (s, size, bold) => { let w = 0; for (const ch of String(s)){ const c = ch.charCodeAt(0); w += c >= 32 && c <= 126 ? HW[c - 32] : ch === "–" ? 556 : ch === "°" ? 400 : 556; } return w*size/1000*(bold ? 1.06 : 1); };
+const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
+function pdfReport(models){
+  const W = 792, Hp = 612, M = 28, ops = [];
+  const pages = [];
+  let cs = [];
+  const f = n => (+n).toFixed(2);
+  const rgb = c => c.map(x => f(x/255)).join(" ");
+  const rect = (x, y, w, h, fill) => cs.push(`${rgb(fill)} rg ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re f`);
+  const line = (x1, y1, x2, y2, gray, wd) => cs.push(`${f(gray)} G ${f(wd)} w ${f(x1)} ${f(Hp - y1)} m ${f(x2)} ${f(Hp - y2)} l S`);
+  const text = (s, x, y, size, opt = {}) => {
+    const w = textW(s, size, opt.bold); let tx = x;
+    if (opt.align === "c") tx = x - w/2; else if (opt.align === "r") tx = x - w;
+    cs.push(`BT ${opt.color ? rgb(opt.color) + " rg " : "0.075 0.125 0.18 rg "}/${opt.bold ? "F2" : "F1"} ${f(size)} Tf ${f(tx)} ${f(Hp - y)} Td ${pdfStr(s)} Tj ET`);
+  };
+  const fitText = (s, maxW, size, bold) => { let z = size; while (z > 4.5 && textW(s, z, bold) > maxW) z -= 0.25; return z; };
+  for (const m of models){
+    m.pages.forEach((pg, pi) => {
+      cs = [];
+      text(m.title, M, M + 12, 13, { bold:true });
+      text(m.sub, M, M + 25, 7.5, { color:[75,90,104] });
+      if (m.pages.length > 1) text(`Page ${pi + 1} of ${m.pages.length}`, W - M, M + 12, 7.5, { align:"r", color:[125,139,151] });
+      const gw = 66, lw = 62, x0 = M + gw + lw, ncol = pg.times.length;
+      const cw = Math.min(24, (W - M - x0)/ncol), top = M + 38, dh = 12, th = 18, rh = 13.2;
+      const xcol = ci => x0 + ci*cw;
+      /* day header */
+      rect(M, top, gw + lw + ncol*cw, dh + th, [244,247,247]);
+      let ci = 0;
+      pg.dayHdr.forEach(d => { text(d.label, xcol(ci) + 3, top + 9, 7.5, { bold:true }); ci += d.n; });
+      text("Parameter", M + 3, top + dh + 11, 7, { bold:true, color:[75,90,104] });
+      pg.times.forEach((t, k) => { text(t.t, xcol(k) + cw/2, top + dh + (t.sub ? 8 : 11), fitText(t.t, cw - 2, 7, true), { bold:true, align:"c" }); if (t.sub) text(t.sub, xcol(k) + cw/2, top + dh + 15.5, 5.5, { align:"c", color:[125,139,151] }); });
+      let y = top + dh + th;
+      line(M, y, xcol(ncol), y, 0.07, 1);
+      for (const g of pg.groups){
+        const gy = y;
+        rect(M, gy, gw, rh*g.rows.length, [244,247,247]);
+        /* group label, wrapped */
+        const words = g.g.split(" "); let ln = "", ly = gy + 9;
+        for (const w of words){ const t2 = ln ? ln + " " + w : w; if (textW(t2, 6.8, true) > gw - 6 && ln){ text(ln, M + 3, ly, 6.8, { bold:true }); ly += 8; ln = w; } else ln = t2; }
+        if (ln) text(ln, M + 3, ly, 6.8, { bold:true });
+        for (const r of g.rows){
+          let k = 0;
+          for (const c of r.cells){ const x = xcol(k), w = c.span*cw; if (c.fill) rect(x, y, w, rh, c.fill); text(c.text, x + w/2, y + 9.2, fitText(c.text, w - 2, 7, false), { align:"c", color: c.muted ? [154,166,176] : undefined }); k += c.span; }
+          text(r.label, M + gw + 3, y + 9.2, fitText(r.label + (r.sub ? " " + r.sub : ""), lw - 5, 6.8, true), { bold:true, color:[75,90,104] });
+          if (r.sub){ const lwid = textW(r.label, fitText(r.label + " " + r.sub, lw - 5, 6.8, true), true); text(r.sub, M + gw + 3 + lwid + 2, y + 9.2, 5.6, { color:[125,139,151] }); }
+          /* cell borders for this row */
+          let kk = 0; for (const c of r.cells){ line(xcol(kk), y, xcol(kk), y + rh, 0.84, 0.4); kk += c.span; }
+          y += rh;
+          line(M + gw, y, xcol(ncol), y, 0.86, 0.4);
+        }
+        line(M, y, xcol(ncol), y, 0.6, 0.8);
+      }
+      /* frame + day separators */
+      line(M, top, xcol(ncol), top, 0.6, 0.6); line(M, top, M, y, 0.6, 0.6); line(xcol(ncol), top, xcol(ncol), y, 0.6, 0.6);
+      line(M + gw, top + dh + th, M + gw, y, 0.6, 0.6); line(x0, top, x0, y, 0.45, 1);
+      ci = 0; pg.dayHdr.forEach((d, j) => { if (j) line(xcol(ci), top, xcol(ci), y, 0.45, 1.2); ci += d.n; });
+      text("Probabilities of 0 or 1% show as a dash. 3 hr and 6 hr probabilities are merged across the hours they cover; in longer blocks the 1 hr and 3 hr cells show the highest period inside the block.", M, Math.min(Hp - M, y + 14), 6.5, { color:[125,139,151] });
+      pages.push(cs.join("\n"));
+    });
+  }
+  /* assemble objects */
+  const objs = [];
+  const add = s => { objs.push(s); return objs.length; };
+  const fontR = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+  const fontB = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  const pagesId = objs.length + 1 + pages.length*2;   /* reserved after page objects */
+  const kids = [];
+  for (const c of pages){
+    const sid = add(`<< /Length ${c.length} >>\nstream\n${c}\nendstream`);
+    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${Hp}] /Resources << /Font << /F1 ${fontR} 0 R /F2 ${fontB} 0 R >> >> /Contents ${sid} 0 R >>`));
+  }
+  add(`<< /Type /Pages /Kids [${kids.map(k => k + " 0 R").join(" ")}] /Count ${kids.length} >>`);
+  const cat = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  let out = "%PDF-1.4\n", offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("");
+  out += `trailer\n<< /Size ${objs.length + 1} /Root ${cat} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const bytes = new Uint8Array(out.length); for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xFF;
+  return new Blob([bytes], { type:"application/pdf" });
+}
+
 let toastT = null;
 function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2600); }
 
@@ -1053,7 +1405,7 @@ function recomputeAgg(){ for (const s of SITES) if (S.G[s.id]) S.agg[s.id] = agg
 let renderT = null;
 function scheduleRender(){ if (renderT) return; renderT = setTimeout(() => { renderT = null; recomputeAgg(); renderAll(); renderSources(); }, 120); }
 async function loadAll(){
-  S.loading = true; S.rows = buildRows(Date.now()); S.TL = makeTimeline(Date.now()); S.G = {}; S.agg = {}; S.status = {}; S.fetchedAt = Date.now();
+  S.loading = true; S.rows = buildRows(Date.now()); S.spanCache = {}; S.TL = makeTimeline(Date.now()); S.G = {}; S.agg = {}; S.status = {}; S.fetchedAt = Date.now();
   pruneEdits(); saveEdits();
   for (const s of SITES) S.G[s.id] = new SiteGuidance(s, S.TL, S.rows);
   ALL_SOURCES.forEach(d => S.status[d.id] = { loading:true });
@@ -1158,9 +1510,9 @@ async function demoSPC(){ const t = Date.now(); const d = new Date(t); const v =
    Events
    ============================================================ */
 function bind(){
-  $("sites").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; renderAll(); });
+  $("sites").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; clearSel(); renderAll(); });
   $("locator").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); renderAll(); });
-  $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderMatrix(); });
+  $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; if (prefs.param !== b.dataset.p) clearSel(); prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderMatrix(); });
   $("undo").onclick = undo; $("redo").onclick = redo;
   $("drawSel").addEventListener("click", ev => { const b = ev.target.closest("[data-d]"); if (!b) return; prefs.draw = b.dataset.d; savePrefs(); renderChart(); });
   $("resetSite").onclick = () => {
@@ -1168,18 +1520,29 @@ function bind(){
     if (!confirm(`Clear all ${n} edits for ${site().name}? You can undo this.`)) return;
     const g = []; const e = edits[prefs.site] || {}; for (const k in e) for (const key in e[k]) setEdit(prefs.site, k, key, undefined, g); commit(g); toast("Reset to guidance");
   };
-  const toolKeys = () => { const ks = keysOf(prefs.param); return ks.length > 1 && prefs.draw === "s" ? [ks[0]] : ks.length > 1 && prefs.draw === "p" ? [ks[1]] : ks; };
-  $("resetParam").onclick = () => { const g = []; for (const k of toolKeys()){ const m = (edits[prefs.site] || {})[k] || {}; for (const key in m) setEdit(prefs.site, k, key, undefined, g); } commit(g); };
-  const nudge = d => { const g = []; for (const k of toolKeys()){ const p = P[k]; S.rows.forEach((r, i) => { const v = OF.o[k][i]; if (v == null) return; let nv = v + d*(p.step || 1); if (p.kind === "dir") nv = ((nv % 360) + 360) % 360; else { if (p.lo != null) nv = Math.max(p.lo, nv); if (p.hi != null) nv = Math.min(p.hi, nv); } writeCell(k, i, nv, g); }); recompute(); } commit(g); };
-  $("nudgeUp").onclick = () => nudge(1); $("nudgeDn").onclick = () => nudge(-1);
+  $("modeSel").addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (!b) return; prefs.cmode = b.dataset.m; savePrefs(); renderChart(); });
+  $("resetParam").onclick = () => {
+    if (CH.sel.size){ applyToPoints(() => null, selList()); return; }
+    const g = []; for (const k of toolKeysG()){ const m = (edits[prefs.site] || {})[k] || {}; for (const key in m) setEdit(prefs.site, k, key, undefined, g); } commit(g);
+  };
+  $("nudgeUp").onclick = () => nudgeSel(1); $("nudgeDn").onclick = () => nudgeSel(-1);
+  const setTo = () => {
+    const ks = keysOf(prefs.param), v = parseInput(P[ks[0]], $("setVal").value);
+    if (v === undefined || v === null){ toast("Type a value first"); $("setVal").focus(); return; }
+    applyToPoints(k => v, scopePoints());
+  };
+  $("setGo").onclick = setTo; $("setVal").addEventListener("keydown", ev => { if (ev.key === "Enter"){ ev.preventDefault(); setTo(); } });
   $("smooth").onclick = () => {
     if (P[keysOf(prefs.param)[0]].kind === "dir") return toast("Smoothing isn't available for direction");
+    const list = CH.sel.size ? selList() : scopePoints().filter(q => rawEdit(q.k, S.rows[q.i].key) !== undefined);
+    if (!list.length) return toast("Select or edit some points first, then smooth them");
+    const keep = {}; for (const q of list) (keep[q.k] = keep[q.k] || new Set()).add(q.i);
     const g = [];
-    for (const k of toolKeys()){
-      const p = P[k], m = (edits[prefs.site] || {})[k] || {}; const v = OF.o[k].slice();
-      S.rows.forEach((r, i) => { if (m[r.key] === undefined || v[i] == null) return; const a = v[i - 1] ?? v[i], b = v[i + 1] ?? v[i]; writeCell(k, i, Math.round((a + 2*v[i] + b)/4/(p.step || 1))*(p.step || 1), g); });
+    for (const k in keep){
+      const pts = CH.hits.filter(h => h.k === k).map(h => h.i).sort((a, b) => a - b), v = OF.o[k];
+      pts.forEach((i, j) => { if (!keep[k].has(i)) return; const a = v[pts[j - 1] ?? i], b = v[pts[j + 1] ?? i]; writeCell(k, i, clampV(k, (a + 2*v[i] + b)/4), g); });
     }
-    commit(g); if (!g.length) toast("Edit some points first, then smooth them");
+    commit(g);
   };
   $("publish").onclick = openPublish;
   $("pubDlg").addEventListener("close", () => { if ($("pubDlg").returnValue === "ok") doPublish(); });
@@ -1202,7 +1565,7 @@ function bind(){
   /* matrix */
   const mx = $("matrix");
   mx.addEventListener("click", ev => {
-    const th = ev.target.closest("th[data-p]"); if (th){ if (P[th.dataset.p].kind !== "sev"){ prefs.param = viewOf(th.dataset.p); savePrefs(); renderParams(); renderChart(); renderMatrix(); $("chart").scrollIntoView({ block:"nearest", behavior:"smooth" }); } return; }
+    const th = ev.target.closest("th[data-p]"); if (th){ if (P[th.dataset.p].kind !== "sev"){ if (viewOf(th.dataset.p) !== prefs.param) clearSel(); prefs.param = viewOf(th.dataset.p); savePrefs(); renderParams(); renderChart(); renderMatrix(); $("chart").scrollIntoView({ block:"nearest", behavior:"smooth" }); } return; }
     const td = ev.target.closest("td.c"); if (!td || ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
     const i = +td.dataset.i, k = td.dataset.k;
     if (S.cur && S.cur.i === i && S.cur.k === k && !td.classList.contains("na")) openEditor(i, k);
@@ -1218,7 +1581,12 @@ function bind(){
   mx.addEventListener("keydown", ev => {
     if (editor || !S.cur) return;
     const ks = PARAMS.map(p => p.k); let { i, k } = S.cur; let ki = ks.indexOf(k);
-    const mv = (di, dk) => { i = Math.max(0, Math.min(S.rows.length - 1, i + di)); ki = Math.max(0, Math.min(ks.length - 1, ki + dk)); selectCell(i, ks[ki], true); ev.preventDefault(); };
+    const mv = (di, dk) => {
+      ev.preventDefault();
+      if (di > 0){ const sp = spanMap(ks[ki])[i]; i += sp && sp.s ? sp.s : 1; } else if (di < 0) i -= 1;
+      i = Math.max(0, Math.min(S.rows.length - 1, i)); ki = Math.max(0, Math.min(ks.length - 1, ki + dk));
+      i = ownerIdx(ks[ki], i); selectCell(i, ks[ki], true);
+    };
     if (ev.key === "ArrowDown") return mv(...visStep(1, 0));
     if (ev.key === "ArrowUp") return mv(...visStep(-1, 0));
     if (ev.key === "ArrowRight" || (ev.key === "Tab" && !ev.shiftKey)) return mv(...visStep(0, 1));
