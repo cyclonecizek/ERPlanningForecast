@@ -109,6 +109,7 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .legend i{ display:inline-block; width:18px; height:0; border-top:2px solid; vertical-align:middle; margin-right:5px; }
 .legend i.off{ border-color:var(--accent); border-top-width:3px; }
 .legend i.off.pk{ border-color:var(--peak); }
+.legend i.bar{ width:9px; height:11px; border:0; background:rgba(var(--p),.35); vertical-align:-1px; }
 .legend i.gd{ border-color:var(--guide); border-top-style:dashed; opacity:.7; }
 .legend i.src{ border-color:var(--ink-3); border-top-width:1px; }
 .legend i.bd{ border:0; height:9px; background:var(--band); }
@@ -136,6 +137,14 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 #chart .marq{ fill:rgba(var(--p),.08); stroke:var(--accent); stroke-dasharray:4 3; }
 #chart .spanbar{ stroke:var(--accent); stroke-width:3; stroke-linecap:round; opacity:.28; }
 #chart .spanbar.pk{ stroke:var(--peak); }
+#chart .pbar{ fill:rgba(var(--p),.28); stroke:rgba(var(--p),.55); stroke-width:1; }
+#chart .pbar.e{ stroke:var(--edit); stroke-width:1.5; }
+#chart .pbar.s{ fill:rgba(var(--p),.45); }
+#chart .pstep{ stroke:var(--accent); stroke-width:3; stroke-linecap:round; }
+#chart .pstep.s2{ stroke:var(--peak); }
+#chart .pstep.s{ stroke-width:4.5; }
+#chart .gstep{ stroke:var(--guide); stroke-width:1.2; stroke-dasharray:3 3; opacity:.55; }
+#chart .h.b{ stroke-width:1.2; }
 #chart .band.pk{ fill:var(--band-pk); }
 #chart .serlab{ font:700 11px var(--cond); fill:var(--accent); }
 #chart .serlab.pk{ fill:var(--peak); }
@@ -296,7 +305,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
     <div class="charthead">
       <h2 id="ptitle">Temperature</h2><span class="unit" id="punit"></span>
       <span class="hint" id="phint">Drag across the graph to draw the forecast. Hold Alt while dragging to erase back to guidance. Double-click a point to reset it.</span>
-      <div class="legend"><span><i class="off"></i><span id="lgOff">Official</span></span><span id="lgPeak" hidden><i class="off pk"></i>Peak</span><span><i class="gd"></i>Guidance blend</span><span><i class="src"></i>Sources</span><span><i class="bd"></i>Member 10th to 90th</span></div>
+<div class="legend" id="legend"></div>
     </div>
     <div class="chartwrap" id="chartwrap">
       <svg id="chart" tabindex="0" role="application" aria-label="Forecast graph editor. Select points, then use the up and down arrow keys to move them."></svg>
@@ -304,7 +313,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
     </div>
     <div class="tools">
       <span class="seg" id="modeSel" role="group" aria-label="Editing mode"><button type="button" data-m="select" title="Select points, then drag or nudge them">Select and drag</button><button type="button" data-m="draw" title="Paint the line by dragging across the graph">Draw</button></span>
-      <span id="drawWrap" hidden>Line <span class="seg" id="drawSel" role="group" aria-label="Line to draw"><button type="button" data-d="n" title="Draw whichever line you start nearest">Nearest</button><button type="button" data-d="s">Sustained</button><button type="button" data-d="p">Peak</button></span></span>
+      <span id="drawWrap" hidden>Line <span class="seg" id="drawSel" role="group" aria-label="Line to draw"></span></span>
       <span class="selinfo" id="selinfo"></span>
       <span class="sp"></span>
       <button class="btn" id="nudgeDn">Lower all</button>
@@ -320,6 +329,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
     <div class="srcgrid" id="srcgrid"></div>
     <div class="srcfoot">
       <label><input type="checkbox" id="linkProbs" checked> Shift exceedance probabilities with my wind and temperature edits</label>
+      <label><input type="checkbox" id="linkWin" checked> Link 1, 3 and 6 hr precipitation and lightning probabilities</label>
       <label><input type="checkbox" id="clampProbs" checked> Cap guidance probabilities at 99% (1% rounds down to 0)</label>
       <span class="limits">Hot threshold (°F) <input type="number" id="hotThr" step="1"></span>
     </div>
@@ -328,7 +338,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
 
   <div class="foot">
-    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Guidance probabilities are whole percents, with 1% rounded down to 0. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
+    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). With linking on, the 3 and 6 hr values are built from the 1 hr (or 3-hour block) values inside them, using how the guidance itself combines hours for that period; edit a 3 or 6 hr value and the hours inside it scale together to match. In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Guidance probabilities are whole percents, with 1% rounded down to 0. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
     <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
   </div>
 </main>
@@ -364,6 +374,7 @@ const DEMO = /[?&]demo=1\b/.test(location.search);
 const prefs = Object.assign({ enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param:"t" }, store.get(LS.prefs, {}));
 let edits = store.get(LS.edits, {});
 if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
+if (/^(pp|lt)\d$/.test(prefs.param)) prefs.param = prefs.param.slice(0, 2);
 if (["s200","g200"].includes(prefs.param)) prefs.param = "w200";
 if (!prefs.draw) prefs.draw = "n";
 if (!prefs.cmode) prefs.cmode = "select";
@@ -406,6 +417,69 @@ function guidanceFor(sid){
   }
   return g;
 }
+/* ---------- linked 1 / 3 / 6 hr probabilities ----------
+   Each row has a base value for its own length (1 h rows: 1 hr, 3 h blocks: 3 hr, 6 h blocks: 6 hr).
+   Longer windows are built from the base values inside them with
+     P = max + k * (1 - prod(1 - p) - max),
+   where k comes from the guidance for that window (0 = all hours the same event, 1 = independent).
+   An edit on a window is an anchor: the unedited base values inside it are scaled together to meet it.
+   "Highest 1 hr / 3 hr inside a block" cells follow the block by the guidance ratio. */
+function combProb(ps, k){ let mx = 0, q = 1; for (const p of ps){ mx = Math.max(mx, p); q *= 1 - p; } return mx + k*((1 - q) - mx); }
+function linkProbs(ev, rows, Gv, ed){
+  const K = [ev + "1", ev + "3", ev + "6"];
+  const P01 = v => v == null || v === undefined ? null : Math.max(0, Math.min(1, v/100));
+  const baseK = r => r.len === 1 ? K[0] : r.len <= 3 ? K[1] : K[2];
+  const G = k => Gv[k] || [];
+  const ratio = (kc, i) => { const gc = P01(G(kc)[i]), gb = P01(G(baseK(rows[i]))[i]); if (gc == null || gb == null || gb <= 0) return 1; return Math.min(1, gc/gb); };
+  const b = rows.map((r, i) => { const e = ed(baseK(r), r); return e !== undefined ? e/100 : P01(G(baseK(r))[i]); });
+  const fixed = rows.map((r, i) => ed(baseK(r), r) !== undefined);
+  /* anchors on "highest inside" cells set their block */
+  rows.forEach((r, i) => {
+    if (r.len === 1 || fixed[i]) return;
+    for (const kc of r.len > 3 ? [K[1], K[0]] : [K[0]]){ const a = ed(kc, r); if (a === undefined) continue; const rt = ratio(kc, i); b[i] = Math.min(1, rt > 0 ? a/100/rt : a/100); fixed[i] = true; break; }
+  });
+  const kOf = (idx, Kw, i0) => {
+    const gs = idx.map(j => P01(G(baseK(rows[j]))[j])), gw = P01(G(Kw)[i0]);
+    if (gs.some(v => v == null) || gw == null) return 0.5;
+    let mx = 0, q = 1; gs.forEach(p => { mx = Math.max(mx, p); q *= 1 - p; });
+    const ind = 1 - q; if (ind - mx < 1e-4) return 0.5;
+    return Math.max(0, Math.min(1, (gw - mx)/(ind - mx)));
+  };
+  const wins = { 3:[], 6:[] };
+  for (const L of [3, 6]){
+    const Kw = L === 3 ? K[1] : K[2];
+    spanMap(Kw).forEach((sp, i0) => {
+      if (sp.cov || sp.na || sp.s < 2) return;
+      const idx = Array.from({ length: sp.s }, (_, d) => i0 + d);
+      wins[L].push({ L, i0, idx, Kw, k: kOf(idx, Kw, i0), anchor: ed(Kw, rows[i0]) });
+    });
+  }
+  const locked = new Set();
+  const solve = w => {
+    const T = Math.min(0.995, w.anchor/100);
+    const free = w.idx.filter(j => !fixed[j] && !locked.has(j)); if (!free.length) return;
+    const base = free.map(j => b[j] || 0); if (base.every(v => v <= 0)) base.fill(0.01);
+    const val = sc => combProb(w.idx.map(j => { const m = free.indexOf(j); return m >= 0 ? Math.min(0.995, base[m]*sc) : (b[j] || 0); }), w.k);
+    let lo = 0, hi = 1; while (val(hi) < T && hi < 1e5) hi *= 2;
+    for (let it = 0; it < 48; it++){ const mid = (lo + hi)/2; if (val(mid) < T) lo = mid; else hi = mid; }
+    const sc = (lo + hi)/2; free.forEach((j, m) => b[j] = Math.min(0.995, base[m]*sc));
+  };
+  wins[3].forEach(w => { if (w.anchor !== undefined){ solve(w); w.idx.forEach(j => locked.add(j)); } });
+  wins[6].forEach(w => { if (w.anchor !== undefined) solve(w); });
+  const out = {}; K.forEach(k => out[k] = rows.map(() => undefined));
+  rows.forEach((r, i) => {
+    out[baseK(r)][i] = b[i] == null ? null : b[i]*100;
+    if (r.len > 1){ out[K[0]][i] = b[i] == null ? null : b[i]*ratio(K[0], i)*100; if (r.len > 3) out[K[1]][i] = b[i] == null ? null : b[i]*ratio(K[1], i)*100; }
+  });
+  const fit = [];
+  for (const L of [3, 6]) for (const w of wins[L]){
+    let v = combProb(w.idx.map(j => b[j] || 0), w.k)*100;
+    if (L === 6 && w.anchor === undefined){ let mx = 0; w.idx.forEach(j => { mx = Math.max(mx, (b[j] || 0)*100); const v3 = out[K[1]][j]; if (v3 != null) mx = Math.max(mx, v3); }); v = Math.max(v, mx); }
+    if (w.anchor !== undefined) fit.push({ k:w.Kw, i:w.i0, anchor:w.anchor, fit:v });
+    out[w.Kw][w.i0] = v;
+  }
+  return { out, fit };
+}
 function officialFor(sid){
   const s = SITES.find(x => x.id === sid), G = S.G[sid], g = guidanceFor(sid) || {};
   const e = edits[sid] || {}, rows = S.rows, o = {}, src = {};
@@ -413,6 +487,21 @@ function officialFor(sid){
   for (const p of PARAMS){
     if (p.k.startsWith("x")) continue;
     o[p.k] = rows.map((r, i) => { if (p.win && !probCell(r, p.win)) return undefined; const x = ed(p.k, r); return x !== undefined ? x : (g[p.k] ? g[p.k][i] : null); });
+  }
+  /* precip and lightning: keep 1, 3 and 6 hr consistent */
+  const fits = [];
+  if (prefs.linkWin !== false && S.agg[sid]){
+    for (const ev of ["pp","lt"]){
+      const res = linkProbs(ev, rows, S.agg[sid].val, ed);
+      for (const k of [ev + "1", ev + "3", ev + "6"]){
+        o[k] = rows.map((r, i) => {
+          if (o[k][i] === undefined) return undefined;
+          const x = ed(k, r); if (x !== undefined) return x;
+          const v = res.out[k][i]; return v == null || v === undefined ? null : probRound(Math.min(prefs.clamp ? 99 : 100, v));
+        });
+      }
+      fits.push(...res.fit);
+    }
   }
   /* peaks follow edited sustained winds unless the peak itself is edited */
   rows.forEach((r, i) => {
@@ -447,7 +536,7 @@ function officialFor(sid){
       o[p.k][i] = x !== undefined ? x : probRound(clampP(shifted.v));
     });
   }
-  return { o, g: Object.assign(g, gx), xsrc: src };
+  return { o, g: Object.assign(g, gx), xsrc: src, fits };
 }
 
 /* QC: impossible or inconsistent combinations */
@@ -463,8 +552,10 @@ function qcIssues(sid, OF){
       if (r.len === 1 && a != null && b != null && a > b) flag(ev+"3", i, (ev === "pp" ? "Precip" : "Lightning") + " 3 hr below 1 hr");
       if (b != null && c != null && b > c) flag(ev+"6", i, (ev === "pp" ? "Precip" : "Lightning") + " 6 hr below 3 hr");
     }
+    for (const w of ["1","3","6"]){ const a = o["lt" + w][i], b = o["pp" + w][i]; if (a != null && b != null && a > b + 5) flag("lt" + w, i, `Lightning ${w} hr (${a}%) is above precipitation ${w} hr (${b}%)`); }
     for (const [lo, hi] of [["x50","x35"],["x35","x25"],["x32","x40"]]) if (o[lo][i] != null && o[hi][i] != null && o[lo][i] > o[hi][i]) flag(lo, i, `${P[lo].l} more likely than ${P[hi].l}`);
   });
+  for (const f of OF.fits || []) if (Math.abs(f.fit - f.anchor) > 2.5) flag(f.k, f.i, `${P[f.k].title} ${f.anchor}% can't be met by the values you've set inside it (they give ${Math.round(f.fit)}%)`);
   return { list: out, bad };
 }
 
@@ -515,12 +606,11 @@ function renderLocator(){
 }
 const CHART_GROUPS = [
   ["Sky and temperature", ["sky","t","td","wbgt"]],
-  ["Precipitation", ["pp1","pp3","pp6"]],
-  ["Lightning", ["lt1","lt3","lt6"]],
+  ["Precipitation and lightning", ["pp","lt"]],
   ["Wind", ["w54","w200","dir"]],
   ["Exceedance probability", ["x18","x25","x35","x50","xhot","x40","x32","xvis"]],
 ];
-const chipName = k => ({ sky:"Sky", t:"Temp", td:"Dew pt", wbgt:"WBGT", pp1:"1 hr", pp3:"3 hr", pp6:"6 hr", lt1:"1 hr", lt3:"3 hr", lt6:"6 hr", w54:"54 ft", w200:"200 ft", dir:"Direction", x18:">18 kt", x25:">25 kt", x35:">35 kt", x50:">50 kt", xhot:`>${hotOf(site())}°F`, x40:"<40°F", x32:"<32°F", xvis:"Vis <3 mi" }[k]);
+const chipName = k => ({ sky:"Sky", t:"Temp", td:"Dew pt", wbgt:"WBGT", pp:"Precipitation", lt:"Lightning", w54:"54 ft", w200:"200 ft", dir:"Direction", x18:">18 kt", x25:">25 kt", x35:">35 kt", x50:">50 kt", xhot:`>${hotOf(site())}°F`, x40:"<40°F", x32:"<32°F", xvis:"Vis <3 mi" }[k]);
 function renderParams(){
   const e = edits[prefs.site] || {};
   $("params").innerHTML = CHART_GROUPS.map(([gl, ks]) => `<div class="pgroup"><span class="gl">${gl}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${keysOf(k).some(q => e[q] && Object.keys(e[q]).length) ? "edited" : ""}" data-p="${k}" aria-pressed="${k === prefs.param}">${chipName(k)}</button>`).join("")}</div></div>`).join("");
@@ -692,7 +782,9 @@ function writeCell(k, i, val, group){
   if (OF.o[k][i] === undefined && p.kind === "prob") return;
   const g = OF.g[k] ? OF.g[k][i] : null;
   if (val === null) return setEdit(prefs.site, k, r.key, undefined, group);
-  const same = p.kind === "sky" ? skyCat(val) === skyCat(g) && Math.abs(val - (g ?? -99)) < 1 : val === g;
+  /* values that follow other cells (linked probabilities, peaks, WBGT, exceedances) keep any typed value as an edit */
+  const linked = /^(pp|lt)\d$|^g54$|^g200$|^wbgt$|^x/.test(k);
+  const same = !linked && (p.kind === "sky" ? skyCat(val) === skyCat(g) && Math.abs(val - (g ?? -99)) < 1 : val === g);
   setEdit(prefs.site, k, r.key, same ? undefined : val, group);
 }
 function commit(group){
@@ -783,32 +875,42 @@ function chartDomain(p, pts, A, srcv){
 }
 function srcColor(id){ const s = ALL_SOURCES.find(x => x.id === id); return s ? FAMILIES[s.fam].color : "var(--ink-3)"; }
 const VIEWS = {
+  pp:   { title:"Precipitation probability", keys:["pp1","pp3","pp6"], names:["1 hr","3 hr","6 hr"], prob:true },
+  lt:   { title:"Lightning probability",     keys:["lt1","lt3","lt6"], names:["1 hr","3 hr","6 hr"], prob:true },
   w54:  { title:"54 ft wind",  keys:["s54","g54"],   names:["Sustained","Peak"] },
   w200: { title:"200 ft wind", keys:["s200","g200"], names:["Sustained","Peak"] },
 };
-const viewOf = k => k === "s54" || k === "g54" ? "w54" : k === "s200" || k === "g200" ? "w200" : k;
+const viewOf = k => k === "s54" || k === "g54" ? "w54" : k === "s200" || k === "g200" ? "w200" : /^pp\d$/.test(k) ? "pp" : /^lt\d$/.test(k) ? "lt" : k;
+const isProbView = v => !!(VIEWS[v] && VIEWS[v].prob);
+/* the cell that sets a row's own value (1 hr on hourly rows, 3 hr on 3 h blocks, 6 hr on 6 h blocks) */
+const isBaseCell = (k, i) => { const p = P[k]; if (!p.win) return true; const len = S.rows[i].len; return p.win === (len === 1 ? 1 : len <= 3 ? 3 : 6); };
+const drawKey = ks => prefs.draw === "s" ? ks[0] : prefs.draw === "p" ? ks[1] : ks.includes(prefs.draw) ? prefs.draw : null;
 const keysOf = v => VIEWS[v] ? VIEWS[v].keys : [v];
 const seriesName = k => { const v = VIEWS[viewOf(k)]; return v ? v.names[v.keys.indexOf(k)] : P[k].title; };
 /* which series a drag edits in a combined view: nearest line, or the locked one */
 function pickKey(i, py){
   const ks = keysOf(prefs.param); if (ks.length === 1) return ks[0];
-  if (prefs.draw === "s") return ks[0]; if (prefs.draw === "p") return ks[1];
+  const dk = drawKey(ks); if (dk) return dk;
   let best = ks[0], d = Infinity;
-  for (const k of ks){ const v = OF.o[k][i]; if (v == null) continue; const dd = Math.abs(CH.y(Math.max(CH.y0, Math.min(CH.y1, v))) - py); if (dd < d){ d = dd; best = k; } }
+  for (const k of ks){ const v = OF.o[k][ownerIdx(k, i)]; if (v == null) continue; const dd = Math.abs(CH.y(Math.max(CH.y0, Math.min(CH.y1, v))) - py); if (dd < d){ d = dd; best = k; } }
   return best;
 }
 function renderChart(){
   const svg = $("chart"), view = prefs.param, ks = keysOf(view), combo = ks.length > 1, p = P[ks[0]] || P.t, s = site();
   $("ptitle").textContent = combo ? VIEWS[view].title : p.k === "xhot" ? `Temperature above ${hotOf(s)}°F` : p.title;
   $("punit").textContent = p.kind === "prob" ? "percent chance" : p.kind === "sky" ? "percent cloud cover (categories at right)" : p.kind === "dir" ? "degrees true, toward the points" : p.unit || "";
-  $("drawWrap").hidden = !(combo && prefs.cmode === "draw"); $("lgPeak").hidden = !combo;
+  $("drawWrap").hidden = !(combo && prefs.cmode === "draw");
   $("modeSel").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === prefs.cmode));
   $("phint").textContent = prefs.cmode === "draw"
     ? "Drag across the graph to draw the forecast. Alt-drag erases back to guidance. Hold Ctrl to see the guidance values."
     : "Click a point to select it, or drag across the graph to select several. Then drag a selected point, or use the arrow keys, to move them. Shift-click adds points. Hold Ctrl to see the guidance values.";
   updateSelInfo();
-  $("lgOff").textContent = combo ? "Sustained" : "Official";
-  $("drawSel").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.d === (prefs.draw || "n")));
+  const pview = isProbView(view);
+  $("legend").innerHTML = pview
+    ? `<span><i class="bar"></i>1 hr</span><span><i class="off"></i>3 hr</span><span><i class="off pk"></i>6 hr</span><span><i class="gd"></i>Guidance</span>`
+    : `<span><i class="off"></i>${combo ? "Sustained" : "Official"}</span>${combo ? `<span><i class="off pk"></i>Peak</span>` : ""}<span><i class="gd"></i>Guidance blend</span><span><i class="src"></i>Sources</span><span><i class="bd"></i>Member 10th to 90th</span>`;
+  if (combo){ const dk = drawKey(ks) || "n"; $("drawSel").innerHTML = `<button type="button" data-d="n" aria-pressed="${dk === "n"}" title="Draw whichever line you start nearest">Nearest</button>` + ks.map((k, j) => `<button type="button" data-d="${k}" aria-pressed="${dk === k}">${VIEWS[view].names[j]}</button>`).join(""); }
+  if (pview && prefs.cmode !== "draw") $("phint").textContent = (prefs.linkWin !== false ? "1, 3 and 6 hr are linked: change any of them and the others follow. " : "") + "Click a bar or step to select it, or drag across the graph to select the hourly or block values. Drag or use the arrow keys to move them. Hold Ctrl to see the guidance values.";
   const W = svg.clientWidth || 900, Hh = CH.h; CH.w = W;
   const A = S.agg[s.id] || { val:{}, srcv:{}, band:{} };
   const rows = S.rows, n = rows.length, { o, g } = OF;
@@ -840,10 +942,27 @@ function renderChart(){
   const step = p.kind === "dir" ? 90 : p.kind === "prob" || p.kind === "sky" ? 20 : niceStep((y1 - y0)/5);
   for (let v = Math.ceil(y0/step)*step; v <= y1 + 1e-9; v += step){ const yy = y(v); h += `<line class="grid" x1="${L}" x2="${R}" y1="${yy}" y2="${yy}"/><text class="axis" x="${L - 7}" y="${yy + 4}" text-anchor="end">${p.kind === "dir" ? compass(v) : v}</text>`; }
   rows.forEach((r, i) => { const hh = z ? new Date(r.a).getUTCHours() : r.lh; if (hh % 6 === 0 && (r.len < 6 || hh % 12 === 0)) h += `<text class="axis" x="${x(i)}" y="${B + 16}" text-anchor="middle">${pad2(hh)}</text>`; });
-  const thr = combo ? [18, 25, 35, 50] : p.thr ? p.thr.slice() : p.k === "t" ? [hotOf(s), 40, 32] : p.k === "wbgt" ? [82, 85, 88, 90] : [];
+  const thr = pview ? [] : combo ? [18, 25, 35, 50] : p.thr ? p.thr.slice() : p.k === "t" ? [hotOf(s), 40, 32] : p.k === "wbgt" ? [82, 85, 88, 90] : [];
   thr.filter(v => v > y0 && v < y1).forEach(v => { h += `<line class="thr" x1="${L}" x2="${R}" y1="${y(v)}" y2="${y(v)}"/><text class="thrlab" x="${R - 3}" y="${y(v) - 4}" text-anchor="end">${v}${p.unit === "kt" ? " kt" : "°"}</text>`; });
   if (p.kind === "sky") SKY.forEach(([c, a, b]) => { const yy = y(Math.min(100, (a + Math.min(b, 100))/2)); h += `<text class="thrlab" style="fill:var(--ink-3)" x="${R - 3}" y="${yy + 4}" text-anchor="end">${c}</text>`; if (a > 0) h += `<line class="grid" x1="${L}" x2="${R}" y1="${y(a)}" y2="${y(a)}" style="stroke-dasharray:2 3"/>`; });
   const line = (arr, cls, style, xf) => { xf = xf || x; let d = "", pen = false; arr.forEach((v, i) => { if (v === undefined && na[i]) return; if (v == null || !isFinite(v)){ pen = false; return; } d += (pen ? "L" : "M") + xf(i).toFixed(1) + "," + y(Math.max(y0, Math.min(y1, v))).toFixed(1); pen = true; }); return d ? `<path class="${cls}" d="${d}" style="${style || ""}"/>` : ""; };
+  if (pview){
+    /* 1 hr as bars, 3 and 6 hr as steps over the periods they cover */
+    const pad = Math.min(3, colW*0.18);
+    ks.forEach((k, j) => {
+      ptsOf(k).forEach(q => {
+        const sp = spanOf(k, q.i), xa = L + q.i*colW, xb = L + (q.i + sp)*colW, id = k + "|" + q.i, sel = CH.sel.has(id);
+        if (q.g != null && q.g !== undefined) h += `<line class="gstep" x1="${(xa + pad).toFixed(1)}" x2="${(xb - pad).toFixed(1)}" y1="${y(q.g)}" y2="${y(q.g)}"/>`;
+        if (q.v == null) return;
+        const cy = y(Math.max(y0, Math.min(y1, q.v))), cx = (xa + xb)/2;
+        if (j === 0) h += `<rect class="pbar ${q.ed ? "e" : ""} ${sel ? "s" : ""}" x="${(xa + pad).toFixed(1)}" y="${cy.toFixed(1)}" width="${Math.max(1, xb - xa - 2*pad).toFixed(1)}" height="${Math.max(0, B - cy).toFixed(1)}"/>`;
+        else h += `<line class="pstep s${j} ${sel ? "s" : ""}" x1="${(xa + pad).toFixed(1)}" x2="${(xb - pad).toFixed(1)}" y1="${cy}" y2="${cy}"/>`;
+        CH.hits.push({ k, i:q.i, x:cx, y:cy });
+        if (sel) h += `<circle class="selring" cx="${cx}" cy="${cy}" r="7.5"/>`;
+        h += `<circle class="h ${j === 2 ? "pk" : ""} ${j === 0 ? "b" : ""} ${q.ed ? "e" : ""} ${sel ? "s" : ""}" cx="${cx}" cy="${cy}" r="${sel ? 4.6 : j === 0 ? 2.4 : 3.2}"/>`;
+      });
+    });
+  } else {
   ks.forEach((k, j) => {
     const bnd = A.band[k] || [];
     if (p.kind !== "dir" && bnd.some(b => b)){
@@ -874,6 +993,7 @@ function renderChart(){
     });
     if (combo){ const last = ptsOf(k).filter(q => q.v != null).pop(); if (last) h += `<text class="serlab ${j ? "pk" : ""}" x="${x(last.i) + 6}" y="${y(last.v) + 4}">${j ? "Pk" : "Sus"}</text>`; }
   });
+  }
   if (S.hoverRow != null) h += `<line class="cursor" x1="${x(S.hoverRow)}" x2="${x(S.hoverRow)}" y1="${T}" y2="${B}"/>`;
   if (CH.drag && CH.drag.kind === "marq"){ const d = CH.drag; h += `<rect class="marq" x="${Math.min(d.x0, d.x1)}" y="${Math.min(d.y0, d.y1)}" width="${Math.abs(d.x1 - d.x0)}" height="${Math.abs(d.y1 - d.y0)}"/>`; }
   if (!allPts.some(q => q.v != null)) h += `<text class="axis" x="${(L + R)/2}" y="${(T + B)/2}" text-anchor="middle" style="font-size:14px">${S.loading ? "Loading guidance" : "No guidance for this parameter. Drag on the graph to draw a forecast."}</text>`;
@@ -926,10 +1046,11 @@ function applyToPoints(f, list){
 }
 function scopePoints(){
   if (CH.sel.size) return selList();
-  const out = []; for (const k of toolKeysG()) S.rows.forEach((r, i) => { if (OF.o[k][i] != null) out.push({ k, i }); });
+  const out = [], pv = isProbView(prefs.param), locked = toolKeysG().length === 1 && keysOf(prefs.param).length > 1;
+  for (const k of toolKeysG()) S.rows.forEach((r, i) => { if (OF.o[k][i] != null && (!pv || locked || isBaseCell(k, i))) out.push({ k, i }); });
   return out;
 }
-const toolKeysG = () => { const ks = keysOf(prefs.param); return ks.length > 1 && prefs.cmode === "draw" && prefs.draw === "s" ? [ks[0]] : ks.length > 1 && prefs.cmode === "draw" && prefs.draw === "p" ? [ks[1]] : ks; };
+const toolKeysG = () => { const ks = keysOf(prefs.param); const dk = ks.length > 1 && prefs.cmode === "draw" ? drawKey(ks) : null; return dk ? [dk] : ks; };
 const clampV = (k, v) => { const p = P[k], st = p.step || 1; v = Math.round(v/st)*st; if (p.kind === "dir") return ((v % 360) + 360) % 360; if (p.lo != null) v = Math.max(p.lo, v); if (p.hi != null) v = Math.min(p.hi, v); return v; };
 function nudgeSel(d){ const n = applyToPoints((v, k) => clampV(k, v + d*(P[k].step || 1)), scopePoints()); if (!n) toast("Nothing to move"); }
 
@@ -980,7 +1101,8 @@ function bindChart(){
       const sel = new Set(d.base);
       /* a thin drag selects every point in those columns; a box selects only the points inside it */
       const tall = y1 - y0 < 6;
-      for (const h of CH.hits) if (h.x >= x0 && h.x <= x1 && (tall || (h.y >= y0 && h.y <= y1))) sel.add(h.k + "|" + h.i);
+      const pv = isProbView(prefs.param);
+      for (const h of CH.hits) if (h.x >= x0 && h.x <= x1 && (tall ? (!pv || isBaseCell(h.k, h.i)) : (h.y >= y0 && h.y <= y1))) sel.add(h.k + "|" + h.i);
       CH.sel = sel; renderChart();
     }
     else {
@@ -1030,16 +1152,16 @@ function hover(i, ev){
   }
   if (i == null || !ev || CH.drag || !(ev.ctrlKey || ev.metaKey)){ tip.style.display = "none"; return; }
   const ks = keysOf(prefs.param), combo = ks.length > 1, p = P[ks[0]], s = site(), A = S.agg[s.id] || { srcv:{} };
-  i = ownerIdx(ks[0], i); const r = S.rows[i];
+  const r = S.rows[i];
   const srcOf = k => k.startsWith("x") ? OF.xsrc[k] : (A.srcv[k] || {});
   const f = v => v == null || v === undefined ? "–" : p.kind === "sky" ? `${Math.round(v)}% ${skyCat(v)}` : p.kind === "dir" ? `${Math.round(v)}° ${compass(v)}` : p.kind === "prob" ? `${Math.round(v)}%` : `${Math.round(v)}${p.unit === "°F" ? "°" : ""}`;
-  const fv = getter => ks.map(k => f(getter(k))).join(" / ");
-  const Ld = dayLabel(r.a, zulu()), sp = spanMap(ks[0])[i], end = S.rows[i + (sp.s || 1) - 1].b;
+  const fv = getter => ks.map(k => f(getter(k, ownerIdx(k, i)))).join(" / ");
+  const Ld = dayLabel(r.a, zulu()), oi = ownerIdx(ks[ks.length - 1], i), sp = spanMap(ks[ks.length - 1])[oi], end = S.rows[oi + (sp.s || 1) - 1].b;
   let h = `<div><b>${Ld.wd.slice(0,3)} ${Ld.dt}, ${hhmm(r.a, zulu())}${sp.s > 1 || r.len > 1 ? "–" + hhmm(end, zulu()) : ""}${zulu() ? "Z" : ""}</b></div>`;
-  if (combo) h += `<div class="r mut"><span></span><span>sust / peak</span></div>`;
-  h += `<div class="r"><span>Official</span><span>${fv(k => OF.o[k][i])}</span></div><div class="r mut"><span>Guidance</span><span>${fv(k => OF.g[k] ? OF.g[k][i] : null)}</span></div>`;
-  const ids = [...new Set(ks.flatMap(k => Object.keys(srcOf(k))))].filter(id => ks.some(k => (srcOf(k)[id] || [])[i] != null)).sort((a, b) => ALL_SOURCES.findIndex(x => x.id === a) - ALL_SOURCES.findIndex(x => x.id === b));
-  ids.slice(0, 16).forEach(id => { const d = ALL_SOURCES.find(x => x.id === id); h += `<div class="r mut"><span>${d ? d.name : id}</span><span>${fv(k => (srcOf(k)[id] || [])[i])}</span></div>`; });
+  if (combo) h += `<div class="r mut"><span></span><span>${VIEWS[prefs.param].names.map(x => x.replace("Sustained", "sust").replace("Peak", "peak")).join(" / ")}</span></div>`;
+  h += `<div class="r"><span>Official</span><span>${fv((k, j) => OF.o[k][j])}</span></div><div class="r mut"><span>Guidance</span><span>${fv((k, j) => OF.g[k] ? OF.g[k][j] : null)}</span></div>`;
+  const ids = [...new Set(ks.flatMap(k => Object.keys(srcOf(k))))].filter(id => ks.some(k => (srcOf(k)[id] || [])[ownerIdx(k, i)] != null)).sort((a, b) => ALL_SOURCES.findIndex(x => x.id === a) - ALL_SOURCES.findIndex(x => x.id === b));
+  ids.slice(0, 16).forEach(id => { const d = ALL_SOURCES.find(x => x.id === id); h += `<div class="r mut"><span>${d ? d.name : id}</span><span>${fv((k, j) => (srcOf(k)[id] || [])[j])}</span></div>`; });
   tip.innerHTML = h; tip.style.display = "block";
   const wrap = $("chartwrap").getBoundingClientRect(); let lx = ev.clientX - wrap.left + 16; if (lx + 210 > wrap.width) lx = ev.clientX - wrap.left - 226;
   tip.style.left = lx + "px"; tip.style.top = Math.max(0, Math.min(wrap.height - tip.offsetHeight, ev.clientY - wrap.top - 20)) + "px";
@@ -1554,6 +1676,7 @@ function bind(){
   $("refresh").onclick = () => { if (S.loading) return; loadAll(); };
   $("initials").value = prefs.initials || ""; $("initials").oninput = e => { prefs.initials = e.target.value.toUpperCase(); savePrefs(); };
   $("linkProbs").checked = prefs.link; $("linkProbs").onchange = e => { prefs.link = e.target.checked; savePrefs(); renderAll(); };
+  $("linkWin").checked = prefs.linkWin !== false; $("linkWin").onchange = e => { prefs.linkWin = e.target.checked; savePrefs(); renderAll(); };
   $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
   $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
   $("srcgrid").addEventListener("change", ev => {
