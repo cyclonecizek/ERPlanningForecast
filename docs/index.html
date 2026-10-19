@@ -320,7 +320,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
     <div class="srcgrid" id="srcgrid"></div>
     <div class="srcfoot">
       <label><input type="checkbox" id="linkProbs" checked> Shift exceedance probabilities with my wind and temperature edits</label>
-      <label><input type="checkbox" id="clampProbs" checked> Keep guidance probabilities between 1% and 99%</label>
+      <label><input type="checkbox" id="clampProbs" checked> Cap guidance probabilities at 99% (1% rounds down to 0)</label>
       <span class="limits">Hot threshold (°F) <input type="number" id="hotThr" step="1"></span>
     </div>
   </details>
@@ -328,7 +328,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
 
   <div class="foot">
-    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Probabilities of 0 or 1% show as a dash. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
+    <p>Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Guidance probabilities are whole percents, with 1% rounded down to 0. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
     <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
   </div>
 </main>
@@ -386,9 +386,11 @@ function editCount(sid){ let n = 0; const e = edits[sid] || {}; for (const k in 
 
 /* ---------- guidance + official values ---------- */
 const rnd = v => v == null ? null : Math.round(v);
+/* guidance probabilities: whole percent, with 1% rounded down to 0 */
+const probRound = v => { if (v == null) return null; const r = Math.round(v); return r <= 1 ? 0 : r; };
 function guidanceFor(sid){
   const A = S.agg[sid]; if (!A) return null;
-  const clampP = v => v == null ? v : prefs.clamp ? Math.max(1, Math.min(99, v)) : Math.max(0, Math.min(100, v));
+  const clampP = v => v == null ? v : Math.max(0, Math.min(prefs.clamp ? 99 : 100, v));
   const g = {};
   for (const p of PARAMS){
     if (p.k.startsWith("x")) continue;
@@ -396,7 +398,7 @@ function guidanceFor(sid){
     g[p.k] = S.rows.map((r, i) => {
       const v = arr[i];
       if (p.win && !probCell(S.rows[i], p.win)) return undefined;
-      if (p.kind === "prob") return v == null ? null : rnd(clampP(v));
+      if (p.kind === "prob") return v == null ? null : probRound(clampP(v));
       if (p.kind === "dir") return v == null ? null : (Math.round(v/10)*10) % 360;
       if (p.kind === "sev") return v || "-";
       return rnd(v);
@@ -436,13 +438,13 @@ function officialFor(sid){
         else if (p.ex === "gmax"){ const a = Math.max(o.g54[i] ?? -1, o.g200[i] ?? -1), b = Math.max(g.g54[i] ?? -1, g.g200[i] ?? -1); if (a >= 0 && b >= 0) delta = a - b; }
         else if (p.ex === "tmax" || p.ex === "tmin"){ if (o.t[i] != null && g.t[i] != null) delta = o.t[i] - g.t[i]; }
       }
-      const clampP = v => v == null ? v : prefs.clamp ? Math.max(1, Math.min(99, v)) : v;
+      const clampP = v => v == null ? v : Math.max(0, Math.min(prefs.clamp ? 99 : 100, v));
       const base = G && G.mem ? exceed(G, p.k, i, 0, hotOf(s)) : { v:null, per:{} };
       const shifted = delta && G && G.mem ? exceed(G, p.k, i, delta, hotOf(s)) : base;
-      gx[p.k][i] = rnd(clampP(base.v));
+      gx[p.k][i] = probRound(clampP(base.v));
       for (const id in base.per) (src[p.k][id] = src[p.k][id] || [])[i] = base.per[id];
       const x = ed(p.k, r);
-      o[p.k][i] = x !== undefined ? x : rnd(clampP(shifted.v));
+      o[p.k][i] = x !== undefined ? x : probRound(clampP(shifted.v));
     });
   }
   return { o, g: Object.assign(g, gx), xsrc: src };
@@ -467,11 +469,9 @@ function qcIssues(sid, OF){
 }
 
 /* ---------- formatting ---------- */
-const LOW_PROB = 2;   /* probabilities below this (%) display as a dash */
 function fmt(p, v){
   if (v === undefined) return "";
   if (v == null) return "";
-  if (p.kind === "prob" && v < LOW_PROB) return "–";
   if (p.kind === "sky") return skyCat(v);
   if (p.kind === "dir") return compass(v);
   if (p.kind === "sev") return v === "-" ? "-" : SEV_NAME[v] || v;
@@ -479,7 +479,7 @@ function fmt(p, v){
 }
 function tint(p, v){
   if (v == null || v === undefined) return "";
-  if (p.kind === "prob"){ if (v < LOW_PROB) return ""; const a = Math.min(0.62, Math.max(0, v)/100*0.62); return a > 0.02 ? `background:rgba(var(--p),${a.toFixed(3)})` : ""; }
+  if (p.kind === "prob"){ const a = Math.min(0.62, Math.max(0, v)/100*0.62); return a > 0.02 ? `background:rgba(var(--p),${a.toFixed(3)})` : ""; }
   if (p.k === "t" || p.k === "wbgt"){ if (v >= 85) return `background:rgba(var(--hot),${Math.min(0.32,(v-84)/40).toFixed(3)})`; if (v <= 50) return `background:rgba(var(--cold),${Math.min(0.3,(51-v)/40).toFixed(3)})`; return ""; }
   if (["s54","g54","s200","g200"].includes(p.k)){ const a = Math.max(0, Math.min(0.4, (v - 12)/45)); return a > 0.02 ? `background:rgba(var(--hot),${a.toFixed(3)})` : ""; }
   if (p.kind === "sky"){ const a = Math.max(0, v)/100*0.16; return a > 0.02 ? `background:rgba(120,135,150,${a.toFixed(3)})` : ""; }
@@ -615,7 +615,7 @@ function renderTable(){
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i];
       const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
-      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${!na && p.kind === "prob" && v != null && v < LOW_PROB ? "lo" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
+      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
       h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : fmt(p, v)}</td>`;
     }
     h += `</tr>`;
@@ -646,7 +646,7 @@ function renderTableAcross(){
       const sp = spm[i]; if (sp.cov) return;
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i], cur = S.cur && S.cur.i === i && S.cur.k === p.k;
-      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${!na && p.kind === "prob" && v != null && v < LOW_PROB ? "lo" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
+      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
       h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
     });
     h += `</tr>`;
@@ -1158,7 +1158,7 @@ function siteSheet(s, OFs, issued, by){
       if (sp.s > 1){ const col = colName(XCOLS.indexOf(k)); merges.push(`${col}${rowNo}:${col}${rowNo + sp.s - 1}`); }
       if (v === undefined){ row.push({ v:"-", s: st(5) }); continue; }
       if (v === null){ row.push({ v:"", s: st(5) }); continue; }
-      if (p.kind === "prob") row.push(v < LOW_PROB ? { v:"-", s: st(5) } : { v: Math.round(v)/100, s: st(7) });
+      if (p.kind === "prob") row.push({ v: Math.round(v)/100, s: st(7) });
       else if (p.kind === "sky") row.push({ v: skyCat(v), s: st(5) });
       else if (p.kind === "dir") row.push({ v: compass(v), s: st(5) });
       else if (p.kind === "sev") row.push({ v: v === "-" ? "-" : SEV_NAME[v], s: st(5) });
@@ -1231,7 +1231,7 @@ function doPublish(){
 const MIX = (rgb, a) => rgb.map(c => Math.round(255 - (255 - c)*a));
 function tintRGB(p, v){
   if (v == null || v === undefined) return null;
-  if (p.kind === "prob"){ if (v < LOW_PROB) return null; const a = Math.min(0.62, v/100*0.62); return a > 0.02 ? MIX([11,110,121], a) : null; }
+  if (p.kind === "prob"){ const a = Math.min(0.62, v/100*0.62); return a > 0.02 ? MIX([11,110,121], a) : null; }
   if (p.k === "t" || p.k === "wbgt"){ if (v >= 85) return MIX([178,58,46], Math.min(0.32, (v - 84)/40)); if (v <= 50) return MIX([52,102,170], Math.min(0.3, (51 - v)/40)); return null; }
   if (["s54","g54","s200","g200"].includes(p.k)){ const a = Math.max(0, Math.min(0.4, (v - 12)/45)); return a > 0.02 ? MIX([178,58,46], a) : null; }
   if (p.kind === "sky"){ const a = Math.max(0, v)/100*0.16; return a > 0.02 ? MIX([120,135,150], a) : null; }
@@ -1270,7 +1270,7 @@ function reportModel(list, issued, by){
             let n = 1; while (n < len && set.has(i + n)) n++;
             const v = o[p.k][own];
             const txt = v === undefined ? "–" : p.kind === "sev" ? (v === "-" ? "-" : v) : fmt(p, v);
-            cells.push({ text: txt, span:n, fill: v === undefined ? null : tintRGB(p, v), muted: v === undefined || (p.kind === "prob" && v != null && v < LOW_PROB), day: times[ci].day });
+            cells.push({ text: txt, span:n, fill: v === undefined ? null : tintRGB(p, v), muted: v === undefined, day: times[ci].day });
           });
           g.rows.push({ label: p.kind === "sev" ? "SPC category" : colLabel(p, s), sub: p.s, cells });
         }
@@ -1369,7 +1369,7 @@ function pdfReport(models){
       line(M, top, xcol(ncol), top, 0.6, 0.6); line(M, top, M, y, 0.6, 0.6); line(xcol(ncol), top, xcol(ncol), y, 0.6, 0.6);
       line(M + gw, top + dh + th, M + gw, y, 0.6, 0.6); line(x0, top, x0, y, 0.45, 1);
       ci = 0; pg.dayHdr.forEach((d, j) => { if (j) line(xcol(ci), top, xcol(ci), y, 0.45, 1.2); ci += d.n; });
-      text("Probabilities of 0 or 1% show as a dash. 3 hr and 6 hr probabilities are merged across the hours they cover; in longer blocks the 1 hr and 3 hr cells show the highest period inside the block.", M, Math.min(Hp - M, y + 14), 6.5, { color:[125,139,151] });
+      text("3 hr and 6 hr probabilities are merged across the hours they cover; in longer blocks the 1 hr and 3 hr cells show the highest period inside the block.", M, Math.min(Hp - M, y + 14), 6.5, { color:[125,139,151] });
       pages.push(cs.join("\n"));
     });
   }
