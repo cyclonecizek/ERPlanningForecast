@@ -71,6 +71,8 @@ a{ color:var(--accent); }
 
 main{ padding:18px 28px 40px; display:grid; gap:18px; }
 main > *{ min-width:0; }
+.tbrand{ display:flex; gap:14px; align-items:center; }
+.unitlogo{ height:60px; width:auto; flex:none; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
 .pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
 .pagenav{ align-items:center; }
 .pagenav .navsp{ flex:1; }
@@ -165,10 +167,10 @@ document.addEventListener("DOMContentLoaded", function(){
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="./#brief">Leadership brief</a><a href="taf.html" aria-current="page">KCOF TAF</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
-  <div>
+  <div class="tbrand"><img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()"><div>
     <h1>TAF generator</h1>
     <div class="where"><b>Patrick SFB (KCOF)</b>, Air Force format (AFMAN 15-129), 30-hour valid period</div>
-  </div>
+  </div></div>
   <div class="actions">
     <button class="btn" id="regen">Regenerate from guidance</button>
     <button class="btn" id="download">Download .txt</button>
