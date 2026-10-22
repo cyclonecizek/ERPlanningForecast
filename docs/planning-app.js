@@ -1640,6 +1640,12 @@ function briefPDF(logo){
   return pdfAssemble([cs.join("\n")], logo, W, Hp);
 }
 const fitSize = (s, maxW, size) => { let z = size; while (z > 5.5 && textW(s, z, false) > maxW) z -= 0.25; return z; };
+/* open the brief now, or as soon as guidance has loaded */
+function wantBrief(){
+  if (S.loading || !Object.keys(S.agg).length){ S.wantBrief = true; toast("Opening the leadership brief when guidance finishes loading"); return; }
+  if (location.hash === "#brief") history.replaceState(null, "", location.pathname + location.search);
+  openBrief();
+}
 function openBrief(){
   if (!S.rows || !Object.keys(S.agg).length){ toast("Wait for guidance to load"); return; }
   renderBrief(BRIEF.bottom == null);
@@ -1712,6 +1718,7 @@ async function loadAll(){
   tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
   await Promise.allSettled(tasks);
   S.loading = false; S.fetchedAt = Date.now(); scheduleRender();
+  if (!EXPO && (S.wantBrief || location.hash === "#brief")){ S.wantBrief = false; setTimeout(wantBrief, 400); }
 }
 
 /* ---------- demo data (only with ?demo=1) ---------- */
@@ -1789,6 +1796,12 @@ async function demoSPC(){ const t = Date.now(); const d = new Date(t); const v =
    ============================================================ */
 function bind(){
   document.querySelectorAll(".pagenav a").forEach(a => { if (a.dataset.page === PAGE) a.setAttribute("aria-current", "page"); });
+  if (!EXPO){
+    const nb = document.querySelector('.pagenav a[data-page="brief"]');
+    if (nb) nb.addEventListener("click", ev => { ev.preventDefault(); wantBrief(); });
+    window.addEventListener("hashchange", () => { if (location.hash === "#brief") wantBrief(); });
+  }
+  window.addEventListener("themechange", () => { CH.layout = null; renderChart(); });
   $("sites").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; clearSel(); renderAll(); renderExpSetup(); });
   $("locator").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); renderAll(); });
   $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; if (prefs.param !== b.dataset.p) clearSel(); prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderMatrix(); });

@@ -72,6 +72,10 @@ a{ color:var(--accent); }
 main{ padding:18px 28px 40px; display:grid; gap:18px; }
 main > *{ min-width:0; }
 .pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
+.pagenav{ align-items:center; }
+.pagenav .navsp{ flex:1; }
+.pagenav .theme{ margin:0 0 4px; }
+.pagenav .theme button{ padding:4px 10px; font-size:12.5px; }
 .pagenav a{ padding:8px 16px 9px; font:600 15px var(--cond); letter-spacing:.2px; color:var(--ink-2); text-decoration:none; border-bottom:3px solid transparent; }
 .pagenav a:hover{ color:var(--ink); }
 .pagenav a[aria-current="page"]{ color:var(--accent); border-bottom-color:var(--accent); }
@@ -142,9 +146,24 @@ details.cfg > summary .sum{ font-weight:400; color:var(--ink-2); font-size:13.5p
 }
 @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
 </style>
+<script>
+/* color theme shared by all pages: auto (follow the system), light or dark */
+(function(){ var t; try { t = localStorage.getItem("erwx:theme"); } catch (e) {} if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); })();
+document.addEventListener("DOMContentLoaded", function(){
+  var cur = function(){ return document.documentElement.getAttribute("data-theme") || "auto"; };
+  var mark = function(){ document.querySelectorAll(".theme [data-th]").forEach(function(b){ b.setAttribute("aria-pressed", b.getAttribute("data-th") === cur()); }); };
+  document.querySelectorAll(".theme [data-th]").forEach(function(b){ b.addEventListener("click", function(){
+    var t = b.getAttribute("data-th");
+    if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t);
+    try { localStorage.setItem("erwx:theme", t); } catch (e) {}
+    mark(); window.dispatchEvent(new Event("themechange"));
+  }); });
+  mark();
+});
+</script>
 </head>
 <body>
-<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="taf.html" aria-current="page">KCOF TAF</a></nav>
+<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="./#brief">Leadership brief</a><a href="taf.html" aria-current="page">KCOF TAF</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
   <div>
     <h1>TAF generator</h1>
