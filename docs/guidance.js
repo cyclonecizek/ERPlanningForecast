@@ -14,6 +14,17 @@ const SITES = [
   { id:"patrick",    name:"Patrick SFB",     point:"KCOF",   stn:"KCOF", lat:28.2349, lon:-80.6101, hot:90 },
 ];
 const STATIONS = [...new Set(SITES.map(s => s.stn))];
+/* MOS stations for whatever points the page is using (the exposure page swaps SITES) */
+const stationsNow = () => [...new Set(SITES.map(s => s.stn).filter(Boolean))];
+/* heights (ft) that get sustained and peak winds; the exposure page sets its own */
+const HEIGHTS = [54, 200];
+const hkeys = () => HEIGHTS.flatMap(ft => ["s" + ft, "g" + ft]);
+/* points in hires.json (pipeline/planning_hires.py); other points use the nearest within 15 km */
+const PIPE_POINTS = {
+  "ksc-inland":[28.6150,-80.6945], "ksc-pads":[28.6272,-80.6208], "cape-inland":[28.4686,-80.5667], "cape-pad37":[28.5314,-80.5650], "patrick":[28.2349,-80.6101],
+  "lc39a":[28.6083,-80.6041], "slc40":[28.5620,-80.5772], "slc41":[28.5833,-80.5830], "lc36":[28.4710,-80.5378],
+};
+const kmBetween = (a, b, c, d) => { const R = 6371, x = (d - b)*Math.PI/180*Math.cos((a + c)/2*Math.PI/180), y = (c - a)*Math.PI/180; return R*Math.hypot(x, y); };
 
 const FAMILIES = {
   hires: { label:"High resolution", color:"var(--hires)" },
@@ -75,17 +86,17 @@ const PARAMS = [
   { k:"lt3",  g:"Lightning prob (%)", l:"3 hr", s:"", kind:"prob", win:3, ev:"tst", title:"Lightning, 3 hours" },
   { k:"lt6",  g:"Lightning prob (%)", l:"6 hr", s:"", kind:"prob", win:6, ev:"tst", title:"Lightning, 6 hours" },
   { k:"s54",  g:"Winds (kt)", l:"54 ft",  s:"sust", kind:"num", unit:"kt", step:1, lo:0, title:"54 ft sustained wind", thr:[18,25,35,50] },
-  { k:"g54",  g:"Winds (kt)", l:"54 ft",  s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:"54 ft peak wind", thr:[25,35,50] },
+  { k:"g54",  g:"Winds (kt)", l:"54 ft",  s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:"54 ft peak wind", thr:[25,35,50], peakOf:"s54" },
   { k:"s200", g:"Winds (kt)", l:"200 ft", s:"sust", kind:"num", unit:"kt", step:1, lo:0, title:"200 ft sustained wind", thr:[18,25,35,50] },
-  { k:"g200", g:"Winds (kt)", l:"200 ft", s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:"200 ft peak wind", thr:[25,35,50] },
+  { k:"g200", g:"Winds (kt)", l:"200 ft", s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:"200 ft peak wind", thr:[25,35,50], peakOf:"s200" },
   { k:"dir",  g:"Winds (kt)", l:"Dir",    s:"54 ft", kind:"dir", unit:"° true", step:10, lo:0, hi:360, title:"Wind direction" },
-  { k:"x18",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">18 kt", s:"sust", kind:"prob", ex:"smax", op:">", v:18, title:"Sustained wind over 18 kt" },
-  { k:"x25",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">25 kt", s:"peak", kind:"prob", ex:"gmax", op:">", v:25, title:"Peak wind over 25 kt" },
-  { k:"x35",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">35 kt", s:"peak", kind:"prob", ex:"gmax", op:">", v:35, title:"Peak wind over 35 kt" },
-  { k:"x50",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">50 kt", s:"peak", kind:"prob", ex:"gmax", op:">", v:50, title:"Peak wind over 50 kt" },
-  { k:"xhot", g:"Probability of exceeding, sfc to 200 ft (%)", l:">86°F",  s:"",     kind:"prob", ex:"tmax", op:">", v:"hot", title:"Temperature above hot threshold" },
-  { k:"x40",  g:"Probability of exceeding, sfc to 200 ft (%)", l:"<40°F",  s:"",     kind:"prob", ex:"tmin", op:"<", v:40, title:"Temperature below 40°F" },
-  { k:"x32",  g:"Probability of exceeding, sfc to 200 ft (%)", l:"<32°F",  s:"",     kind:"prob", ex:"tmin", op:"<", v:32, title:"Temperature below 32°F" },
+  { k:"x18",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">18 kt", s:"sust", kind:"prob", ex:"smax", dep:["s54","s200"], op:">", v:18, title:"Sustained wind over 18 kt" },
+  { k:"x25",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">25 kt", s:"peak", kind:"prob", ex:"gmax", dep:["g54","g200"], op:">", v:25, title:"Peak wind over 25 kt" },
+  { k:"x35",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">35 kt", s:"peak", kind:"prob", ex:"gmax", dep:["g54","g200"], op:">", v:35, title:"Peak wind over 35 kt" },
+  { k:"x50",  g:"Probability of exceeding, sfc to 200 ft (%)", l:">50 kt", s:"peak", kind:"prob", ex:"gmax", dep:["g54","g200"], op:">", v:50, title:"Peak wind over 50 kt" },
+  { k:"xhot", g:"Probability of exceeding, sfc to 200 ft (%)", l:">86°F",  s:"",     kind:"prob", ex:"tmax", dep:["t"], op:">", v:"hot", title:"Temperature above hot threshold" },
+  { k:"x40",  g:"Probability of exceeding, sfc to 200 ft (%)", l:"<40°F",  s:"",     kind:"prob", ex:"tmin", dep:["t"], op:"<", v:40, title:"Temperature below 40°F" },
+  { k:"x32",  g:"Probability of exceeding, sfc to 200 ft (%)", l:"<32°F",  s:"",     kind:"prob", ex:"tmin", dep:["t"], op:"<", v:32, title:"Temperature below 32°F" },
   { k:"xvis", g:"Probability of exceeding, sfc to 200 ft (%)", l:"Vis <3 mi", s:"", kind:"prob", ex:"vmin", op:"<", v:4828, title:"Visibility below 3 miles" },
   { k:"sev",  g:"Severe potential", l:"Damaging wind, hail, tornado", s:"", kind:"sev", title:"Severe thunderstorm potential" },
 ];
@@ -128,8 +139,18 @@ function buildRows(nowMs){
   while (t < t0 + 24 * H || lp(t).h % 3 !== 0){ rows.push({ a:t, b:t + H, len:1 }); t += H; }
   while (t < day6){ const b = Math.min(nextAligned(t, 3), day6); rows.push({ a:t, b, len:Math.round((b - t)/H) === 3 ? 3 : Math.round((b - t)/H) }); t = b; }
   while (t < day8){ const b = Math.min(nextAligned(t, 6), day8); rows.push({ a:t, b, len:Math.round((b - t)/H) }); t = b; }
+  return finishRows(rows);
+}
+function finishRows(rows){
   rows.forEach((r, i) => { r.i = i; r.key = r.a + "_" + r.len; r.blk = r.len === 1 ? 1 : r.len <= 3 ? 3 : 6; const mid = lp(r.a + (r.b - r.a)/2).h; r.daytime = r.len === 1 ? null : (mid >= 9 && mid <= 18); r.lh = lp(r.a).h; });
   return rows;
+}
+/* exposure forecasts: hourly for the first hourlyH hours (Infinity = all), then 3-hour blocks to the end */
+function buildRowsRange(startMs, endMs, hourlyH){
+  const rows = []; let t = Math.floor(startMs/H)*H; const hEnd = t + (isFinite(hourlyH) ? hourlyH : 1e6)*H;
+  while (t < endMs && (t < hEnd || lp(t).h % 3 !== 0)){ rows.push({ a:t, b:t + H, len:1 }); t += H; }
+  while (t < endMs){ const b = Math.min(nextAligned(t, 3), endMs); rows.push({ a:t, b, len:Math.max(1, Math.round((b - t)/H)) }); t = b; }
+  return finishRows(rows);
 }
 
 /* ---------- physics ---------- */
@@ -190,14 +211,18 @@ function deriveMember(m, n){
   ["t","td","sky","s10","d10","g10","s80","d80","vis","sw","pr","pp","cl","cm","ch","slp","cig","lcb"].forEach(k => { if (!m[k]) m[k] = z(); });
   ["t","td","sky","s10","g10","s80","vis","sw","cl","cm","ch","slp","cig","lcb"].forEach(k => fillGaps(m[k], m.gap || 3));
   m.d10 = fillDirGaps(m.d10, m.s10, m.gap || 3);
-  m.s54 = z(); m.g54 = z(); m.s200 = z(); m.g200 = z(); m.wbgt = z();
-  for (let i = 0; i < n; i++){
-    const s10 = m.s10[i]; if (s10 != null){
-      const gf = gustFactor(s10, m.g10[i]);
-      m.s54[i] = windAt(Z54, s10, m.s80[i]); m.s200[i] = windAt(Z200, s10, m.s80[i]);
-      m.g54[i] = peakAt(Z54, m.s54[i], gf); m.g200[i] = peakAt(Z200, m.s200[i], gf);
-    }
-    m.wbgt[i] = wbgtF(m.t[i], m.td[i], m.sw[i], s10);
+  m.wbgt = z();
+  for (let i = 0; i < n; i++) m.wbgt[i] = wbgtF(m.t[i], m.td[i], m.sw[i], m.s10[i]);
+  deriveHeights(m, n, true);
+  return m;
+}
+/* sustained and peak wind at every height in HEIGHTS (ft) */
+function deriveHeights(m, n, force){
+  for (const ft of HEIGHTS){
+    const sk = "s" + ft, gk = "g" + ft; if (!force && m[sk]) continue;
+    const zm = ft*0.3048, S = new Array(n).fill(null), G = new Array(n).fill(null);
+    for (let i = 0; i < n; i++){ const s10 = m.s10[i]; if (s10 == null) continue; S[i] = windAt(zm, s10, m.s80[i]); G[i] = peakAt(zm, S[i], gustFactor(s10, m.g10[i])); }
+    m[sk] = S; m[gk] = G;
   }
   return m;
 }
@@ -251,14 +276,14 @@ async function fetchMOS(src, TL){
   let js = null, from = "";
   try { js = await getJSON(`data/mos/${src.model}.json?ts=${Date.now()}`, 8000); from = "mirror"; } catch (e) { js = null; }
   if (!js || !rowsOf(js).length){
-    const st = STATIONS.map(s => "station=" + s).join("&");
+    const st = stationsNow().map(s => "station=" + s).join("&");
     js = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?${st}&model=${src.model}`, 30000); from = "IEM";
   }
   const rows = rowsOf(js);
   const byStn = {};
   for (const r of rows){ const k = String(pick(r, ["station"]) || "").toUpperCase(); (byStn[k] = byStn[k] || []).push(r); }
   const out = {};
-  for (const stn of STATIONS){
+  for (const stn of stationsNow()){
     const rs = byStn[stn] || byStn[stn.slice(1)] || [];
     if (!rs.length){ out[stn] = null; continue; }
     out[stn] = parseMOS(rs, src, TL); out[stn].from = from;
@@ -326,7 +351,9 @@ async function fetchPipeline(TL){
   for (const src of js.sources || []){
     const per = {};
     for (const s of SITES){
-      const st = (src.sites || {})[s.id]; if (!st) continue;
+      let st = (src.sites || {})[s.id];
+      if (!st){ let best = null, d = 15; for (const id in (src.sites || {})){ const q = PIPE_POINTS[id]; if (!q) continue; const k = kmBetween(s.lat, s.lon, q[0], q[1]); if (k < d){ d = k; best = id; } } st = best ? src.sites[best] : null; }
+      if (!st) continue;
       const members = (st.members || []).map(mm => {
         const m = {};
         for (const k in mm){ const arr = new Array(TL.n).fill(null); mm[k].forEach((v, j) => { const i = TL.idx(src.t0 + j*H); if (i >= 0 && i < TL.n && v != null) arr[i] = v; }); m[k] = arr; }
@@ -378,16 +405,17 @@ function blockOf(m, row, TL){
   if (!rng.length) return null;
   const agg = (arr, how) => { let r = null, s = 0, n = 0; for (const i of rng){ const v = arr[i]; if (v == null) continue; if (how === "max") r = r == null ? v : Math.max(r, v); else if (how === "min") r = r == null ? v : Math.min(r, v); else { s += v; n++; } } return how === "mean" ? (n ? s/n : null) : r; };
   const o = {};
-  if (row.len === 1){ const i = rng[0]; ["t","td","wbgt","sky","s54","g54","s200","g200"].forEach(k => o[k] = m[k][i]); o.tmax = o.tmin = m.t[i]; o.vmin = m.vis[i]; }
+  const hk = hkeys();
+  if (row.len === 1){ const i = rng[0]; ["t","td","wbgt","sky", ...hk].forEach(k => o[k] = m[k] ? m[k][i] : null); o.tmax = o.tmin = m.t[i]; o.vmin = m.vis[i]; }
   else {
     o.tmax = agg(m.t, "max"); o.tmin = agg(m.t, "min"); o.t = row.daytime ? o.tmax : o.tmin;
     o.td = agg(m.td, "mean"); o.wbgt = agg(m.wbgt, "max"); o.sky = agg(m.sky, "mean");
-    ["s54","g54","s200","g200"].forEach(k => o[k] = agg(m[k], "max")); o.vmin = agg(m.vis, "min");
+    hk.forEach(k => o[k] = m[k] ? agg(m[k], "max") : null); o.vmin = agg(m.vis, "min");
   }
-  let u = 0, v = 0, nn = 0; for (const i of (row.len === 1 ? [rng[0]] : rng)){ const d = m.d10[i], s = m.s54[i]; if (d == null || s == null) continue; const w = Math.max(0.3, s); u += -Math.sin(d*Math.PI/180)*w; v += -Math.cos(d*Math.PI/180)*w; nn++; }
+  let u = 0, v = 0, nn = 0; for (const i of (row.len === 1 ? [rng[0]] : rng)){ const d = m.d10[i], s = m.s10[i]; if (d == null || s == null) continue; const w = Math.max(0.3, s); u += -Math.sin(d*Math.PI/180)*w; v += -Math.cos(d*Math.PI/180)*w; nn++; }
   o.du = nn ? u/nn : null; o.dv = nn ? v/nn : null;
-  o.smax = o.s54 == null && o.s200 == null ? null : Math.max(o.s54 ?? -1, o.s200 ?? -1);
-  o.gmax = o.g54 == null && o.g200 == null ? null : Math.max(o.g54 ?? -1, o.g200 ?? -1);
+  const mx = ks => { const v = ks.map(k => o[k]).filter(x => x != null); return v.length ? Math.max(...v) : null; };
+  o.smax = mx(HEIGHTS.map(f => "s" + f)); o.gmax = mx(HEIGHTS.map(f => "g" + f));
   return o;
 }
 /* fraction of a source's members with precip >= 0.01 in [A,B) (precip stamps are end-of-hour) */
@@ -457,9 +485,9 @@ function aggregate(G, prefs){
   const rows = G.rows, on = G.src.filter(s => prefs.enabled[s.def.id] !== false && (prefs.weight[s.def.id] ?? s.def.w ?? 1) > 0);
   const W = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
   const val = {}, srcv = {}, band = {}, mem = {};
-  const scal = ["t","td","wbgt","sky","s54","g54","s200","g200"];
+  const scal = ["t","td","wbgt","sky", ...hkeys()];
   for (const k of [...scal, "dir"]){ val[k] = []; srcv[k] = {}; band[k] = []; }
-  for (const k of ["tmax","tmin","smax","gmax","vmin"]) mem[k] = [];
+  for (const k of new Set(["tmax","tmin","smax","gmax","vmin", ...PARAMS.filter(p => p.ex).map(p => p.ex)])) mem[k] = [];
   rows.forEach((r, ri) => {
     for (const k of scal){
       const pairs = [], vals = [], wts = [];
@@ -510,9 +538,7 @@ function aggregate(G, prefs){
     });
   }
   /* exceedance probabilities (members, with optional shift by the forecaster's edits) */
-  for (const pk of ["x18","x25","x35","x50","xhot","x40","x32","xvis"]){
-    val[pk] = []; srcv[pk] = {};
-  }
+  for (const p of PARAMS.filter(p => p.ex)){ val[p.k] = []; srcv[p.k] = {}; }
   G.mem = mem; G.on = on;
   /* severe: SPC outlook */
   val.sev = rows.map(r => {
@@ -537,7 +563,7 @@ function exceed(G, pk, ri, delta, hot){
   const p = P[pk]; const list = G.mem[p.ex][ri]; if (!list || !list.length) return { v:null, per:{} };
   const thr = p.v === "hot" ? hot : p.v;
   const bySrc = {};
-  for (const [x, w, id] of list){ const y = x + (p.ex === "vmin" ? 0 : delta); const hit = p.op === ">" ? y > thr : y < thr; const o = bySrc[id] = bySrc[id] || { h:0, n:0, w:0 }; o.h += hit ? w : 0; o.w += w; }
+  for (const [x, w, id] of list){ const y = x + (p.ex === "vmin" ? 0 : delta); const hit = p.op === ">" ? y > thr : p.op === ">=" ? y >= thr : p.op === "<=" ? y <= thr : y < thr; const o = bySrc[id] = bySrc[id] || { h:0, n:0, w:0 }; o.h += hit ? w : 0; o.w += w; }
   let s = 0, w = 0; const per = {};
   for (const id in bySrc){ const o = bySrc[id]; per[id] = 100*o.h/o.w; s += o.h; w += o.w; }
   return { v: w ? 100*s/w : null, per };

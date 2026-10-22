@@ -45,6 +45,11 @@ SITES = [
     ("cape-inland", 28.4686, -80.5667),  # KXMR
     ("cape-pad37", 28.5314, -80.5650),   # SLC-37
     ("patrick", 28.2349, -80.6101),      # KCOF
+    # extra pads for the exposure page (custom points use the nearest point within 15 km)
+    ("lc39a", 28.6083, -80.6041),
+    ("slc40", 28.5620, -80.5772),
+    ("slc41", 28.5833, -80.5830),
+    ("lc36", 28.4710, -80.5378),
 ]
 
 NOMADS = "https://nomads.ncep.noaa.gov/pub/data/nccf/com"

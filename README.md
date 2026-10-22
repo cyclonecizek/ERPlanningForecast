@@ -16,6 +16,8 @@ Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days
 ## Layout
 ```
 docs/index.html                       the planning forecast page
+docs/exposure.html                    exposure forecasts for one operation (pads, SLF, XMR or a custom point)
+docs/planning-app.js                  the editor shared by the planning and exposure pages
 docs/taf.html                         KCOF TAF generator (separate tool, linked from the planning page)
 docs/guidance.js                      guidance engine shared by both pages (fetching, blending, MOS, pipeline)
 docs/data/mos/                        MOS, LAMP, NBM text and SPC outlook mirror (written by the workflow)
@@ -91,3 +93,16 @@ Not generated: WS, icing and turbulence groups, and remarks.
 
 Ceilings come from LAMP, GFS/NAM MOS, NBM text and RRFS/REFS where available; otherwise from the
 models' low/mid/high cloud cover. Add `?demo=1` to see it with synthetic data.
+
+## Exposure forecasts (`exposure.html`)
+A tailored forecast for one operation, with the same editor, linking and publishing as the planning
+page. Pick LC-39A, LC-39B, SLC-41, SLC-40, SLC-37, LC-36, the SLF, XMR or a custom point; set the
+valid window, how many hours stay hourly before switching to 3-hour blocks, and any number of
+constraints:
+* wind: height (ft), sustained or peak, at-or-above or above a speed in kt, mph, m/s or km/h,
+* temperature: above or below a value in °F or °C.
+
+Each wind height gets its own sustained/peak rows and graph, and each constraint gets a probability
+row (the chance it's met at any time in the row, from all guidance members), which moves with your
+wind and temperature edits. Settings and edits are saved in the browser separately from the
+planning page. Publishing writes Excel, CSV, PDF and HTML named after the operation.

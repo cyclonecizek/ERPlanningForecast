@@ -71,6 +71,10 @@ a{ color:var(--accent); }
 
 main{ padding:18px 28px 40px; display:grid; gap:18px; }
 main > *{ min-width:0; }
+.pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
+.pagenav a{ padding:8px 16px 9px; font:600 15px var(--cond); letter-spacing:.2px; color:var(--ink-2); text-decoration:none; border-bottom:3px solid transparent; }
+.pagenav a:hover{ color:var(--ink); }
+.pagenav a[aria-current="page"]{ color:var(--accent); border-bottom-color:var(--accent); }
 .panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; }
 
 /* TAF text: the product itself */
@@ -140,13 +144,13 @@ details.cfg > summary .sum{ font-weight:400; color:var(--ink-2); font-size:13.5p
 </style>
 </head>
 <body>
+<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="taf.html" aria-current="page">KCOF TAF</a></nav>
 <header class="top">
   <div>
     <h1>TAF generator</h1>
     <div class="where"><b>Patrick SFB (KCOF)</b>, Air Force format (AFMAN 15-129), 30-hour valid period</div>
   </div>
   <div class="actions">
-    <a class="btn" href="./">Planning forecast</a>
     <button class="btn" id="regen">Regenerate from guidance</button>
     <button class="btn" id="download">Download .txt</button>
     <button class="btn primary" id="copy">Copy TAF</button>
@@ -630,7 +634,6 @@ function init(){
   loadAll();
 }
 init();
-
 </script>
 </body>
 </html>
