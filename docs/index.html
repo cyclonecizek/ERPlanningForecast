@@ -255,6 +255,15 @@ table.mx{ border-collapse:separate; border-spacing:0; width:max-content; min-wid
 
 /* ---------- dialog / toast ---------- */
 dialog{ border:1px solid var(--rule); border-radius:14px; padding:0; width:min(520px,92vw); background:var(--panel); color:var(--ink); box-shadow:0 24px 60px rgba(0,0,0,.25); }
+dialog.wide{ width:min(1180px,96vw); }
+.brhead{ display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; margin-bottom:12px; }
+.brhead h2{ margin:0; } .brhead .sub{ color:var(--ink-2); font-size:13.5px; }
+.brgrid{ display:grid; grid-template-columns:300px 1fr; gap:18px; align-items:start; }
+.brside{ display:grid; gap:12px; }
+.brside label{ display:grid; gap:5px; font:600 13px var(--cond); color:var(--ink-2); }
+.brside textarea{ border:1px solid var(--rule); border-radius:8px; padding:8px 10px; background:var(--panel); font:13.5px/1.4 var(--font); resize:vertical; }
+.brprev{ background:#fff; color:#13202E; border:1px solid var(--rule); border-radius:10px; padding:18px 20px; max-height:68vh; overflow:auto; font:14px/1.4 "Segoe UI", Arial, sans-serif; }
+@media (max-width:900px){ .brgrid{ grid-template-columns:1fr; } }
 dialog::backdrop{ background:rgba(13,21,29,.45); }
 .dlg{ padding:22px 24px 20px; }
 .dlg h2{ margin:0 0 4px; font:700 24px/1.1 var(--cond); }
@@ -304,6 +313,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
     <button class="btn icon" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>&#8630;</button>
     <button class="btn icon" id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>&#8631;</button>
     <button class="btn" id="resetSite" title="Clear every edit for this point">Reset to guidance</button>
+    <button class="btn plan-only" id="briefBtn" title="One-page summary of the main concerns for leadership">Leadership brief</button>
     <button class="btn primary" id="publish">Save and publish</button>
   </div>
 </header>
@@ -313,6 +323,7 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   <span><span class="k">Edits</span><span id="editCount">0</span></span>
   <span class="spacer"></span>
   <span class="seg" role="group" aria-label="Matrix layout"><button id="orD" aria-pressed="false" title="Time runs down the rows">Time down</button><button id="orA" aria-pressed="true" title="Time runs across the columns">Time across</button></span>
+  <span class="seg" id="wuSel" role="group" aria-label="Wind units"><button type="button" data-u="kt">kt</button><button type="button" data-u="mph">mph</button><button type="button" data-u="m/s">m/s</button><button type="button" data-u="ft/s">ft/s</button></span>
   <span class="seg" role="group" aria-label="Time zone"><button id="tzL" aria-pressed="true">Local</button><button id="tzZ" aria-pressed="false">Zulu</button></span>
   <button class="btn" id="refresh" style="padding:4px 10px;font-size:13px">Refresh guidance</button>
   <label>Forecaster <input type="text" id="initials" maxlength="5" placeholder="Init" autocomplete="off"></label>
@@ -386,6 +397,20 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   </div>
 </main>
 
+<dialog id="briefDlg" class="wide">
+  <div class="dlg">
+    <div class="brhead"><h2>Leadership quick look</h2><span class="sub">Built from the official forecast, including your edits. Edit the bottom line and concerns, then download or copy.</span></div>
+    <div class="brgrid">
+      <div class="brside">
+        <label>Bottom line<textarea id="brBottom" rows="5"></textarea></label>
+        <label>Key concerns (one per line)<textarea id="brConcerns" rows="9"></textarea></label>
+        <button class="btn" id="brRegen" type="button">Regenerate from forecast</button>
+      </div>
+      <div class="brprev" id="brPreview"></div>
+    </div>
+    <div class="row"><button class="btn" id="brClose" type="button">Close</button><button class="btn" id="brCopy" type="button">Copy as text</button><button class="btn" id="brHtml" type="button">Download HTML</button><button class="btn primary" id="brPdf" type="button">Download PDF</button></div>
+  </div>
+</dialog>
 <dialog id="pubDlg">
   <form method="dialog" class="dlg" id="pubForm">
     <h2>Save and publish</h2>

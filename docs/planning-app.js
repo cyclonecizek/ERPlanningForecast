@@ -26,7 +26,15 @@ const EXP_POINTS = [
   { id:"xmr",   name:"XMR",    point:"XMR",    area:"CCSFS Skid Strip", tag:"XMR", off:[-6,3,"end"],    stn:"KXMR", lat:28.4686, lon:-80.5667 },
 ];
 const MOS_STATIONS = { KTTS:[28.6150,-80.6945], KXMR:[28.4686,-80.5667], KCOF:[28.2349,-80.6101] };
-const WIND_UNITS = { kt:1, mph:0.868976, "m/s":1.943844, "km/h":0.539957 };
+const WIND_UNITS = { kt:1, mph:0.868976, "m/s":1.943844, "ft/s":0.592484, "km/h":0.539957 };
+/* display unit for forecast winds (stored in knots) */
+const WIND_DISP = { kt:1, mph:1.150779, "m/s":0.514444, "ft/s":1.687810, "km/h":1.852 };
+const isWind = p => p && p.unit === "kt" && p.kind === "num";
+const wfac = () => WIND_DISP[prefs.wu] || 1;
+const wuLabel = () => prefs.wu || "kt";
+const toDispW = v => v == null ? v : v*wfac();
+/* "Winds (kt)" group labels follow the display unit */
+const grpLabel = g => g.replace("Winds (kt)", `Winds (${wuLabel()})`);
 function expDefaults(){
   const st = Math.ceil(Date.now()/H)*H;
   return { op:"", start:st, end:st + 48*H, hourly:24, custom:{ name:"Custom point", lat:28.5, lon:-80.6 },
@@ -274,6 +282,7 @@ function qcIssues(sid, OF){
 function fmt(p, v){
   if (v === undefined) return "";
   if (v == null) return "";
+  if (isWind(p)) return String(Math.round(v*wfac()));
   if (p.kind === "sky") return skyCat(v);
   if (p.kind === "dir") return compass(v);
   if (p.kind === "sev") return v === "-" ? "-" : SEV_NAME[v] || v;
@@ -471,7 +480,7 @@ function recompute(){ OF = officialFor(prefs.site); QC = qcIssues(prefs.site, OF
 function renderTable(){
   const s = site(), rows = S.rows, { o } = OF, e = edits[s.id] || {}, z = zulu();
   const groups = []; PARAMS.forEach(p => { const g = groups[groups.length - 1]; if (g && g.g === p.g) g.n++; else groups.push({ g:p.g, n:1 }); });
-  let h = `<table class="mx"><thead><tr class="g"><th class="stick" rowspan="1"></th><th class="stick2"></th>${groups.map(g => `<th colspan="${g.n}" class="gstart">${g.g}</th>`).join("")}</tr>`;
+  let h = `<table class="mx"><thead><tr class="g"><th class="stick" rowspan="1"></th><th class="stick2"></th>${groups.map(g => `<th colspan="${g.n}" class="gstart">${grpLabel(g.g)}</th>`).join("")}</tr>`;
   h += `<tr class="c"><th class="stick">Day</th><th class="stick2">Time<small>${tzLabel()}</small></th>`;
   let lastG = null;
   for (const p of PARAMS){ const gs = p.g !== lastG; lastG = p.g; h += `<th data-p="${p.k}" class="${gs ? "gstart" : ""} ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" title="${p.title}">${colLabel(p, s)}${p.s ? `<small>${p.s}</small>` : ""}</th>`; }
@@ -515,7 +524,7 @@ function renderTableAcross(){
   for (const p of PARAMS){
     const gs = p.g !== lastG; lastG = p.g;
     h += `<tr class="${gs ? "gfirst" : ""}">`;
-    if (gs) h += `<th class="stick grp" rowspan="${gcount[p.g]}">${p.g}</th>`;
+    if (gs) h += `<th class="stick grp" rowspan="${gcount[p.g]}">${grpLabel(p.g)}</th>`;
     h += `<th class="stick2 plab ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" data-p="${p.k}" title="${p.title}">${colLabel(p, s)}${p.s ? ` <small>${p.s}</small>` : ""}</th>`;
     const spm = spanMap(p.k);
     rows.forEach((r, i) => {
@@ -552,6 +561,7 @@ function parseInput(p, txt){
   if (p.kind === "dir"){ const d = parseDir(txt); return d == null ? undefined : (Math.round(d/10)*10) % 360; }
   if (p.kind === "sev"){ const u = txt.toUpperCase(); const map = { NONE:"-", "-":"-", MARGINAL:"MRGL", SLIGHT:"SLGT", ENHANCED:"ENH", MODERATE:"MDT" }; const c = map[u] || u; return SEV.includes(c) ? c : undefined; }
   let n = parseFloat(txt.replace("%", "")); if (!isFinite(n)) return undefined;
+  if (isWind(p) && wfac() !== 1) return Math.max(0, Math.round(n/wfac()*10)/10);   /* typed in the display unit, stored in knots */
   if (p.kind === "prob" && n > 0 && n < 1 && txt.includes(".")) n *= 100;
   if (p.lo != null) n = Math.max(p.lo, n); if (p.hi != null) n = Math.min(p.hi, n);
   return Math.round(n);
@@ -694,7 +704,7 @@ function renderChartFg(){ renderChart(true); }
 function renderChart(fgOnly){
   const svg = $("chart"), view = prefs.param, ks = keysOf(view), combo = ks.length > 1, p = P[ks[0]] || P.t, s = site();
   $("ptitle").textContent = combo ? VIEWS[view].title : p.k === "xhot" ? `Temperature above ${hotOf(s)}°F` : p.title;
-  $("punit").textContent = p.kind === "prob" ? "percent chance" : p.kind === "sky" ? "percent cloud cover (categories at right)" : p.kind === "dir" ? "degrees true, toward the points" : p.unit || "";
+  $("punit").textContent = p.kind === "prob" ? "percent chance" : p.kind === "sky" ? "percent cloud cover (categories at right)" : p.kind === "dir" ? "degrees true, toward the points" : isWind(p) ? wuLabel() : p.unit || "";
   $("drawWrap").hidden = !(combo && prefs.cmode === "draw");
   $("modeSel").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === prefs.cmode));
   $("phint").textContent = prefs.cmode === "draw"
@@ -717,17 +727,19 @@ function renderChart(fgOnly){
   /* domain across every series in the view */
   const merged = {}; ks.forEach((k, j) => { const sv = srcOf(k); for (const id in sv) merged[id + "_" + j] = sv[id]; });
   const bandAll = { band:{ [p.k]: rows.map((r, i) => { const bs = ks.map(k => (A.band[k] || [])[i]).filter(Boolean); return bs.length ? [Math.min(...bs.map(b => b[0])), Math.max(...bs.map(b => b[1]))] : null; }) } };
-  const layoutKey = [view, s.id, svg.clientWidth || 900, zulu(), S.rows.length].join("|");
+  const layoutKey = [view, s.id, svg.clientWidth || 900, zulu(), S.rows.length, wuLabel()].join("|");
   const full = !fgOnly || !CH.layout || CH.layout.key !== layoutKey;
-  const [y0, y1] = !full ? [CH.layout.y0, CH.layout.y1] : chartDomain(p, allPts, bandAll, merged);
+  const sc = isWind(p) ? wfac() : 1;
+  const dom = full ? chartDomain(p, allPts, bandAll, merged) : null;
+  const [y0, y1] = !full ? [CH.layout.y0, CH.layout.y1] : sc === 1 ? dom : [Math.floor(dom[0]*sc), Math.ceil(dom[1]*sc)];
   if (full) CH.layout = { key:layoutKey, y0, y1 };
   const L = CH.m.l, R = W - CH.m.r, T = CH.m.t, B = Hh - CH.m.b;
-  const x = i => L + (i + 0.5) * (R - L)/n, y = v => B - (v - y0)/(y1 - y0)*(B - T);
+  const x = i => L + (i + 0.5) * (R - L)/n, yD = v => B - (v - y0)/(y1 - y0)*(B - T), y = v => yD(v*sc);
   const colW = (R - L)/n;
   const spanOf = (k, i) => { const sp = spanMap(k)[i]; return sp && sp.s ? sp.s : 1; };
   const xk = k => i => L + (i + spanOf(k, i)/2) * colW;   /* centre of the period a value covers */
   CH.xk = xk;
-  CH.x = x; CH.y = y; CH.inv = py => y0 + (B - py)/(B - T)*(y1 - y0); CH.ix = px => Math.max(0, Math.min(n - 1, Math.floor((px - L)/((R - L)/n)))); CH.y0 = y0; CH.y1 = y1;
+  CH.sc = sc; CH.x = x; CH.y = y; CH.inv = py => y0 + (B - py)/(B - T)*(y1 - y0); CH.ix = px => Math.max(0, Math.min(n - 1, Math.floor((px - L)/((R - L)/n)))); CH.y0 = y0; CH.y1 = y1;
   let h = "", f = "";
   const z = zulu(); let start = 0, band = 0;
   if (full) for (let i = 1; i <= n; i++){
@@ -740,11 +752,11 @@ function renderChart(fgOnly){
   }
   const step = p.kind === "dir" ? 90 : p.kind === "prob" || p.kind === "sky" ? 20 : niceStep((y1 - y0)/5);
   if (full){
-  for (let v = Math.ceil(y0/step)*step; v <= y1 + 1e-9; v += step){ const yy = y(v); h += `<line class="grid" x1="${L}" x2="${R}" y1="${yy}" y2="${yy}"/><text class="axis" x="${L - 7}" y="${yy + 4}" text-anchor="end">${p.kind === "dir" ? compass(v) : v}</text>`; }
+  for (let v = Math.ceil(y0/step)*step; v <= y1 + 1e-9; v += step){ const yy = yD(v); h += `<line class="grid" x1="${L}" x2="${R}" y1="${yy}" y2="${yy}"/><text class="axis" x="${L - 7}" y="${yy + 4}" text-anchor="end">${p.kind === "dir" ? compass(v) : v}</text>`; }
   rows.forEach((r, i) => { const hh = z ? new Date(r.a).getUTCHours() : r.lh; if (hh % 6 === 0 && (r.len < 6 || hh % 12 === 0)) h += `<text class="axis" x="${x(i)}" y="${B + 16}" text-anchor="middle">${pad2(hh)}</text>`; });
   const tempThr = () => EXPO ? PARAMS.filter(q => q.ex === "tmax" || q.ex === "tmin").map(q => Math.round(q.v)) : [hotOf(s), 40, 32];
   const thr = pview ? [] : combo ? [...new Set(ks.flatMap(k => P[k].thr || []))] : p.thr ? p.thr.slice() : p.k === "t" ? tempThr() : p.k === "wbgt" ? [82, 85, 88, 90] : [];
-  thr.filter(v => v > y0 && v < y1).forEach(v => { h += `<line class="thr" x1="${L}" x2="${R}" y1="${y(v)}" y2="${y(v)}"/><text class="thrlab" x="${R - 3}" y="${y(v) - 4}" text-anchor="end">${v}${p.unit === "kt" ? " kt" : "°"}</text>`; });
+  thr.filter(v => v*sc > y0 && v*sc < y1).forEach(v => { h += `<line class="thr" x1="${L}" x2="${R}" y1="${y(v)}" y2="${y(v)}"/><text class="thrlab" x="${R - 3}" y="${y(v) - 4}" text-anchor="end">${p.unit === "kt" ? Math.round(v*sc) + " " + wuLabel() : v + "°"}</text>`; });
   if (p.kind === "sky") SKY.forEach(([c, a, b]) => { const yy = y(Math.min(100, (a + Math.min(b, 100))/2)); h += `<text class="thrlab" style="fill:var(--ink-3)" x="${R - 3}" y="${yy + 4}" text-anchor="end">${c}</text>`; if (a > 0) h += `<line class="grid" x1="${L}" x2="${R}" y1="${y(a)}" y2="${y(a)}" style="stroke-dasharray:2 3"/>`; });
   }
   const line = (arr, cls, style, xf) => { xf = xf || x; let d = "", pen = false; arr.forEach((v, i) => { if (v === undefined && na[i]) return; if (v == null || !isFinite(v)){ pen = false; return; } d += (pen ? "L" : "M") + xf(i).toFixed(1) + "," + y(Math.max(y0, Math.min(y1, v))).toFixed(1); pen = true; }); return d ? `<path class="${cls}" d="${d}" style="${style || ""}"/>` : ""; };
@@ -813,7 +825,9 @@ function moveCursor(i){
 }
 function niceStep(s){ const e = Math.pow(10, Math.floor(Math.log10(s))); const f = s/e; return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10)*e; }
 function chartValue(py, k){
-  const p = P[k]; let v = CH.inv(py);
+  const p = P[k];
+  if (isWind(p) && (CH.sc || 1) !== 1){ const vd = Math.max(0, Math.round(CH.inv(py))); return Math.round(vd/CH.sc*10)/10; }
+  let v = CH.inv(py);
   v = Math.max(p.lo ?? CH.y0, Math.min(p.hi ?? CH.y1, v));
   const st = p.step || 1; v = Math.round(v/st)*st;
   if (p.kind === "dir") v = ((v % 360) + 360) % 360;
@@ -929,7 +943,7 @@ function bindChart(){
     const d = CH.drag;
     if (d && d.kind === "paint"){ const v = chartValue(py, d.k); paintRange(d.k, d.i, d.v, i, v, d.erase || ev.altKey); d.i = i; d.v = v; liveRefresh(); }
     else if (d && d.kind === "move"){
-      const dv = CH.inv(py) - CH.inv(d.py0);
+      const dv = (CH.inv(py) - CH.inv(d.py0))/(CH.sc || 1);
       if (!d.moved && Math.abs(py - d.py0) < 3) return;
       d.moved = true;
       const tmp = [];
@@ -994,7 +1008,7 @@ function hover(i, ev){
   const ks = keysOf(prefs.param), combo = ks.length > 1, p = P[ks[0]], s = site(), A = S.agg[s.id] || { srcv:{} };
   const r = S.rows[i];
   const srcOf = k => k.startsWith("x") ? OF.xsrc[k] : (A.srcv[k] || {});
-  const f = v => v == null || v === undefined ? "–" : p.kind === "sky" ? `${Math.round(v)}% ${skyCat(v)}` : p.kind === "dir" ? `${Math.round(v)}° ${compass(v)}` : p.kind === "prob" ? `${Math.round(v)}%` : `${Math.round(v)}${p.unit === "°F" ? "°" : ""}`;
+  const f = v => v == null || v === undefined ? "–" : isWind(p) ? `${Math.round(v*wfac())} ${wuLabel()}` : p.kind === "sky" ? `${Math.round(v)}% ${skyCat(v)}` : p.kind === "dir" ? `${Math.round(v)}° ${compass(v)}` : p.kind === "prob" ? `${Math.round(v)}%` : `${Math.round(v)}${p.unit === "°F" ? "°" : ""}`;
   const fv = getter => ks.map(k => f(getter(k, ownerIdx(k, i)))).join(" / ");
   const Ld = dayLabel(r.a, zulu()), oi = ownerIdx(ks[ks.length - 1], i), sp = spanMap(ks[ks.length - 1])[oi], end = S.rows[oi + (sp.s || 1) - 1].b;
   let h = `<div><b>${Ld.wd.slice(0,3)} ${Ld.dt}, ${hhmm(r.a, zulu())}${sp.s > 1 || r.len > 1 ? "–" + hhmm(end, zulu()) : ""}${zulu() ? "Z" : ""}</b></div>`;
@@ -1012,11 +1026,29 @@ function hover(i, ev){
    ============================================================ */
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b){ let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+/* ---------- 45 WS logo for published products ---------- */
+let LOGO = null;
+async function loadLogo(){
+  if (LOGO !== null) return LOGO;
+  try {
+    const r = await fetch("45ws-logo.png"); if (!r.ok) throw new Error("no logo");
+    const png = new Uint8Array(await r.arrayBuffer());
+    const img = await createImageBitmap(new Blob([png], { type:"image/png" }));
+    const rh = 200, rw = Math.round(img.width*rh/img.height);
+    const c = document.createElement("canvas"); c.width = rw; c.height = rh;
+    const x = c.getContext("2d"); x.fillStyle = "#ffffff"; x.fillRect(0, 0, rw, rh); x.drawImage(img, 0, 0, rw, rh);
+    const d = x.getImageData(0, 0, rw, rh).data, rgb = new Uint8Array(rw*rh*3);
+    for (let i = 0, j = 0; i < d.length; i += 4){ rgb[j++] = d[i]; rgb[j++] = d[i + 1]; rgb[j++] = d[i + 2]; }
+    let bin = ""; for (let i = 0; i < png.length; i += 0x8000) bin += String.fromCharCode.apply(null, png.subarray(i, i + 0x8000));
+    LOGO = { png, w: img.width, h: img.height, rgb, rw, rh, b64: btoa(bin) };
+  } catch (e) { LOGO = false; }
+  return LOGO;
+}
 function zip(files){
   const enc = new TextEncoder(), parts = [], central = []; let off = 0;
   const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
   for (const [name, text] of files){
-    const nb = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const nb = enc.encode(name), data = typeof text === "string" ? enc.encode(text) : text, crc = crc32(data);
     const lh = new DataView(new ArrayBuffer(30));
     lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, dt, true); lh.setUint16(12, dd, true);
     lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, nb.length, true); lh.setUint16(28, 0, true);
@@ -1075,10 +1107,11 @@ function sheetXML(sh){
   x += `</sheetData>`;
   if (sh.merges.length) x += `<mergeCells count="${sh.merges.length}">${sh.merges.map(m => `<mergeCell ref="${m}"/>`).join("")}</mergeCells>`;
   (sh.cf || []).forEach((ref, i) => { x += `<conditionalFormatting sqref="${ref}"><cfRule type="colorScale" priority="${i + 1}"><colorScale><cfvo type="num" val="0"/><cfvo type="num" val="1"/><color rgb="FFFFFFFF"/><color rgb="FF6FAFB6"/></colorScale></cfRule></conditionalFormatting>`; });
-  x += `<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+  x += `<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>${sh.logo ? `<drawing r:id="rId1"/>` : ""}</worksheet>`;
   return x;
 }
-function workbook(sheets){
+function workbook(sheets, logo){
+  if (logo) sheets.forEach(s => s.logo = true);
   const files = [
     ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`],
     ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`],
@@ -1088,6 +1121,17 @@ function workbook(sheets){
     ["xl/styles.xml", XSTYLES],
     ...sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheetXML(s)]),
   ];
+  if (logo){
+    const cy = Math.round(62*12700), cx = Math.round(62*logo.w/logo.h*12700);
+    files[0][1] = files[0][1].replace('<Default Extension="xml"', '<Default Extension="png" ContentType="image/png"/><Default Extension="xml"').replace("</Types>", sheets.map((s, i) => `<Override PartName="/xl/drawings/drawing${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join("") + "</Types>");
+    files.push(["xl/media/image1.png", logo.png]);
+    sheets.forEach((s, i) => {
+      const col = Math.max(0, s.cols.length - 1);
+      files.push([`xl/worksheets/_rels/sheet${i + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${i + 1}.xml"/></Relationships>`]);
+      files.push([`xl/drawings/_rels/drawing${i + 1}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/></Relationships>`]);
+      files.push([`xl/drawings/drawing${i + 1}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:oneCellAnchor><xdr:from><xdr:col>${col}</xdr:col><xdr:colOff>76200</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>25400</xdr:rowOff></xdr:from><xdr:ext cx="${cx}" cy="${cy}"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="45 WS"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>`]);
+    });
+  }
   return zip(files);
 }
 const xcols = () => ["Day","Time","Period", ...PARAMS.map(p => p.k)];
@@ -1105,7 +1149,7 @@ function siteSheet(s, OFs, issued, by){
   R.push([{ v:`Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times are ${tz}. Probabilities are the chance of the event at any time in the period.`, s:2 }]);
   R.push([{ v: EXPO ? `Valid ${dayLabel(rows[0].a, z).dt} ${hhmm(rows[0].a, z)} to ${dayLabel(rows[rows.length - 1].b, z).dt} ${hhmm(rows[rows.length - 1].b, z)} ${tz}. ${constraintSummary()}` : "Hourly to 24 h, 3-hour blocks to day 5, 6-hour blocks on days 6 and 7. In blocks, temperature is the daytime high or overnight low, winds are the block maximum.", s:2 }]);
   R.push([]);
-  const G = [["Valid",0,2]]; PARAMS.forEach((p, j) => { const ci = j + 3, g = G[G.length - 1]; const lab = p.g.replace(" (%)", ""); if (g[0] === lab && g[2] === ci - 1) g[2] = ci; else G.push([lab, ci, ci]); });
+  const G = [["Valid",0,2]]; PARAMS.forEach((p, j) => { const ci = j + 3, g = G[G.length - 1]; const lab = grpLabel(p.g).replace(" (%)", ""); if (g[0] === lab && g[2] === ci - 1) g[2] = ci; else G.push([lab, ci, ci]); });
   const gr = new Array(ncol).fill(null).map(() => ({ v:"", s:3 }));
   G.forEach(([n, a, b]) => { gr[a] = { v:n, s:3 }; if (b > a) merges.push(`${colName(a)}6:${colName(b)}6`); });
   R.push(gr); heights[5] = 20;
@@ -1128,7 +1172,7 @@ function siteSheet(s, OFs, issued, by){
       else if (p.kind === "sky") row.push({ v: skyCat(v), s: st(5) });
       else if (p.kind === "dir") row.push({ v: compass(v), s: st(5) });
       else if (p.kind === "sev") row.push({ v: v === "-" ? "-" : SEV_NAME[v], s: st(5) });
-      else row.push({ v: Math.round(v), s: st(6) });
+      else row.push({ v: Math.round(isWind(p) ? v*wfac() : v), s: st(6) });
     }
     R.push(row);
   });
@@ -1155,7 +1199,7 @@ function csvFor(list, issued, by){
 }
 /* exposure CSV: one column per parameter on the page */
 function csvGeneric(list, issued, by){
-  const colOf = p => p.csv || (p.kind === "prob" ? `${p.k}_pct` : p.k);
+  const colOf = p => { const c = p.csv || (p.kind === "prob" ? `${p.k}_pct` : p.k); return isWind(p) ? c.replace(/_kt$/, "_" + wuLabel().replace("/", "p")) : c; };
   const head = ["point","lat","lon","valid_start_utc","valid_end_utc","valid_start_local","period_h", ...PARAMS.map(colOf), "issued_utc","forecaster"];
   const q = v => { if (v === undefined || v === null) return ""; const t = String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
   const lines = [`# ${productName()}. ${constraintSummary()}`, head.join(",")];
@@ -1163,7 +1207,7 @@ function csvGeneric(list, issued, by){
     const o = OFs.o;
     S.rows.forEach((r, i) => {
       const p = lp(r.a), loc = `${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:00`;
-      const val = pp => { const v = o[pp.k][i]; if (v == null) return ""; if (pp.kind === "sky") return skyCat(v); if (pp.kind === "dir") return Math.round(v); if (pp.kind === "sev") return v; return Math.round(v); };
+      const val = pp => { const v = o[pp.k][i]; if (v == null) return ""; if (pp.kind === "sky") return skyCat(v); if (pp.kind === "dir") return Math.round(v); if (pp.kind === "sev") return v; return Math.round(isWind(pp) ? v*wfac() : v); };
       lines.push([s.point, s.lat.toFixed(4), s.lon.toFixed(4), new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, ...PARAMS.map(val), new Date(issued).toISOString().slice(0,16) + "Z", by].map(q).join(","));
     });
   }
@@ -1188,7 +1232,8 @@ function openPublish(){
   $("pubSites").onchange = qcRefresh; qcRefresh();
   dlg.showModal(); $("pubInit").focus();
 }
-function doPublish(){
+async function doPublish(){
+  const logo = await loadLogo();
   const ids = [...$("pubSites").querySelectorAll("input:checked")].map(x => x.value);
   const by = ($("pubInit").value || "").trim().toUpperCase() || "WX";
   prefs.initials = by; $("initials").value = by; savePrefs();
@@ -1196,13 +1241,13 @@ function doPublish(){
   const p = lp(issued), stamp = `${p.y}${pad2(p.mo)}${pad2(p.d)}_${pad2(p.h)}${pad2(p.mi)}`;
   const tag = ids.length === 1 ? "_" + SITES.find(s => s.id === ids[0]).point.replace(/[^A-Za-z0-9]/g, "") : "";
   let nfiles = 0;
-  if ($("fmtX").checked){ download(workbook(list.map(([s, o]) => siteSheet(s, o, issued, by))), `${FILE_BASE()}${tag}_${stamp}.xlsx`); nfiles++; }
+  if ($("fmtX").checked){ download(workbook(list.map(([s, o]) => siteSheet(s, o, issued, by)), logo), `${FILE_BASE()}${tag}_${stamp}.xlsx`); nfiles++; }
   if ($("fmtC").checked){ setTimeout(() => download(new Blob([csvFor(list, issued, by)], { type:"text/csv" }), `${FILE_BASE()}${tag}_${stamp}.csv`), 300); nfiles++; }
   const wantP = $("fmtP").checked, wantH = $("fmtH").checked;
   if (wantP || wantH){
     const models = reportModel(list, issued, by);
-    if (wantP){ setTimeout(() => download(pdfReport(models), `${FILE_BASE()}${tag}_${stamp}.pdf`), 600); nfiles++; }
-    if (wantH){ setTimeout(() => download(new Blob([htmlReport(models, issued)], { type:"text/html" }), `${FILE_BASE()}${tag}_${stamp}.html`), 900); nfiles++; }
+    if (wantP){ setTimeout(() => download(pdfReport(models, logo), `${FILE_BASE()}${tag}_${stamp}.pdf`), 600); nfiles++; }
+    if (wantH){ setTimeout(() => download(new Blob([htmlReport(models, issued, logo)], { type:"text/html" }), `${FILE_BASE()}${tag}_${stamp}.html`), 900); nfiles++; }
   }
   prefs.fmt = { x:$("fmtX").checked, c:$("fmtC").checked, p:wantP, h:wantH }; savePrefs();
   ids.forEach(id => published[id] = { t: issued, by }); store.set(LS.pub, published);
@@ -1244,7 +1289,7 @@ function reportModel(list, issued, by){
         const times = pg.cols.map(i => ({ t:tlab(rows[i]), sub: rows[i].len > 1 ? rows[i].len + " h" : "", day: pg.days.some(d => d.cols[0] === i) }));
         const groups = [];
         for (const p of PARAMS){
-          let g = groups[groups.length - 1]; if (!g || g.g !== p.g){ g = { g:p.g, rows:[] }; groups.push(g); }
+          let g = groups[groups.length - 1]; if (!g || g.g !== grpLabel(p.g)){ g = { g:grpLabel(p.g), rows:[] }; groups.push(g); }
           const spm = spanMap(p.k), cells = [];
           pg.cols.forEach((i, ci) => {
             const sp = spm[i];
@@ -1266,18 +1311,18 @@ function reportModel(list, issued, by){
 
 /* ---------- HTML ---------- */
 const hesc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-function htmlReport(models, issued){
+function htmlReport(models, issued, logo){
   const css = `body{font:13px/1.35 "Segoe UI",Arial,sans-serif;color:#13202E;margin:24px;background:#fff}
 h1{font-size:20px;margin:0 0 4px}h1+p{margin:0 0 12px;color:#4B5A68;font-size:12px}
 section{margin-bottom:36px}table{border-collapse:collapse;margin:0 0 16px;font-variant-numeric:tabular-nums}
 th,td{border:1px solid #D4DBDF;padding:3px 4px;text-align:center;white-space:nowrap;font-size:12px}
 thead th{background:#F4F7F7;font-weight:600}th.grp{background:#F4F7F7;text-align:left;vertical-align:top;white-space:normal;width:110px}
 th.lab{text-align:left;font-weight:600;color:#4B5A68}th.lab small,thead small{color:#7D8B97;font-weight:400;display:block;font-size:10px}
-td.mut{color:#9AA6B0}.wrap{overflow-x:auto;margin-bottom:16px}.wrap table{margin:0}.d{border-left:2px solid #7D8B97}.note{color:#7D8B97;font-size:11px;max-width:110ch}
+td.mut{color:#9AA6B0}.hd{display:flex;gap:14px;align-items:center;margin-bottom:12px}.hd img{height:64px;width:auto}.hd h1{margin:0 0 4px}.hd p{margin:0}.wrap{overflow-x:auto;margin-bottom:16px}.wrap table{margin:0}.d{border-left:2px solid #7D8B97}.note{color:#7D8B97;font-size:11px;max-width:110ch}
 @media print{body{margin:10mm}section{page-break-after:always}table{page-break-inside:avoid}}`;
   let h = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${productName()}</title><style>${css}</style></head><body>`;
   for (const m of models){
-    h += `<section><h1>${hesc(m.title)}</h1><p>${hesc(m.sub)}</p>`;
+    h += `<section><header class="hd">${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : ""}<div><h1>${hesc(m.title)}</h1><p>${hesc(m.sub)}</p></div></header>`;
     for (const pg of m.pages){
       h += `<div class="wrap"><table><thead><tr><th colspan="2"></th>${pg.dayHdr.map(d => `<th colspan="${d.n}" class="d" style="text-align:left">${hesc(d.label)}</th>`).join("")}</tr>`;
       h += `<tr><th colspan="2" style="text-align:left">Parameter</th>${pg.times.map(t => `<th class="${t.day ? "d" : ""}">${t.t}${t.sub ? `<small>${t.sub}</small>` : ""}</th>`).join("")}</tr></thead><tbody>`;
@@ -1298,9 +1343,10 @@ td.mut{color:#9AA6B0}.wrap{overflow-x:auto;margin-bottom:16px}.wrap table{margin
 /* ---------- PDF (hand-built, Helvetica, US Letter landscape) ---------- */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 const textW = (s, size, bold) => { let w = 0; for (const ch of String(s)){ const c = ch.charCodeAt(0); w += c >= 32 && c <= 126 ? HW[c - 32] : ch === "–" ? 556 : ch === "°" ? 400 : 556; } return w*size/1000*(bold ? 1.06 : 1); };
-const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
-function pdfReport(models){
+const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "•") return "\\225"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
+function pdfReport(models, logo){
   const W = 792, Hp = 612, M = 28, ops = [];
+  const LH = logo ? 46 : 0, LW = logo ? LH*logo.rw/logo.rh : 0, TX = logo ? M + LW + 10 : M;
   const pages = [];
   let cs = [];
   const f = n => (+n).toFixed(2);
@@ -1316,11 +1362,13 @@ function pdfReport(models){
   for (const m of models){
     m.pages.forEach((pg, pi) => {
       cs = [];
-      text(m.title, M, M + 12, 13, { bold:true });
-      text(m.sub, M, M + 25, 7.5, { color:[75,90,104] });
+      if (logo) cs.push(`q ${f(LW)} 0 0 ${f(LH)} ${f(M)} ${f(Hp - M + 4 - LH)} cm /Im1 Do Q`);
+      const ty = logo ? M + 14 : M + 12;
+      text(m.title, TX, ty, 13, { bold:true });
+      text(m.sub, TX, ty + 13, 7.5, { color:[75,90,104] });
       if (m.pages.length > 1) text(`Page ${pi + 1} of ${m.pages.length}`, W - M, M + 12, 7.5, { align:"r", color:[125,139,151] });
       const gw = 66, lw = 62, x0 = M + gw + lw, ncol = pg.times.length;
-      const cw = Math.min(24, (W - M - x0)/ncol), top = M + 38, dh = 12, th = 18, rh = 13.2;
+      const cw = Math.min(24, (W - M - x0)/ncol), top = M + Math.max(38, LH + 4), dh = 12, th = 18, rh = 13.2;
       const xcol = ci => x0 + ci*cw;
       /* day header */
       rect(M, top, gw + lw + ncol*cw, dh + th, [244,247,247]);
@@ -1357,26 +1405,258 @@ function pdfReport(models){
       pages.push(cs.join("\n"));
     });
   }
+  return pdfAssemble(pages, logo, W, Hp);
+}
+function pdfAssemble(pages, logo, W, Hp){
   /* assemble objects */
   const objs = [];
   const add = s => { objs.push(s); return objs.length; };
   const fontR = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   const fontB = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  const img = logo ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${logo.rgb.length} >>\nstream\n`, bin:logo.rgb, tail:"\nendstream" }) : null;
   const pagesId = objs.length + 1 + pages.length*2;   /* reserved after page objects */
   const kids = [];
   for (const c of pages){
     const sid = add(`<< /Length ${c.length} >>\nstream\n${c}\nendstream`);
-    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${Hp}] /Resources << /Font << /F1 ${fontR} 0 R /F2 ${fontB} 0 R >> >> /Contents ${sid} 0 R >>`));
+    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${Hp}] /Resources << /Font << /F1 ${fontR} 0 R /F2 ${fontB} 0 R >>${img ? ` /XObject << /Im1 ${img} 0 R >>` : ""} >> /Contents ${sid} 0 R >>`));
   }
   add(`<< /Type /Pages /Kids [${kids.map(k => k + " 0 R").join(" ")}] /Count ${kids.length} >>`);
   const cat = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
-  let out = "%PDF-1.4\n", offs = [];
-  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
-  const xref = out.length;
-  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("");
-  out += `trailer\n<< /Size ${objs.length + 1} /Root ${cat} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  const bytes = new Uint8Array(out.length); for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xFF;
-  return new Blob([bytes], { type:"application/pdf" });
+  const parts = []; let pos = 0;
+  const putS = str => { const b = new Uint8Array(str.length); for (let i = 0; i < str.length; i++) b[i] = str.charCodeAt(i) & 0xFF; parts.push(b); pos += b.length; };
+  const putB = b => { parts.push(b); pos += b.length; };
+  const offs = [];
+  putS("%PDF-1.4\n");
+  objs.forEach((o, i) => {
+    offs.push(pos);
+    if (typeof o === "string") putS(`${i + 1} 0 obj\n${o}\nendobj\n`);
+    else { putS(`${i + 1} 0 obj\n${o.head}`); putB(o.bin); putS(`${o.tail}\nendobj\n`); }
+  });
+  const xref = pos;
+  putS(`xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
+  putS(`trailer\n<< /Size ${objs.length + 1} /Root ${cat} 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type:"application/pdf" });
+}
+
+/* ============================================================
+   Leadership quick look: one page built from the official forecast
+   ============================================================ */
+const HAZ = [
+  { id:"ltg",  label:"Lightning",          keys:["lt1","lt3","lt6"], mod:20, high:50 },
+  { id:"rain", label:"Rain",               keys:["pp1","pp3","pp6"], mod:30, high:60 },
+  { id:"s18",  label:"Sustained wind >18 kt", keys:["x18"], mod:20, high:50 },
+  { id:"g25",  label:"Peak wind >25 kt",   keys:["x25"], mod:20, high:50 },
+  { id:"g35",  label:"Peak wind >35 kt",   keys:["x35"], mod:10, high:30 },
+  { id:"heat", label:"Heat",               keys:["xhot"], mod:30, high:60 },
+  { id:"cold", label:"Cold <40°F",         keys:["x40"], mod:20, high:50 },
+  { id:"frz",  label:"Freeze <32°F",       keys:["x32"], mod:10, high:30 },
+  { id:"fog",  label:"Fog / vis <3 mi",    keys:["xvis"], mod:20, high:50 },
+  { id:"svr",  label:"Severe storms (SPC)", keys:["sev"] },
+];
+const LV = ["Low","Moderate","High"];
+const LVC = { 0:[47,122,74], 1:[214,152,32], 2:[178,58,46] };
+const levelOf = (h, v) => h.id === "svr" ? (v >= 2 ? 2 : v >= 1 ? 1 : 0) : v >= h.high ? 2 : v >= h.mod ? 1 : 0;
+const BRIEF_SITES = () => SITES.map(s => s.id);
+/* every number in the brief comes from the official forecast (guidance plus forecaster edits) */
+function briefData(){
+  const z = zulu(), rows = S.rows, sites = BRIEF_SITES().map(id => [SITES.find(s => s.id === id), officialFor(id)]);
+  const days = []; rows.forEach((r, i) => { const dk = dayKey(r.a, z); let d = days[days.length - 1]; if (!d || d.dk !== dk){ d = { dk, rows:[], a:r.a }; days.push(d); } d.rows.push(i); d.b = r.b; });
+  for (const d of days){
+    d.label = (() => { const L = dayLabel(d.a, z); return { wd: L.wd.slice(0, 3), dt: L.dt }; })();
+    d.haz = {};
+    for (const h of HAZ){
+      let mx = h.id === "svr" ? 0 : null, hits = [];
+      for (const [s, OFs] of sites){
+        for (const i of d.rows){
+          for (const k of h.keys){
+            let v = OFs.o[k] ? OFs.o[k][i] : undefined; if (v === undefined || v === null) continue;
+            if (h.id === "svr") v = v === "-" ? 0 : v === "MRGL" ? 1 : 2;
+            if (mx == null || v > mx) mx = v;
+            if (levelOf(h, v) >= 1) hits.push({ s, i, v });
+          }
+        }
+      }
+      d.haz[h.id] = { v: mx, lv: mx == null ? 0 : levelOf(h, mx), hits, sevTxt: h.id === "svr" ? (mx >= 2 ? "Slight or higher" : mx >= 1 ? "Marginal" : "None") : null };
+    }
+    /* daily summary */
+    let hi = null, lo = null, gust = null, skyN = {};
+    for (const [s, OFs] of sites) for (const i of d.rows){
+      const t = OFs.o.t[i]; if (t != null){ hi = hi == null ? t : Math.max(hi, t); lo = lo == null ? t : Math.min(lo, t); }
+      for (const k of PARAMS.filter(p => p.peakOf).map(p => p.k)){ const g = OFs.o[k] && OFs.o[k][i]; if (g != null) gust = gust == null ? g : Math.max(gust, g); }
+      const sk = OFs.o.sky[i]; if (sk != null && rows[i].lh >= 7 && rows[i].lh <= 18){ const c = skyCat(sk); skyN[c] = (skyN[c] || 0) + 1; }
+    }
+    const skyWord = { CLR:"Clear", FEW:"Mostly sunny", SCT:"Partly cloudy", BKN:"Mostly cloudy", OVC:"Overcast" };
+    const sky = Object.entries(skyN).sort((a, b) => b[1] - a[1])[0];
+    d.sum = { hi, lo, gust, sky: sky ? skyWord[sky[0]] : "" };
+  }
+  const shown = HAZ.filter(h => days.some(d => d.haz[h.id].lv >= 1));
+  const quiet = HAZ.filter(h => !shown.includes(h));
+  return { days, shown, quiet, sites };
+}
+/* concern sentences, most serious first; consecutive days with the same hazard are combined */
+const HPRI = ["svr","ltg","g35","g25","frz","heat","fog","s18","cold","rain"];
+const HNOUN = { ltg:"lightning", rain:"rain", s18:"sustained winds over 18 kt", g25:"peak winds over 25 kt", g35:"peak winds over 35 kt", heat:"heat", cold:"cold below 40°F", frz:"freezing temperatures", fog:"fog or low visibility", svr:"severe storms" };
+function hazRuns(D, id){
+  const runs = []; let cur = null;
+  D.days.forEach((d, j) => {
+    const hz = d.haz[id];
+    if (hz.lv >= 1){ if (cur && cur.j1 === j - 1){ cur.j1 = j; cur.days.push(d); } else { cur = { j0:j, j1:j, days:[d] }; runs.push(cur); } }
+  });
+  for (const r of runs){
+    r.lv = Math.max(...r.days.map(d => d.haz[id].lv)); r.v = Math.max(...r.days.map(d => d.haz[id].v ?? 0));
+    r.hits = r.days.flatMap(d => d.haz[id].hits);
+    const a = r.days[0].label, b = r.days[r.days.length - 1].label;
+    r.lab = r.days.length === 1 ? `${a.wd} ${a.dt}` : `${a.wd} ${a.dt.split(" ")[0]}${a.dt.split(" ")[1] === b.dt.split(" ")[1] ? "" : " " + a.dt.split(" ")[1]}–${b.wd} ${b.dt}`;
+    r.short = r.days.length === 1 ? a.wd : `${a.wd}–${b.wd}`;
+  }
+  return runs;
+}
+function whenPhrase(run){
+  if (run.days.length > 1) return "at times";
+  const d = run.days[0], z = zulu(), is = run.hits.map(x => x.i), ia = Math.min(...is), ib = Math.max(...is);
+  const first = d.rows[0], last = d.rows[d.rows.length - 1], tz = z ? "Z" : " " + tzAbbr(S.rows[ia].a);
+  if (ia === first && ib === last) return "much of the day";
+  if (ib === last) return `from ${hhmm(S.rows[ia].a, z)}${tz}`;
+  if (ia === first) return `until ${hhmm(S.rows[ib].b, z)}${tz}`;
+  return `${hhmm(S.rows[ia].a, z)}–${hhmm(S.rows[ib].b, z)}${tz}`;
+}
+function wherePhrase(D, hits){
+  const names = [...new Set(hits.map(x => x.s.name))];
+  if (names.length === D.sites.length) return "all forecast points";
+  return names.length > 2 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join(" and ");
+}
+function briefConcerns(D){
+  const out = [];
+  for (const h of D.shown) for (const r of hazRuns(D, h.id)){
+    const what = h.id === "svr" ? `SPC ${r.lv >= 2 ? "slight or higher" : "marginal"} risk of severe storms` : `${HNOUN[h.id]}, chance up to ${Math.round(r.v)}%`;
+    out.push({ lv:r.lv, pri:HPRI.indexOf(h.id), a:r.days[0].a, txt:`${r.lab}: ${what} at ${wherePhrase(D, r.hits)}, ${whenPhrase(r)}.` });
+  }
+  out.sort((x, y) => y.lv - x.lv || x.pri - y.pri || x.a - y.a);
+  return out.slice(0, 7).map(x => x.txt.charAt(0).toUpperCase() + x.txt.slice(1));
+}
+function briefBottomLine(D){
+  const items = D.shown.map(h => { const runs = hazRuns(D, h.id); return { h, runs, lv: Math.max(0, ...runs.map(r => r.lv)) }; }).filter(x => x.lv >= 1);
+  items.sort((x, y) => y.lv - x.lv || HPRI.indexOf(x.h.id) - HPRI.indexOf(y.h.id));
+  /* winds: mention only the strongest threshold that's a concern */
+  const windOrder = ["g35","g25","s18"], strongest = windOrder.find(id => items.some(x => x.h.id === id));
+  for (let k = items.length - 1; k >= 0; k--) if (windOrder.includes(items[k].h.id) && items[k].h.id !== strongest) items.splice(k, 1);
+  if (!items.length) return "No significant weather concerns for KSC, CCSFS or Patrick SFB through the forecast period.";
+  const parts = items.slice(0, 4).map(x => `${x.lv === 2 ? "high" : "moderate"} risk of ${HNOUN[x.h.id]} ${x.runs.map(r => r.short).join(" and ")}`);
+  let s = "Main concerns: " + parts.join("; ") + ".";
+  if (D.quiet.length){ const q = D.quiet.map(h => HNOUN[h.id]).slice(0, 4); s += " No concerns for " + (q.length > 1 ? q.slice(0, -1).join(", ") + " or " + q[q.length - 1] : q[0]) + "."; }
+  return s;
+}
+const BRIEF = { bottom:null, concerns:null };
+function renderBrief(regen){
+  const D = briefData();
+  if (regen || BRIEF.bottom == null) BRIEF.bottom = briefBottomLine(D);
+  if (regen || BRIEF.concerns == null) BRIEF.concerns = briefConcerns(D).join("\n");
+  $("brBottom").value = BRIEF.bottom; $("brConcerns").value = BRIEF.concerns;
+  $("brPreview").innerHTML = briefHTMLBody(D, null);
+  BRIEF.D = D;
+}
+function briefHTMLBody(D, logo){
+  const issued = Date.now(), z = zulu(), tz = z ? "UTC" : tzAbbr(issued), by = (prefs.initials || "").toUpperCase();
+  const cell = (h, hz) => { const c = LVC[hz.lv]; const txt = h.id === "svr" ? (hz.sevTxt === "None" ? "–" : hz.sevTxt.replace(" or higher", "+")) : hz.v == null ? "–" : `${Math.round(hz.v)}%`; return `<td style="background:rgba(${c.join(",")},${hz.lv ? 0.85 : 0.16});color:${hz.lv ? "#fff" : "#2F5A3C"}">${txt}</td>`; };
+  const r0 = S.rows[0], r1 = S.rows[S.rows.length - 1];
+  let h = `<div class="bq-head">${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">`}<div><h1>Leadership Quick Look</h1><p>KSC, Cape Canaveral SFS and Patrick SFB. Issued ${dayLabel(issued, z).dt} ${hhmm(issued, z)} ${tz}${by ? " by " + hesc(by) : ""}. Valid ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)} ${tz}.</p></div></div>`;
+  h += `<div class="bq-bl"><b>Bottom line</b>${hesc(BRIEF.bottom || "")}</div>`;
+  h += `<table class="bq-t"><thead><tr><th></th>${D.days.map(d => `<th>${d.label.wd}<small>${d.label.dt}</small></th>`).join("")}</tr></thead><tbody>`;
+  for (const hz of D.shown) h += `<tr><th>${hz.label}</th>${D.days.map(d => cell(hz, d.haz[hz.id])).join("")}</tr>`;
+  if (!D.shown.length) h += `<tr><th>All hazards</th>${D.days.map(() => `<td style="background:rgba(47,122,74,.16);color:#2F5A3C">Low</td>`).join("")}</tr>`;
+  h += `<tr class="sum"><th>Sky</th>${D.days.map(d => `<td>${d.sum.sky || "–"}</td>`).join("")}</tr>`;
+  h += `<tr class="sum"><th>High / low (°F)</th>${D.days.map(d => `<td>${d.sum.hi == null ? "–" : `${Math.round(d.sum.hi)} / ${Math.round(d.sum.lo)}`}</td>`).join("")}</tr>`;
+  h += `<tr class="sum"><th>Peak gusts (kt)</th>${D.days.map(d => `<td>${d.sum.gust == null ? "–" : Math.round(d.sum.gust)}</td>`).join("")}</tr>`;
+  h += `</tbody></table>`;
+  const cs = (BRIEF.concerns || "").split("\n").map(x => x.trim()).filter(Boolean);
+  h += `<div class="bq-c"><b>Key concerns</b>${cs.length ? `<ul>${cs.map(c => `<li>${hesc(c)}</li>`).join("")}</ul>` : `<p>None.</p>`}</div>`;
+  h += `<p class="bq-n">Chance of each hazard at any time during the day at any of the ${D.sites.length} forecast points (${D.sites.map(x => x[0].point).join(", ")}). Green low, amber moderate, red high.${D.quiet.length ? " Not a concern this period: " + D.quiet.map(x => x.label).join(", ") + "." : ""}</p>`;
+  return h;
+}
+const BRIEF_CSS = `.bq-head{display:flex;gap:14px;align-items:center;margin-bottom:12px}.bq-head img{height:64px;width:auto}.bq-head h1{margin:0;font:700 24px/1.1 "Segoe UI",Arial,sans-serif}.bq-head p{margin:4px 0 0;color:#4B5A68;font-size:12.5px}
+.bq-bl{border-left:5px solid #13202E;background:#F4F7F7;padding:10px 14px;margin:0 0 14px;font-size:15px;line-height:1.45}.bq-bl b{display:block;font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#4B5A68;margin-bottom:3px}
+table.bq-t{border-collapse:separate;border-spacing:3px;width:100%;font-size:13px;margin-bottom:12px}.bq-t th{text-align:left;font-weight:600;color:#13202E;padding:4px 8px;white-space:nowrap}.bq-t thead th{text-align:center;font-weight:700}.bq-t thead th small{display:block;font-weight:400;color:#7D8B97;font-size:11px}
+.bq-t td{text-align:center;padding:7px 4px;border-radius:5px;font-weight:700;min-width:62px}.bq-t tr.sum td{background:#F4F7F7;color:#13202E;font-weight:500}.bq-t tr.sum th{color:#4B5A68;font-weight:500}
+.bq-c{font-size:13.5px;line-height:1.45}.bq-c b{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#4B5A68}.bq-c ul{margin:4px 0 10px;padding-left:20px}.bq-n{font-size:11px;color:#7D8B97}`;
+function briefHTMLDoc(logo){
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Leadership Quick Look</title><style>body{font:14px/1.4 "Segoe UI",Arial,sans-serif;color:#13202E;margin:28px;max-width:1100px}${BRIEF_CSS}@media print{body{margin:10mm}}</style></head><body>${briefHTMLBody(BRIEF.D, logo)}</body></html>`;
+}
+function briefText(){
+  const D = BRIEF.D, z = zulu();
+  const lines = ["LEADERSHIP QUICK LOOK: KSC, CCSFS, PATRICK SFB", `Issued ${dayLabel(Date.now(), z).dt} ${hhmm(Date.now(), z)}${z ? "Z" : " " + tzAbbr(Date.now())}`, "", "BOTTOM LINE: " + BRIEF.bottom, ""];
+  for (const d of D.days){
+    const risks = D.shown.filter(h => d.haz[h.id].lv >= 1).map(h => `${h.label} ${h.id === "svr" ? d.haz[h.id].sevTxt : Math.round(d.haz[h.id].v) + "%"} (${LV[d.haz[h.id].lv].toLowerCase()})`);
+    lines.push(`${d.label.wd} ${d.label.dt}: ${d.sum.sky || ""}${d.sum.hi != null ? `, ${Math.round(d.sum.hi)}/${Math.round(d.sum.lo)}°F` : ""}${d.sum.gust != null ? `, gusts to ${Math.round(d.sum.gust)} kt` : ""}. ${risks.length ? "Concerns: " + risks.join("; ") + "." : "No concerns."}`);
+  }
+  const cs = (BRIEF.concerns || "").split("\n").map(x => x.trim()).filter(Boolean);
+  if (cs.length) lines.push("", "KEY CONCERNS:", ...cs.map(c => "- " + c));
+  return lines.join("\n");
+}
+/* one landscape page, built with the same PDF writer as the forecast */
+function briefPDF(logo){
+  const D = BRIEF.D, W = 792, Hp = 612, M = 32, cs = [];
+  const f = n => (+n).toFixed(2), rgbf = c => c.map(x => f(x/255)).join(" ");
+  const rect = (x, y, w, h, fill) => cs.push(`${rgbf(fill)} rg ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re f`);
+  const text = (s, x, y, size, opt = {}) => { const w = textW(s, size, opt.bold); let tx = x; if (opt.align === "c") tx = x - w/2; else if (opt.align === "r") tx = x - w; cs.push(`BT ${rgbf(opt.color || [19,32,46])} rg /${opt.bold ? "F2" : "F1"} ${f(size)} Tf ${f(tx)} ${f(Hp - y)} Td ${pdfStr(s)} Tj ET`); };
+  const wrap = (s, maxW, size, bold) => { const words = String(s).split(/\s+/), out = []; let ln = ""; for (const w of words){ const t = ln ? ln + " " + w : w; if (textW(t, size, bold) > maxW && ln){ out.push(ln); ln = w; } else ln = t; } if (ln) out.push(ln); return out; };
+  const z = zulu(), issued = Date.now(), tz = z ? "UTC" : tzAbbr(issued), r0 = S.rows[0], r1 = S.rows[S.rows.length - 1];
+  const LH = logo ? 52 : 0, LW = logo ? LH*logo.rw/logo.rh : 0, TX = logo ? M + LW + 12 : M;
+  if (logo) cs.push(`q ${f(LW)} 0 0 ${f(LH)} ${f(M)} ${f(Hp - M + 6 - LH)} cm /Im1 Do Q`);
+  text("Leadership Quick Look", TX, M + 16, 20, { bold:true });
+  text(`KSC, Cape Canaveral SFS and Patrick SFB. Issued ${dayLabel(issued, z).dt} ${hhmm(issued, z)} ${tz}${prefs.initials ? " by " + prefs.initials.toUpperCase() : ""}. Valid ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)} ${tz}.`, TX, M + 32, 9, { color:[75,90,104] });
+  let y = M + Math.max(44, LH + 2);
+  const bl = wrap(BRIEF.bottom || "", W - 2*M - 24, 11.5, false);
+  rect(M, y, W - 2*M, 22 + bl.length*15, [244,247,247]); rect(M, y, 4, 22 + bl.length*15, [19,32,46]);
+  text("BOTTOM LINE", M + 14, y + 13, 7.5, { bold:true, color:[75,90,104] });
+  bl.forEach((l, i) => text(l, M + 14, y + 28 + i*15, 11.5));
+  y += 30 + bl.length*15;
+  /* stoplight table */
+  const labW = 150, nd = D.days.length, cw = (W - 2*M - labW)/nd, rh = 21, gap = 2.5;
+  D.days.forEach((d, j) => { const cx = M + labW + j*cw + cw/2; text(d.label.wd, cx, y + 9, 9.5, { bold:true, align:"c" }); text(d.label.dt, cx, y + 19, 7.5, { align:"c", color:[125,139,151] }); });
+  y += 24;
+  const rowsH = [...(D.shown.length ? D.shown : [{ id:"none", label:"All hazards" }])];
+  for (const hz of rowsH){
+    text(hz.label, M + 2, y + 14, 9.5, { bold:true });
+    D.days.forEach((d, j) => {
+      const x = M + labW + j*cw + gap/2, v = hz.id === "none" ? { lv:0, v:null } : d.haz[hz.id];
+      const c = LVC[v.lv], fill = v.lv ? c : [230,240,233];
+      rect(x, y + 1, cw - gap, rh - gap, fill);
+      const txt = hz.id === "none" ? "Low" : hz.id === "svr" ? (v.sevTxt === "None" ? "-" : v.sevTxt.replace(" or higher", "+")) : v.v == null ? "-" : `${Math.round(v.v)}%`;
+      text(txt, x + (cw - gap)/2, y + 14, 9.5, { bold:true, align:"c", color: v.lv ? [255,255,255] : [47,90,60] });
+    });
+    y += rh;
+  }
+  for (const [lab, fn] of [["Sky", d => d.sum.sky || "-"], ["High / low (°F)", d => d.sum.hi == null ? "-" : `${Math.round(d.sum.hi)} / ${Math.round(d.sum.lo)}`], ["Peak gusts (kt)", d => d.sum.gust == null ? "-" : String(Math.round(d.sum.gust))]]){
+    text(lab, M + 2, y + 13, 9, { color:[75,90,104] });
+    D.days.forEach((d, j) => { const x = M + labW + j*cw + gap/2; rect(x, y + 1, cw - gap, rh - gap - 2, [244,247,247]); const t = fn(d); text(t, x + (cw - gap)/2, y + 13, fitSize(t, cw - 6, 9), { align:"c" }); });
+    y += rh - 2;
+  }
+  y += 10;
+  text("KEY CONCERNS", M, y + 8, 7.5, { bold:true, color:[75,90,104] }); y += 14;
+  const cs2 = (BRIEF.concerns || "").split("\n").map(x => x.trim()).filter(Boolean);
+  for (const c of (cs2.length ? cs2 : ["None."])){ const ls = wrap(c, W - 2*M - 16, 10, false); ls.forEach((l, i) => { if (i === 0) text("•", M + 2, y + 9, 10); text(l, M + 14, y + 9, 10); y += 13; }); y += 2; if (y > Hp - M - 30) break; }
+  const note = `Chance of each hazard at any time during the day at any of the ${D.sites.length} forecast points (${D.sites.map(x => x[0].point).join(", ")}). Green low, amber moderate, red high.${D.quiet.length ? " Not a concern this period: " + D.quiet.map(x => x.label).join(", ") + "." : ""}`;
+  wrap(note, W - 2*M, 7.5, false).forEach((l, i) => text(l, M, Hp - M - 10 + i*9 - (wrap(note, W - 2*M, 7.5, false).length - 1)*9, 7.5, { color:[125,139,151] }));
+  return pdfAssemble([cs.join("\n")], logo, W, Hp);
+}
+const fitSize = (s, maxW, size) => { let z = size; while (z > 5.5 && textW(s, z, false) > maxW) z -= 0.25; return z; };
+function openBrief(){
+  if (!S.rows || !Object.keys(S.agg).length){ toast("Wait for guidance to load"); return; }
+  renderBrief(BRIEF.bottom == null);
+  $("briefDlg").showModal();
+}
+function bindBrief(){
+  if (EXPO) return;
+  const st = document.createElement("style"); st.textContent = BRIEF_CSS.replace(/(^|\})\s*\./g, "$1 .brprev ."); document.head.appendChild(st);
+  $("briefBtn").onclick = openBrief;
+  $("brClose").onclick = () => $("briefDlg").close();
+  $("brRegen").onclick = () => renderBrief(true);
+  $("brBottom").oninput = e => { BRIEF.bottom = e.target.value; $("brPreview").innerHTML = briefHTMLBody(BRIEF.D, null); };
+  $("brConcerns").oninput = e => { BRIEF.concerns = e.target.value; $("brPreview").innerHTML = briefHTMLBody(BRIEF.D, null); };
+  const stamp = () => { const p = lp(Date.now()); return `${p.y}${pad2(p.mo)}${pad2(p.d)}_${pad2(p.h)}${pad2(p.mi)}`; };
+  $("brPdf").onclick = async () => { const logo = await loadLogo(); download(briefPDF(logo), `Leadership_Quick_Look_${stamp()}.pdf`); };
+  $("brHtml").onclick = async () => { const logo = await loadLogo(); download(new Blob([briefHTMLDoc(logo)], { type:"text/html" }), `Leadership_Quick_Look_${stamp()}.html`); };
+  $("brCopy").onclick = async () => { try { await navigator.clipboard.writeText(briefText()); toast("Copied as text for email"); } catch (e) { toast("Copy didn't work in this browser"); } };
 }
 
 let toastT = null;
@@ -1548,6 +1828,8 @@ function bind(){
   $("pubForm").addEventListener("submit", ev => { if (ev.submitter && ev.submitter.value === "ok" && !$("pubInit").value.trim()){ ev.preventDefault(); $("pubInit").focus(); } });
   $("orD").onclick = () => { prefs.orient = "down"; savePrefs(); renderAll(); };
   $("orA").onclick = () => { prefs.orient = "across"; savePrefs(); renderAll(); };
+  document.querySelectorAll("#wuSel button").forEach(b => b.setAttribute("aria-pressed", b.dataset.u === wuLabel()));
+  $("wuSel").onclick = ev => { const b = ev.target.closest("[data-u]"); if (!b) return; prefs.wu = b.dataset.u; savePrefs(); CH.layout = null; document.querySelectorAll("#wuSel button").forEach(x => x.setAttribute("aria-pressed", x.dataset.u === wuLabel())); renderAll(); };
   $("tzL").onclick = () => { prefs.tz = "L"; savePrefs(); renderAll(); renderExpSetup(); };
   $("tzZ").onclick = () => { prefs.tz = "Z"; savePrefs(); renderAll(); renderExpSetup(); };
   $("refresh").onclick = () => { if (S.loading) return; loadAll(); };
@@ -1633,4 +1915,5 @@ function bind(){
 }
 bind();
 bindExp();
+bindBrief();
 loadAll();

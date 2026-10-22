@@ -106,3 +106,14 @@ Each wind height gets its own sustained/peak rows and graph, and each constraint
 row (the chance it's met at any time in the row, from all guidance members), which moves with your
 wind and temperature edits. Settings and edits are saved in the browser separately from the
 planning page. Publishing writes Excel, CSV, PDF and HTML named after the operation.
+
+## Leadership quick look
+The **Leadership brief** button on the planning page builds a one-page summary from the official
+forecast (guidance plus forecaster edits) for all five points: an editable bottom line, a stoplight
+chart of days by hazard (lightning, rain, sustained and peak wind thresholds, heat, cold, freeze,
+fog/low visibility and SPC severe risk; hazards that never reach moderate are left off and listed
+as "not a concern"), the daily sky, high/low and peak gusts, and the key concerns with days, times
+and locations. Download it as a PDF or HTML page (both carry the 45 WS patch) or copy it as text
+for email. Stoplight levels: lightning, sustained >18 kt, peak >25 kt, cold and fog moderate at
+20 %, high at 50 %; rain 30/60 %; heat 30/60 %; peak >35 kt and freeze 10/30 %; SPC marginal is
+moderate, slight or higher is high.
