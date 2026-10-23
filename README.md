@@ -18,7 +18,7 @@ Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days
 docs/index.html                       the planning forecast page
 docs/exposure.html                    exposure forecasts for one operation (pads, SLF, XMR or a custom point)
 docs/planning-app.js                  the editor shared by the planning and exposure pages
-docs/taf.html                         KCOF TAF generator (separate tool, linked from the planning page)
+docs/taf.html                         TAF generator: KCOF, KTTS, KXMR or any ICAO
 docs/guidance.js                      guidance engine shared by both pages (fetching, blending, MOS, pipeline)
 docs/data/mos/                        MOS, LAMP, NBM text and SPC outlook mirror (written by the workflow)
 docs/data/hires.json                  RRFS, REFS members and calibrated thunder (written by the high-res workflow)
@@ -117,3 +117,15 @@ and locations. Download it as a PDF or HTML page (both carry the 45 WS patch) or
 for email. Stoplight levels: lightning, sustained >18 kt, peak >25 kt, cold and fog moderate at
 20 %, high at 50 %; rain 30/60 %; heat 30/60 %; peak >35 kt and freeze 10/30 %; SPC marginal is
 moderate, slight or higher is high.
+
+### TAF stations
+The TAF generator's station bar picks KCOF, KTTS or KXMR, or any other ICAO: type it and press
+Load (its position is looked up on aviationweather.gov, or enter latitude and longitude). Each
+station keeps its own draft. US stations get LAMP, MOS and NBM text; RRFS and calibrated thunder
+come from the nearest pipeline point within 15 km. The valid period can be 24 or 30 hours.
+
+### Brief settings
+In the leadership brief, "What the brief shows" turns each hazard and the daily sky, high/low and
+gust rows on or off (remembered). Hazards that are off are left out of the chart, bottom line and
+key concerns; "Show hazards even when they stay low" keeps all-green rows. Edited wording is kept
+when settings change; Regenerate rewrites it from the forecast.

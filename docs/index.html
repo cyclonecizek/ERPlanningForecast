@@ -268,6 +268,13 @@ dialog.wide{ width:min(1180px,96vw); }
 .brside{ display:grid; gap:12px; }
 .brside label{ display:grid; gap:5px; font:600 13px var(--cond); color:var(--ink-2); }
 .brside textarea{ border:1px solid var(--rule); border-radius:8px; padding:8px 10px; background:var(--panel); font:13.5px/1.4 var(--font); resize:vertical; }
+.brcfg{ border:1px solid var(--rule-2); border-radius:9px; padding:8px 10px; background:var(--panel-2); }
+.brcfg summary{ cursor:pointer; font:600 13px var(--cond); color:var(--ink-2); }
+.brh{ display:flex; justify-content:space-between; align-items:center; margin:8px 0 4px; font:600 12px var(--cond); color:var(--ink-3); letter-spacing:.3px; text-transform:uppercase; }
+.brchk{ display:grid; grid-template-columns:1fr 1fr; gap:3px 10px; }
+.brside .brchk label,.brside .brone{ display:flex; gap:6px; align-items:center; font:13px/1.25 var(--font); color:var(--ink); cursor:pointer; }
+.brone{ margin-top:6px; }
+.lnk{ border:0; background:none; color:var(--accent); cursor:pointer; font-size:12px; padding:0; }
 .brprev{ background:#fff; color:#13202E; border:1px solid var(--rule); border-radius:10px; padding:18px 20px; max-height:68vh; overflow:auto; font:14px/1.4 "Segoe UI", Arial, sans-serif; }
 @media (max-width:900px){ .brgrid{ grid-template-columns:1fr; } }
 dialog::backdrop{ background:rgba(13,21,29,.45); }
@@ -320,7 +327,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 </head>
 <body>
-<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="taf.html" data-page="taf">KCOF TAF</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="taf.html" data-page="taf">TAF generator</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
   <div class="brand">
     <img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">
@@ -427,6 +434,13 @@ document.addEventListener("DOMContentLoaded", function(){
         <label>Bottom line<textarea id="brBottom" rows="5"></textarea></label>
         <label>Key concerns (one per line)<textarea id="brConcerns" rows="9"></textarea></label>
         <button class="btn" id="brRegen" type="button">Regenerate from forecast</button>
+        <details class="brcfg" open><summary>What the brief shows</summary>
+          <div class="brh"><span>Hazards</span><button type="button" class="lnk" id="brAll">all on</button></div>
+          <div class="brchk" id="brHaz"></div>
+          <label class="brone"><input type="checkbox" id="brLow"> Show hazards even when they stay low</label>
+          <div class="brh"><span>Daily rows</span></div>
+          <div class="brchk" id="brSum"></div>
+        </details>
       </div>
       <div class="brprev" id="brPreview"></div>
     </div>

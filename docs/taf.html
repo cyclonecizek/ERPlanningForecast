@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TAF Generator | Patrick SFB (KCOF)</title>
+<title>TAF Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -65,6 +65,10 @@ a{ color:var(--accent); }
 .statusline label{ display:inline-flex; gap:7px; align-items:center; }
 .statusline input{ width:78px; padding:3px 7px; border:1px solid var(--rule); border-radius:6px; background:var(--panel); font-family:var(--mono); }
 .statusline .sp{ flex:1; }
+.stnline{ background:var(--panel); }
+.stnother{ display:inline-flex; gap:10px; align-items:center; }
+.stnother[hidden]{ display:none; }
+.statusline select{ border:1px solid var(--rule); border-radius:6px; padding:3px 6px; background:var(--panel); }
 .banner{ margin:14px 28px 0; padding:10px 14px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-weight:500; display:none; }
 .banner.show{ display:block; }
 .banner.demo{ background:var(--edit-bg); color:var(--edit); }
@@ -165,11 +169,11 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 </head>
 <body>
-<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="./#brief">Leadership brief</a><a href="taf.html" aria-current="page">KCOF TAF</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="./#brief">Leadership brief</a><a href="taf.html" aria-current="page">TAF generator</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
   <div class="tbrand"><img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()"><div>
     <h1>TAF generator</h1>
-    <div class="where"><b>Patrick SFB (KCOF)</b>, Air Force format (AFMAN 15-129), 30-hour valid period</div>
+    <div class="where" id="tafWhere"></div>
   </div></div>
   <div class="actions">
     <button class="btn" id="regen">Regenerate from guidance</button>
@@ -177,6 +181,13 @@ document.addEventListener("DOMContentLoaded", function(){
     <button class="btn primary" id="copy">Copy TAF</button>
   </div>
 </header>
+<div class="statusline stnline">
+  <span class="k">Station</span>
+  <span class="seg" id="stnSel" role="group" aria-label="TAF station"></span>
+  <span id="stnOther" hidden class="stnother"><label>ICAO <input id="cuIcao" maxlength="4" autocomplete="off" style="width:70px;text-transform:uppercase"></label><label>Lat <input id="cuLat" inputmode="decimal" style="width:82px" placeholder="auto"></label><label>Lon <input id="cuLon" inputmode="decimal" style="width:90px" placeholder="auto"></label><button class="btn" id="cuLoad" style="padding:4px 10px;font-size:13px">Load</button></span>
+  <span class="sp"></span>
+  <label>Valid period <select id="vlen"><option value="24">24 h</option><option value="30">30 h</option></select></label>
+</div>
 <div class="statusline">
   <span class="live" id="live">Loading guidance</span>
   <span class="seg" role="group" aria-label="TAF type"><button data-k="" aria-pressed="true">Routine</button><button data-k="AMD" aria-pressed="false">AMD</button><button data-k="COR" aria-pressed="false">COR</button></span>
@@ -195,7 +206,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </section>
 
   <section class="panel strip" aria-label="Hourly guidance">
-    <h2>Hourly guidance at KCOF</h2>
+    <h2 id="stripTitle">Hourly guidance</h2>
     <p class="sub" id="stripsub">Blend of the sources below. Shaded ceiling and visibility cells are below your category thresholds; the top row shows how the TAF groups line up.</p>
     <div class="gridwrap" id="grid"></div>
   </section>
@@ -220,13 +231,19 @@ document.addEventListener("DOMContentLoaded", function(){
 <script>
 "use strict";
 /* ============================================================
-   KCOF TAF generator (Air Force format, AFMAN 15-129)
+   TAF generator for KCOF, KTTS, KXMR or any ICAO (Air Force format, AFMAN 15-129)
    Uses the shared guidance engine in guidance.js.
    ============================================================ */
-const SITE = SITES.find(s => s.id === "patrick");
-const SI = SITES.indexOf(SITE);
+/* TAF sites: the three 45 WS airfields plus any ICAO */
+const TAF_SITES = [
+  { id:"kcof", name:"Patrick SFB", stn:"KCOF", lat:28.2349, lon:-80.6101 },
+  { id:"ktts", name:"KSC Shuttle Landing Facility", stn:"KTTS", lat:28.6150, lon:-80.6945 },
+  { id:"kxmr", name:"Cape Canaveral SFS Skid Strip", stn:"KXMR", lat:28.4686, lon:-80.5667 },
+];
+let SITE = null, SI = 0;
 const $ = id => document.getElementById(id);
-const LSK = "taffx:v1", LSD = "taffx:v1:draft";
+const LSK = "taffx:v1";
+const LSD = () => `taffx:v1:draft:${SITE ? SITE.stn : "KCOF"}`;
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
@@ -270,7 +287,7 @@ function fromDdhh(s, ref){
 }
 
 /* ============================================================
-   Hourly blend at KCOF
+   Hourly blend at the selected station
    ============================================================ */
 const Wt = s => T.weight[s.def.id] ?? s.def.w ?? 1;
 const onSources = () => S.G ? S.G.src.filter(s => T.enabled[s.def.id] !== false && Wt(s) > 0) : [];
@@ -440,7 +457,7 @@ function tempGroups(states){
   return `TX${f(mx.tc)}/${ddhh(mx.t)}Z TN${f(mn.tc)}/${ddhh(mn.t)}Z`;
 }
 function buildTAF(){
-  const start = S.start, n = 30;
+  const start = S.start, n = T.vlen || 30;
   S.hours = Array.from({ length:n }, (_, k) => start + k*H);
   S.states = S.hours.map(t => hourState(t, blendHour(t)));
   const P = plan(S.states); S.plan = P;
@@ -478,7 +495,7 @@ function lint(txt){
   if (!vm) add("err", "Valid period should be <code>ddhh/ddhh</code>.");
   else {
     vs = fromDdhh(vm[1], S.start || Date.now()); ve = fromDdhh(vm[2], vs + 30*H);
-    if (vs != null && ve != null){ const hrs = Math.round((ve - vs)/H); if (!kind && hrs !== 30) add("warn", `Valid period is ${hrs} hours; a routine KCOF TAF is 30.`); }
+    if (vs != null && ve != null){ const hrs = Math.round((ve - vs)/H); if (!kind && hrs !== (T.vlen || 30)) add("warn", `Valid period is ${hrs} hours; a routine ${SITE.stn} TAF is ${T.vlen || 30}.`); }
   }
   p++;
   /* split into groups */
@@ -536,7 +553,7 @@ function fitTaf(){ const ta = $("taf"); ta.rows = Math.max(6, ta.value.split("\n
 function renderLint(){ fitTaf(); $("lint").innerHTML = lint($("taf").value).map(x => `<li class="${x.lvl === "ok" ? "ok" : x.lvl === "err" ? "err" : x.lvl === "info" ? "info" : ""}">${x.msg}</li>`).join(""); }
 function edited(){ return $("taf").value.trim() !== S.gen.trim(); }
 function renderNote(){ const n = $("tafnote"); if (edited()){ n.textContent = "Edited by hand. Regenerate to start over from guidance."; n.classList.add("edited"); } else { n.textContent = "Generated from guidance. Edit freely; the checks below update as you type."; n.classList.remove("edited"); } }
-function saveDraft(){ store.set(LSD, { text:$("taf").value, gen:S.gen, start:S.start, issue:S.issue, kind:T.kind, saved:Date.now() }); }
+function saveDraft(){ store.set(LSD(), { text:$("taf").value, gen:S.gen, start:S.start, issue:S.issue, kind:T.kind, saved:Date.now() }); }
 function generate(force){
   if (!S.G) return;
   if (!force && edited() && !confirm("Replace your edited TAF with a fresh one from guidance?")) return;
@@ -584,24 +601,26 @@ function renderStatus(){
   if (DEMO){ b.className = "banner show demo"; b.textContent = "Demo mode: the guidance is synthetic. Remove ?demo=1 from the address for real guidance."; }
   else if (!S.loading && !ok){ b.className = "banner show"; b.textContent = "Couldn't load any guidance. Check the connection and press Refresh guidance; you can still write the TAF by hand."; }
   else b.className = "banner";
-  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === T.kind));
-  $("issue").value = ddhhmm(S.issue) + "Z"; $("vstart").value = ddhh(S.start); $("vend").textContent = ddhh(S.start + 30*H, true) + "Z";
+  document.querySelectorAll(".seg button[data-k]").forEach(x => x.setAttribute("aria-pressed", x.dataset.k === T.kind));
+  $("issue").value = ddhhmm(S.issue) + "Z"; $("vstart").value = ddhh(S.start); $("vend").textContent = ddhh(S.start + (T.vlen || 30)*H, true) + "Z";
 }
 let toastT = null;
 function toast(m){ const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2400); }
 
 /* ---------- loading ---------- */
 let buildT = null;
-function scheduleBuild(){ if (buildT) return; buildT = setTimeout(() => { buildT = null; renderSources(); renderStatus(); if (!edited() || !$("taf").value.trim()) generate(true); else { S.hours = Array.from({ length:30 }, (_, k) => S.start + k*H); S.states = S.hours.map(t => hourState(t, blendHour(t))); S.plan = plan(S.states); renderGrid(); } }, 200); }
+function scheduleBuild(){ if (buildT) return; buildT = setTimeout(() => { buildT = null; renderSources(); renderStatus(); if (!edited() || !$("taf").value.trim()) generate(true); else { S.hours = Array.from({ length:T.vlen || 30 }, (_, k) => S.start + k*H); S.states = S.hours.map(t => hourState(t, blendHour(t))); S.plan = plan(S.states); renderGrid(); } }, 200); }
 async function loadAll(){
+  const tok = S.tok = (S.tok || 0) + 1;   /* ignore results from a previous station */
   S.loading = true; S.TL = makeTimeline(Date.now()); S.G = new SiteGuidance(SITE, S.TL, []); S.status = {}; S.fetchedAt = Date.now();
   ALL_SOURCES.forEach(d => S.status[d.id] = { loading:true }); renderSources(); renderStatus();
   const tasks = [];
-  const om = (d, ens) => (DEMO ? demoOM(d, ens) : fetchOM(d, ens, S.TL)).then(per => { const ms = per[SI] || []; if (ms.length){ S.G.addSource(d, ms); S.status[d.id] = { ok:true, note: ens ? `${ms.length} members` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not available" }; }).finally(scheduleBuild);
+  const om = (d, ens) => (DEMO ? demoOM(d, ens) : fetchOM(d, ens, S.TL)).then(per => { const ms = per[SI] || []; if (ms.length){ (tok === S.tok) && S.G.addSource(d, ms); S.status[d.id] = { ok:true, note: ens ? `${ms.length} members` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not available" }; }).finally(scheduleBuild);
   OM_DET.forEach(d => tasks.push(om(d, false))); OM_ENS.forEach(d => tasks.push(om(d, true)));
-  MOS.forEach(d => tasks.push((DEMO ? demoMOS(d) : fetchMOS(d, S.TL)).then(per => { const x = per[SITE.stn]; if (x && x.members[0].t.some(v => v != null)){ S.G.addSource(d, x.members, { iv:x.iv, run:x.run }); S.status[d.id] = { ok:true, note: x.run ? `${p2(new Date(x.run).getUTCHours())}Z run` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleBuild)));
-  tasks.push((DEMO ? demoPipe() : fetchPipeline(S.TL)).then(res => { for (const d of PIPE){ const x = res[d.id], p = x && x.per[SITE.id]; if (!p){ S.status[d.id] = { err:"not in this run" }; continue; } S.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); S.status[d.id] = { ok:true, note:`${p2(new Date(x.run).getUTCHours())}Z run${p.members.length > 1 ? `, ${p.members.length} members` : ""}` }; } }).catch(() => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleBuild));
+  MOS.forEach(d => tasks.push((DEMO ? demoMOS(d) : fetchMOS(d, S.TL)).then(per => { const x = per[SITE.stn]; if (x && x.members[0].t.some(v => v != null)){ (tok === S.tok) && S.G.addSource(d, x.members, { iv:x.iv, run:x.run }); S.status[d.id] = { ok:true, note: x.run ? `${p2(new Date(x.run).getUTCHours())}Z run` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleBuild)));
+  tasks.push((DEMO ? demoPipe() : fetchPipeline(S.TL)).then(res => { for (const d of PIPE){ const x = res[d.id], p = x && x.per[SITE.id]; if (!p){ S.status[d.id] = { err:"not in this run" }; continue; } (tok === S.tok) && S.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); S.status[d.id] = { ok:true, note:`${p2(new Date(x.run).getUTCHours())}Z run${p.members.length > 1 ? `, ${p.members.length} members` : ""}` }; } }).catch(() => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleBuild));
   await Promise.allSettled(tasks);
+  if (tok !== S.tok) return;
   S.loading = false; S.fetchedAt = Date.now(); scheduleBuild();
 }
 
@@ -633,9 +652,46 @@ async function demoPipe(){
 }
 
 /* ---------- events ---------- */
+/* ---------- station selection ---------- */
+const isUSicao = ic => /^(K|PA|PH|PG|TJ)[A-Z0-9]{2,3}$/.test(ic);
+function stationList(){ return [...TAF_SITES, ...(T.custom && T.custom.stn ? [{ id:"custom", ...T.custom }] : [])]; }
+function applyStation(id){
+  const st = stationList().find(s => s.id === id) || TAF_SITES[0];
+  T.station = st.id; saveT();
+  SITE = { id: st.id, name: st.name, point: st.stn, stn: isUSicao(st.stn) ? st.stn : null, icao: st.stn, lat: st.lat, lon: st.lon };
+  SITES.splice(0, SITES.length, SITE); SI = 0;
+  SITE.stn = SITE.stn || SITE.icao;            /* the TAF header always uses the ICAO */
+  if (!isUSicao(st.stn)) SITES[0] = { ...SITE, stn: null };   /* no MOS outside the US */
+  document.title = `TAF Generator | ${st.name} (${st.stn})`;
+  $("tafWhere").innerHTML = `<b>${st.name.replace(/</g, "&lt;")} (${st.stn})</b>, Air Force format (AFMAN 15-129), ${T.vlen || 30}-hour valid period`;
+  $("stripTitle").textContent = `Hourly guidance at ${st.stn}`;
+  document.querySelectorAll("#stnSel [data-st]").forEach(b => b.setAttribute("aria-pressed", b.dataset.st === st.id || (b.dataset.st === "other" && st.id === "custom")));
+  $("stnOther").hidden = st.id !== "custom" && !S.showOther;
+  if (T.custom){ $("cuIcao").value = T.custom.stn || ""; $("cuLat").value = T.custom.lat ?? ""; $("cuLon").value = T.custom.lon ?? ""; }
+}
+function renderStations(){
+  $("stnSel").innerHTML = TAF_SITES.map(s => `<button type="button" data-st="${s.id}" title="${s.name}">${s.stn}</button>`).join("") + `<button type="button" data-st="other">${T.custom && T.custom.stn ? T.custom.stn : "Other ICAO"}</button>`;
+}
+/* look an ICAO up: this site's TFC/planning tables first, then aviationweather.gov */
+async function lookupICAO(ic){
+  const known = TAF_SITES.find(s => s.stn === ic); if (known) return known;
+  try {
+    const j = await getJSON(`https://aviationweather.gov/api/data/stationinfo?ids=${ic}&format=json`, 12000);
+    const s = Array.isArray(j) ? j[0] : null; if (s && isFinite(+s.lat)) return { name: s.site || ic, lat: +s.lat, lon: +s.lon };
+  } catch (e) { /* not reachable from this browser */ }
+  return null;
+}
+function switchStation(id){
+  applyStation(id);
+  const d = store.get(LSD(), null), now = Date.now();
+  S.gen = ""; $("taf").value = "";
+  if (d && d.start && d.start + 6*H > now && d.text){ S.start = d.start; S.issue = d.issue || now; S.gen = d.gen || ""; $("taf").value = d.text; }
+  renderStatus(); renderLint(); renderNote(); loadAll();
+}
 function init(){
   const now = Date.now();
-  const draft = store.get(LSD, null);
+  renderStations(); applyStation(T.station || "kcof");
+  const draft = store.get(LSD(), null);
   S.issue = now;
   S.start = Math.ceil(now/H)*H;
   if (T.kind === "AMD") S.start = Math.floor(now/H)*H;
@@ -643,10 +699,29 @@ function init(){
   renderCfg(); renderStatus(); renderLint(); renderNote();
   $("taf").addEventListener("input", () => { renderLint(); renderNote(); saveDraft(); });
   $("regen").onclick = () => { S.issue = Date.now(); generate(false); renderStatus(); };
+  $("stnSel").onclick = ev => {
+    const b = ev.target.closest("[data-st]"); if (!b) return;
+    if (b.dataset.st === "other"){ S.showOther = true; $("stnOther").hidden = false; if (T.custom && T.custom.stn) switchStation("custom"); else $("cuIcao").focus(); return; }
+    S.showOther = false; switchStation(b.dataset.st);
+  };
+  $("cuLoad").onclick = async () => {
+    const ic = $("cuIcao").value.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9]{3}$/.test(ic)){ toast("Enter a four-character ICAO"); return; }
+    let la = parseFloat($("cuLat").value), lo = parseFloat($("cuLon").value), name = ic;
+    if (!isFinite(la) || !isFinite(lo)){
+      toast(`Looking up ${ic}`);
+      const f = await lookupICAO(ic);
+      if (!f){ toast(`Couldn't find ${ic}; enter its latitude and longitude`); $("cuLat").focus(); return; }
+      la = f.lat; lo = f.lon; name = f.name || ic;
+    }
+    T.custom = { stn: ic, name, lat: la, lon: lo }; saveT(); renderStations(); switchStation("custom");
+  };
+  $("vlen").value = String(T.vlen || 30);
+  $("vlen").onchange = e => { T.vlen = +e.target.value; saveT(); applyStation(T.station); renderStatus(); generate(false); };
   $("refresh").onclick = () => { if (!S.loading) loadAll(); };
   $("copy").onclick = async () => { const v = $("taf").value; try { await navigator.clipboard.writeText(v); } catch (e) { $("taf").select(); document.execCommand("copy"); } toast("TAF copied"); };
   $("download").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([$("taf").value.trim() + "\n"], { type:"text/plain" })); a.download = `${SITE.stn}_TAF_${ddhhmm(S.issue)}Z.txt`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
-  document.querySelector(".seg").addEventListener("click", ev => { const b = ev.target.closest("[data-k]"); if (!b) return; T.kind = b.dataset.k; saveT(); if (T.kind === "AMD"){ S.issue = Date.now(); S.start = Math.floor(S.issue/H)*H; } renderStatus(); generate(false); });
+  document.querySelector(".seg:has(button[data-k])").addEventListener("click", ev => { const b = ev.target.closest("[data-k]"); if (!b) return; T.kind = b.dataset.k; saveT(); if (T.kind === "AMD"){ S.issue = Date.now(); S.start = Math.floor(S.issue/H)*H; } renderStatus(); generate(false); });
   $("issue").addEventListener("change", e => { const m = e.target.value.trim().match(/^(\d{2})(\d{2})(\d{2})Z?$/); if (!m){ toast("Issue time is ddhhmmZ"); renderStatus(); return; } const t = fromDdhh(m[1] + m[2], Date.now()); if (t != null){ S.issue = t + (+m[3])*60e3; generate(false); } renderStatus(); });
   $("vstart").addEventListener("change", e => { const t = fromDdhh(e.target.value.trim(), Date.now()); if (t == null){ toast("Valid start is ddhh"); renderStatus(); return; } S.start = t; renderStatus(); generate(false); });
   $("cfggrid").addEventListener("change", ev => { const k = ev.target.dataset.c; if (!k) return; T.cfg[k] = typeof DEF[k] === "boolean" ? ev.target.checked : typeof DEF[k] === "number" ? (parseFloat(ev.target.value) || DEF[k]) : ev.target.value; saveT(); generate(false); });

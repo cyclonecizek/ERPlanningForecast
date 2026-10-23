@@ -279,9 +279,17 @@ async function fetchMOS(src, TL){
     const st = stationsNow().map(s => "station=" + s).join("&");
     js = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?${st}&model=${src.model}`, 30000); from = "IEM";
   }
-  const rows = rowsOf(js);
+  let rows = rowsOf(js);
   const byStn = {};
   for (const r of rows){ const k = String(pick(r, ["station"]) || "").toUpperCase(); (byStn[k] = byStn[k] || []).push(r); }
+  /* stations the mirror doesn't carry (a custom TAF site, say) come straight from IEM */
+  const missing = stationsNow().filter(s => !byStn[s] && !byStn[s.slice(1)]);
+  if (from === "mirror" && missing.length){
+    try {
+      const j2 = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?${missing.map(s => "station=" + s).join("&")}&model=${src.model}`, 30000);
+      for (const r of rowsOf(j2)){ const k = String(pick(r, ["station"]) || "").toUpperCase(); (byStn[k] = byStn[k] || []).push(r); }
+    } catch (e) { /* not reachable from this browser */ }
+  }
   const out = {};
   for (const stn of stationsNow()){
     const rs = byStn[stn] || byStn[stn.slice(1)] || [];

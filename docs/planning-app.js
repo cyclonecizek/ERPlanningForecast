@@ -1489,8 +1489,10 @@ function briefData(){
     const sky = Object.entries(skyN).sort((a, b) => b[1] - a[1])[0];
     d.sum = { hi, lo, gust, sky: sky ? skyWord[sky[0]] : "" };
   }
-  const shown = HAZ.filter(h => days.some(d => d.haz[h.id].lv >= 1));
-  const quiet = HAZ.filter(h => !shown.includes(h));
+  const cfg = briefCfg(), inc = HAZ.filter(h => !cfg.off[h.id]);
+  const active = h => days.some(d => d.haz[h.id].lv >= 1);
+  const shown = inc.filter(h => cfg.showLow || active(h));
+  const quiet = inc.filter(h => !active(h));
   return { days, shown, quiet, sites };
 }
 /* concern sentences, most serious first; consecutive days with the same hazard are combined */
@@ -1547,10 +1549,17 @@ function briefBottomLine(D){
   return s;
 }
 const BRIEF = { bottom:null, concerns:null };
+/* what the brief shows: hazards switched off are left out everywhere (chart, bottom line, concerns) */
+function briefCfg(){ prefs.brief = Object.assign({ off:{}, showLow:false, sum:{ sky:true, hilo:true, gust:true } }, prefs.brief || {}); prefs.brief.sum = Object.assign({ sky:true, hilo:true, gust:true }, prefs.brief.sum || {}); return prefs.brief; }
+const SUMROWS = [["sky","Sky"],["hilo","High / low (°F)"],["gust","Peak gusts (kt)"]];
 function renderBrief(regen){
   const D = briefData();
-  if (regen || BRIEF.bottom == null) BRIEF.bottom = briefBottomLine(D);
-  if (regen || BRIEF.concerns == null) BRIEF.concerns = briefConcerns(D).join("\n");
+  const autoB = briefBottomLine(D), autoC = briefConcerns(D).join("\n");
+  /* keep the forecaster's wording unless it's still the automatic text */
+  if (regen || BRIEF.bottom == null || BRIEF.bottom === BRIEF.autoB) BRIEF.bottom = autoB;
+  if (regen || BRIEF.concerns == null || BRIEF.concerns === BRIEF.autoC) BRIEF.concerns = autoC;
+  BRIEF.autoB = autoB; BRIEF.autoC = autoC; BRIEF.D = D;
+  renderBriefCfg();
   $("brBottom").value = BRIEF.bottom; $("brConcerns").value = BRIEF.concerns;
   $("brPreview").innerHTML = briefHTMLBody(D, null);
   BRIEF.D = D;
@@ -1564,9 +1573,10 @@ function briefHTMLBody(D, logo){
   h += `<table class="bq-t"><thead><tr><th></th>${D.days.map(d => `<th>${d.label.wd}<small>${d.label.dt}</small></th>`).join("")}</tr></thead><tbody>`;
   for (const hz of D.shown) h += `<tr><th>${hz.label}</th>${D.days.map(d => cell(hz, d.haz[hz.id])).join("")}</tr>`;
   if (!D.shown.length) h += `<tr><th>All hazards</th>${D.days.map(() => `<td style="background:rgba(47,122,74,.16);color:#2F5A3C">Low</td>`).join("")}</tr>`;
-  h += `<tr class="sum"><th>Sky</th>${D.days.map(d => `<td>${d.sum.sky || "–"}</td>`).join("")}</tr>`;
-  h += `<tr class="sum"><th>High / low (°F)</th>${D.days.map(d => `<td>${d.sum.hi == null ? "–" : `${Math.round(d.sum.hi)} / ${Math.round(d.sum.lo)}`}</td>`).join("")}</tr>`;
-  h += `<tr class="sum"><th>Peak gusts (kt)</th>${D.days.map(d => `<td>${d.sum.gust == null ? "–" : Math.round(d.sum.gust)}</td>`).join("")}</tr>`;
+  const sc = briefCfg().sum;
+  if (sc.sky) h += `<tr class="sum"><th>Sky</th>${D.days.map(d => `<td>${d.sum.sky || "–"}</td>`).join("")}</tr>`;
+  if (sc.hilo) h += `<tr class="sum"><th>High / low (°F)</th>${D.days.map(d => `<td>${d.sum.hi == null ? "–" : `${Math.round(d.sum.hi)} / ${Math.round(d.sum.lo)}`}</td>`).join("")}</tr>`;
+  if (sc.gust) h += `<tr class="sum"><th>Peak gusts (kt)</th>${D.days.map(d => `<td>${d.sum.gust == null ? "–" : Math.round(d.sum.gust)}</td>`).join("")}</tr>`;
   h += `</tbody></table>`;
   const cs = (BRIEF.concerns || "").split("\n").map(x => x.trim()).filter(Boolean);
   h += `<div class="bq-c"><b>Key concerns</b>${cs.length ? `<ul>${cs.map(c => `<li>${hesc(c)}</li>`).join("")}</ul>` : `<p>None.</p>`}</div>`;
@@ -1586,7 +1596,8 @@ function briefText(){
   const lines = ["LEADERSHIP QUICK LOOK: KSC, CCSFS, PATRICK SFB", `Issued ${dayLabel(Date.now(), z).dt} ${hhmm(Date.now(), z)}${z ? "Z" : " " + tzAbbr(Date.now())}`, "", "BOTTOM LINE: " + BRIEF.bottom, ""];
   for (const d of D.days){
     const risks = D.shown.filter(h => d.haz[h.id].lv >= 1).map(h => `${h.label} ${h.id === "svr" ? d.haz[h.id].sevTxt : Math.round(d.haz[h.id].v) + "%"} (${LV[d.haz[h.id].lv].toLowerCase()})`);
-    lines.push(`${d.label.wd} ${d.label.dt}: ${d.sum.sky || ""}${d.sum.hi != null ? `, ${Math.round(d.sum.hi)}/${Math.round(d.sum.lo)}°F` : ""}${d.sum.gust != null ? `, gusts to ${Math.round(d.sum.gust)} kt` : ""}. ${risks.length ? "Concerns: " + risks.join("; ") + "." : "No concerns."}`);
+    const sc = briefCfg().sum, bits = [sc.sky ? d.sum.sky : "", sc.hilo && d.sum.hi != null ? `${Math.round(d.sum.hi)}/${Math.round(d.sum.lo)}°F` : "", sc.gust && d.sum.gust != null ? `gusts to ${Math.round(d.sum.gust)} kt` : ""].filter(Boolean);
+    lines.push(`${d.label.wd} ${d.label.dt}: ${bits.length ? bits.join(", ") + ". " : ""}${risks.length ? "Concerns: " + risks.join("; ") + "." : "No concerns."}`);
   }
   const cs = (BRIEF.concerns || "").split("\n").map(x => x.trim()).filter(Boolean);
   if (cs.length) lines.push("", "KEY CONCERNS:", ...cs.map(c => "- " + c));
@@ -1626,7 +1637,8 @@ function briefPDF(logo){
     });
     y += rh;
   }
-  for (const [lab, fn] of [["Sky", d => d.sum.sky || "-"], ["High / low (°F)", d => d.sum.hi == null ? "-" : `${Math.round(d.sum.hi)} / ${Math.round(d.sum.lo)}`], ["Peak gusts (kt)", d => d.sum.gust == null ? "-" : String(Math.round(d.sum.gust))]]){
+  const scp = briefCfg().sum;
+  for (const [lab, fn] of [["sky", "Sky", d => d.sum.sky || "-"], ["hilo", "High / low (°F)", d => d.sum.hi == null ? "-" : `${Math.round(d.sum.hi)} / ${Math.round(d.sum.lo)}`], ["gust", "Peak gusts (kt)", d => d.sum.gust == null ? "-" : String(Math.round(d.sum.gust))]].filter(x => scp[x[0]]).map(x => x.slice(1))){
     text(lab, M + 2, y + 13, 9, { color:[75,90,104] });
     D.days.forEach((d, j) => { const x = M + labW + j*cw + gap/2; rect(x, y + 1, cw - gap, rh - gap - 2, [244,247,247]); const t = fn(d); text(t, x + (cw - gap)/2, y + 13, fitSize(t, cw - 6, 9), { align:"c" }); });
     y += rh - 2;
@@ -1646,6 +1658,12 @@ function wantBrief(){
   if (location.hash === "#brief") history.replaceState(null, "", location.pathname + location.search);
   openBrief();
 }
+function renderBriefCfg(){
+  const c = briefCfg(), D = BRIEF.D;
+  $("brHaz").innerHTML = HAZ.map(h => `<label><input type="checkbox" data-bh="${h.id}" ${c.off[h.id] ? "" : "checked"}> ${h.label}</label>`).join("");
+  $("brSum").innerHTML = SUMROWS.map(([k, l]) => `<label><input type="checkbox" data-bs="${k}" ${c.sum[k] ? "checked" : ""}> ${l}</label>`).join("");
+  $("brLow").checked = !!c.showLow;
+}
 function openBrief(){
   if (!S.rows || !Object.keys(S.agg).length){ toast("Wait for guidance to load"); return; }
   renderBrief(BRIEF.bottom == null);
@@ -1657,6 +1675,11 @@ function bindBrief(){
   $("briefBtn").onclick = openBrief;
   $("brClose").onclick = () => $("briefDlg").close();
   $("brRegen").onclick = () => renderBrief(true);
+  const cfgChange = () => { savePrefs(); renderBrief(false); };
+  $("brHaz").onchange = e => { const id = e.target.dataset.bh; if (!id) return; const c = briefCfg(); if (e.target.checked) delete c.off[id]; else c.off[id] = true; cfgChange(); };
+  $("brSum").onchange = e => { const k = e.target.dataset.bs; if (!k) return; briefCfg().sum[k] = e.target.checked; cfgChange(); };
+  $("brLow").onchange = e => { briefCfg().showLow = e.target.checked; cfgChange(); };
+  $("brAll").onclick = () => { briefCfg().off = {}; cfgChange(); };
   $("brBottom").oninput = e => { BRIEF.bottom = e.target.value; $("brPreview").innerHTML = briefHTMLBody(BRIEF.D, null); };
   $("brConcerns").oninput = e => { BRIEF.concerns = e.target.value; $("brPreview").innerHTML = briefHTMLBody(BRIEF.D, null); };
   const stamp = () => { const p = lp(Date.now()); return `${p.y}${pad2(p.mo)}${pad2(p.d)}_${pad2(p.h)}${pad2(p.mi)}`; };
