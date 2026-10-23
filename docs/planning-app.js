@@ -1036,11 +1036,12 @@ async function loadLogo(){
     const img = await createImageBitmap(new Blob([png], { type:"image/png" }));
     const rh = 200, rw = Math.round(img.width*rh/img.height);
     const c = document.createElement("canvas"); c.width = rw; c.height = rh;
-    const x = c.getContext("2d"); x.fillStyle = "#ffffff"; x.fillRect(0, 0, rw, rh); x.drawImage(img, 0, 0, rw, rh);
-    const d = x.getImageData(0, 0, rw, rh).data, rgb = new Uint8Array(rw*rh*3);
-    for (let i = 0, j = 0; i < d.length; i += 4){ rgb[j++] = d[i]; rgb[j++] = d[i + 1]; rgb[j++] = d[i + 2]; }
+    /* keep the transparency: colour channels plus a separate alpha mask (PDF soft mask) */
+    const x = c.getContext("2d"); x.drawImage(img, 0, 0, rw, rh);
+    const d = x.getImageData(0, 0, rw, rh).data, rgb = new Uint8Array(rw*rh*3), alpha = new Uint8Array(rw*rh);
+    for (let i = 0, j = 0, k = 0; i < d.length; i += 4, k++){ rgb[j++] = d[i]; rgb[j++] = d[i + 1]; rgb[j++] = d[i + 2]; alpha[k] = d[i + 3]; }
     let bin = ""; for (let i = 0; i < png.length; i += 0x8000) bin += String.fromCharCode.apply(null, png.subarray(i, i + 0x8000));
-    LOGO = { png, w: img.width, h: img.height, rgb, rw, rh, b64: btoa(bin) };
+    LOGO = { png, w: img.width, h: img.height, rgb, alpha, rw, rh, b64: btoa(bin) };
   } catch (e) { LOGO = false; }
   return LOGO;
 }
@@ -1091,7 +1092,7 @@ const XSTYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </styleSheet>`;
 function sheetXML(sh){
   let x = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`;
-  x += `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" zoomScale="100"><pane xSplit="${sh.freeze.c}" ySplit="${sh.freeze.r}" topLeftCell="${colName(sh.freeze.c)}${sh.freeze.r + 1}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>`;
+  x += `<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" zoomScale="100" showGridLines="${sh.grid === false ? 0 : 1}">${sh.freeze ? `<pane xSplit="${sh.freeze.c}" ySplit="${sh.freeze.r}" topLeftCell="${colName(sh.freeze.c)}${sh.freeze.r + 1}" activePane="bottomRight" state="frozen"/>` : ""}</sheetView></sheetViews>`;
   x += `<sheetFormatPr defaultRowHeight="15"/><cols>${sh.cols.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols><sheetData>`;
   sh.rows.forEach((row, ri) => {
     const ht = sh.heights && sh.heights[ri];
@@ -1413,7 +1414,8 @@ function pdfAssemble(pages, logo, W, Hp){
   const add = s => { objs.push(s); return objs.length; };
   const fontR = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   const fontB = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-  const img = logo ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length ${logo.rgb.length} >>\nstream\n`, bin:logo.rgb, tail:"\nendstream" }) : null;
+  const smask = logo && logo.alpha ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${logo.alpha.length} >>\nstream\n`, bin:logo.alpha, tail:"\nendstream" }) : null;
+  const img = logo ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8${smask ? ` /SMask ${smask} 0 R` : ""} /Length ${logo.rgb.length} >>\nstream\n`, bin:logo.rgb, tail:"\nendstream" }) : null;
   const pagesId = objs.length + 1 + pages.length*2;   /* reserved after page objects */
   const kids = [];
   for (const c of pages){
@@ -1747,7 +1749,7 @@ async function loadAll(){
 /* ---------- demo data (only with ?demo=1) ---------- */
 function rng(seed){ let x = seed >>> 0 || 1; return () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296; }
 function demoSeries(TL, r, bias){
-  const m = {}; ["t","td","sky","s10","d10","g10","s80","vis","sw","pr","pp"].forEach(k => m[k] = new Array(TL.n).fill(null));
+  const m = {}; ["t","td","sky","s10","d10","g10","s80","vis","sw","pr","pp","cl","cm","ch","lcb"].forEach(k => m[k] = new Array(TL.n).fill(null));
   const front = TL.t0 + (70 + r()*10) * H;
   for (let i = 0; i < TL.n; i++){
     const t = TL.t0 + i*H, h = lp(t).h, post = t > front;
@@ -1763,6 +1765,7 @@ function demoSeries(TL, r, bias){
     m.sw[i] = Math.max(0, 850*Math.sin((h - 6)/12*Math.PI));
     m.pr[i] = !post && h >= 13 && h <= 19 && r() < 0.18 ? 0.05 + r()*0.3 : (Math.abs(t - front) < 6*H && r() < 0.4 ? 0.1 : 0);
     m.pp[i] = !post && h >= 13 && h <= 19 ? 25 + r()*20 : 5;
+    m.cl[i] = Math.min(100, m.sky[i]*0.7); m.cm[i] = Math.min(100, m.sky[i]*0.4); m.ch[i] = Math.min(100, m.sky[i]*0.6); m.lcb[i] = 3500 + r()*1500;
   }
   return m;
 }
@@ -1949,7 +1952,10 @@ function bind(){
   });
   bindChart();
 }
-bind();
-bindExp();
-bindBrief();
-loadAll();
+/* the LMEF page loads this file as a library (exports, logo, PDF writer) and runs its own UI */
+if (PAGE !== "lmef"){
+  bind();
+  bindExp();
+  bindBrief();
+  loadAll();
+}

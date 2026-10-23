@@ -19,6 +19,7 @@ docs/index.html                       the planning forecast page
 docs/exposure.html                    exposure forecasts for one operation (pads, SLF, XMR or a custom point)
 docs/planning-app.js                  the editor shared by the planning and exposure pages
 docs/taf.html                         TAF generator: KCOF, KTTS, KXMR or any ICAO
+docs/lmef.html, docs/lmef.js           Launch Mission Execution Forecast (LMEF) builder
 docs/guidance.js                      guidance engine shared by both pages (fetching, blending, MOS, pipeline)
 docs/data/mos/                        MOS, LAMP, NBM text and SPC outlook mirror (written by the workflow)
 docs/data/hires.json                  RRFS, REFS members and calibrated thunder (written by the high-res workflow)
@@ -129,3 +130,24 @@ In the leadership brief, "What the brief shows" turns each hazard and the daily 
 gust rows on or off (remembered). Hazards that are off are left out of the chart, bottom line and
 key concerns; "Show hazards even when they stay low" keeps all-green rows. Edited wording is kept
 when settings change; Regenerate rewrites it from the forecast.
+
+## Launch forecast (LMEF)
+`lmef.html` builds the public Launch Mission Execution Forecast. Pick an upcoming Space Coast launch
+(Launch Library 2, mirrored by the MOS workflow into `docs/data/launches.json`) or enter the mission,
+vehicle, pad and windows yourself. The page loads the guidance blend at the pad and fills in a first
+guess for the launch day and every delay day (add as many as you need):
+* probability of violation and primary concerns from the blend's chances of cumulus/showers,
+  lightning, thick mid-level cloud, the liftoff wind constraint (any height, sustained or peak, any
+  unit; the product just says "Liftoff Winds") and, for missions that have it, Flight Through
+  Precipitation,
+* weather and visibility, temperature and humidity, 200 ft liftoff winds, cloud layers.
+
+Additional risk criteria can each be switched off, and you can add your own:
+* Upper-Level Wind Shear: GFS 300-200 hPa winds (100 kt moderate, 140 kt high),
+* Booster Recovery Weather: winds (forecast API) and wave heights (marine API) at each recovery site
+  against your limits (80 % of a limit moderate, at or over high),
+* Proton Flux: GOES >=10 MeV integral flux and the SWPC 3-day S1-or-greater probabilities
+  (mirrored as `docs/data/protons.json` and `docs/data/3day.txt`).
+
+Every field is editable and a live preview shows the finished product. Export as PDF, HTML, Excel or
+CSV. The first guess is a starting point; the PoV and concerns are the forecaster's call.

@@ -20,6 +20,10 @@ STATIONS = ["KTTS", "KXMR", "KCOF"]           # SLF / LC-39B, KXMR / SLC-37, Pat
 MODELS = ["LAV", "GFS", "NAM", "GFSX", "NBS", "NBE"]
 IEM = "https://mesonet.agron.iastate.edu/api/1/mos.json?{st}&model={model}"
 SPC = "https://www.spc.noaa.gov/products/outlook/day{d}otlk_cat.nolyr.geojson"
+LL2 = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?location__ids=12,27&limit=15"
+KP = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json"
+PROTONS = "https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json"
+THREEDAY = "https://services.swpc.noaa.gov/text/3-day-forecast.txt"
 UA = {"User-Agent": "planning-forecast-mirror (GitHub Actions)"}
 
 
@@ -71,6 +75,27 @@ def main():
                 print(f"SPC day {d}: {len(js['features'])} features")
         except Exception as e:  # noqa: BLE001
             print(f"SPC day {d}: failed ({e}), keeping previous file")
+    # upcoming Space Coast launches (Launch Library 2) and the planetary K-index forecast (SWPC)
+    for name, url in (("launches.json", LL2), ("kp.json", KP), ("protons.json", PROTONS)):
+        try:
+            js = get(url)
+            if js:
+                with open(os.path.join(ROOT, "docs", "data", name + ".tmp"), "w") as f:
+                    json.dump(js, f, separators=(",", ":"))
+                os.replace(os.path.join(ROOT, "docs", "data", name + ".tmp"), os.path.join(ROOT, "docs", "data", name))
+                print(f"{name}: saved")
+        except Exception as e:  # noqa: BLE001
+            print(f"{name}: failed ({e}), keeping previous file")
+    # SWPC 3-day forecast text (solar radiation storm probabilities for proton flux)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(THREEDAY, headers=UA), timeout=45) as r:
+            txt = r.read().decode("utf-8", "replace")
+        if "Solar Radiation" in txt:
+            with open(os.path.join(ROOT, "docs", "data", "3day.txt"), "w") as f:
+                f.write(txt)
+            print("3day.txt: saved")
+    except Exception as e:  # noqa: BLE001
+        print(f"3day.txt: failed ({e}), keeping previous file")
     return 0 if ok else 1
 
 
