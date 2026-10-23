@@ -381,6 +381,15 @@ document.addEventListener("DOMContentLoaded", function(){
 @media (max-width:1100px){ .lmmain{ grid-template-columns:1fr; } .lmed{ position:static; max-height:none; } }
 #sites[hidden]{ display:none !important; }
 .warnline{ margin:6px 0 10px; padding:8px 10px; border-radius:8px; background:var(--edit-bg); color:var(--edit); font-size:13px; }
+.cpick{ display:grid; gap:6px; }
+.cpick > span{ font:600 12px var(--cond); color:var(--ink-2); display:flex; gap:8px; align-items:baseline; }
+.cpick > span small{ font:500 11.5px var(--font); color:var(--ink-3); }
+.cchips{ display:flex; flex-wrap:wrap; gap:5px; }
+.cc{ border:1px solid var(--rule); background:var(--panel); color:var(--ink-2); border-radius:999px; padding:4px 10px; font:500 12.5px var(--font); cursor:pointer; }
+.cc:hover{ border-color:var(--accent); }
+.cc.on{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600; }
+.cpick.ov .cc.on{ background:var(--edit); border-color:var(--edit); }
+.cother{ border:1px dashed var(--rule); border-radius:7px; padding:5px 8px; background:var(--panel); color:var(--ink); font:13px var(--font); }
 </style></head>
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>

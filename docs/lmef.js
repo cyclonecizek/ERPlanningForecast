@@ -499,11 +499,21 @@ function renderProductEditor(){
       <p class="mut gd">From the forecast: window PoV ${d.pov ?? "–"}% (average of the hourly PoV row). Rule averages: ${top || "all near zero"}.${Object.keys(d.why || {}).length ? " " + Object.entries(d.why).map(([k, v]) => `${(L.risks.find(r => r.id === k) || {}).name || k}: ${v}`).join(". ") + "." : ""}</p></details>`;
   }).join("");
 }
+/* primary concerns: pick from the rules and constraints in this forecast (or add another) */
+function concernOptions(){ return Object.keys(CONCERN_NAMES).filter(k => P[k]).map(k => CONCERN_NAMES[k]); }
+const splitC = v => String(v || "").split(/\s*,\s*/).filter(x => x && x !== "None");
+function concernPicker(i, d, ov){
+  const sel = splitC(ov.concerns !== undefined ? ov.concerns : d.concerns);
+  const opts = [...new Set([...concernOptions(), ...sel])];
+  return `<div class="wide cpick ${ov.concerns !== undefined ? "ov" : ""}"><span>Primary concerns ${ov.concerns !== undefined ? `<button type="button" class="rs" data-rs="concerns" title="Back to the forecast (${hesc(d.concerns || "None")})">↺</button>` : `<small>from the forecast; click to change</small>`}</span>
+    <div class="cchips">${opts.map(c => `<button type="button" class="cc ${sel.includes(c) ? "on" : ""}" data-cc="${hesc(c)}" aria-pressed="${sel.includes(c)}">${hesc(c)}</button>`).join("")}<button type="button" class="cc none ${sel.length ? "" : "on"}" data-cc="None" aria-pressed="${!sel.length}">None</button></div>
+    <input class="cother" data-cother placeholder="Other concern, press Enter" list="lmConcernList"></div>`;
+}
 function fields(i, d, ov){
   const fld = (f, label, cls) => `<label class="${cls || ""} ${ov[f] !== undefined ? "ov" : ""}">${label}<span class="u"><input data-f="${f}" ${f === "concerns" ? 'list="lmConcernList"' : ""} value="${hesc(ov[f] !== undefined ? ov[f] : (d[f] ?? ""))}">${ov[f] !== undefined ? `<button type="button" class="rs" data-rs="${f}" title="Back to the forecast value (${hesc(d[f] ?? "")})">↺</button>` : ""}</span></label>`;
   const D = dayData(i);
   return `<div class="edgrid" data-day="${i}">
-    ${fld("pov", "PoV %", "pv")}${fld("concerns", "Primary concerns", "wide")}
+    ${fld("pov", "PoV %", "pv")}${concernPicker(i, d, ov)}
     ${fld("wx", "Weather")}${fld("vis", "Visibility")}${fld("temp", "Temperature")}${fld("rh", "Humidity")}${fld("wind", "Liftoff winds (200 ft)", "wide")}
     <div class="wide clouds"><span>Clouds ${ov.clouds ? `<button type="button" class="rs" data-rs="clouds" title="Back to the forecast layers">↺</button>` : ""}</span>${(D.clouds || []).map((c, k) => `<div class="crow" data-i="${k}"><input data-c="type" value="${hesc(c.type || "")}" placeholder="Type"><select data-c="cov">${opt(["","Few","Scattered","Broken","Overcast"], c.cov || "")}</select><input data-c="base" type="number" step="500" value="${c.base ?? ""}" placeholder="Base"><input data-c="tops" type="number" step="500" value="${c.tops ?? ""}" placeholder="Tops"><button type="button" class="x" data-delc="${k}" aria-label="Remove layer">×</button></div>`).join("")}<button type="button" class="lnk" data-addc="1">+ cloud layer</button></div>
     ${risksOn().map(r => `<label class="${ov.risk && ov.risk[r.id] ? "ov" : ""}">${hesc(r.name)} <select data-risk="${r.id}">${opt(RISK, D.risk[r.id] || "Low")}</select></label>`).join("")}
@@ -569,17 +579,29 @@ function bindLM(){
   const upd = e => {
     const grid = e.target.closest("[data-day]"), t = e.target;
     if (t.dataset.segon != null){ const i = +t.dataset.segon; L.days[i] = L.days[i] || {}; L.days[i].showSeg = t.checked; saveL(); renderPreview(); return; }
-    if (!grid) return; const i = +grid.dataset.day, ov = ovOf(i);
+    if (!grid || (t.hasAttribute && t.hasAttribute("data-cother"))) return; const i = +grid.dataset.day, ov = ovOf(i);
     if (t.dataset.f) ov[t.dataset.f] = t.dataset.f === "pov" ? (t.value === "" ? undefined : Math.max(0, Math.min(100, +t.value))) : t.value;
     if (t.dataset.risk){ ov.risk = ov.risk || {}; ov.risk[t.dataset.risk] = t.value; }
     if (t.dataset.c){ const k = +t.closest("[data-i]").dataset.i; if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).map(c => ({ ...c })); ov.clouds[k] = ov.clouds[k] || {}; ov.clouds[k][t.dataset.c] = t.type === "number" ? (t.value === "" ? null : +t.value) : t.value; }
     saveL(); renderPreview();
   };
+  box.addEventListener("keydown", e => {
+    if (!e.target.hasAttribute || !e.target.hasAttribute("data-cother") || e.key !== "Enter") return;
+    e.preventDefault(); const v = e.target.value.trim(); if (!v) return;
+    const i = +e.target.closest(".dayed").querySelector("[data-day]").dataset.day, ov = ovOf(i);
+    const sel = splitC(ov.concerns !== undefined ? ov.concerns : dayData(i).concerns); if (!sel.includes(v)) sel.push(v);
+    ov.concerns = sel.join(", "); saveL(); e.target.blur(); box.innerHTML = ""; refreshProduct();
+  });
   box.addEventListener("input", upd); box.addEventListener("change", e => { upd(e); if (e.target.dataset.f || e.target.dataset.risk) { e.target.blur && null; } });
   box.addEventListener("click", e => {
     if (e.target.tagName === "BUTTON") e.target.blur();
     const grid = e.target.closest(".dayed"); if (!grid) return; const g2 = grid.querySelector("[data-day]"); if (!g2) return; const i = +g2.dataset.day, ov = ovOf(i);
     if (e.target.dataset.rs){ delete ov[e.target.dataset.rs]; saveL(); box.innerHTML = ""; refreshProduct(); }
+    if (e.target.dataset.cc){
+      const c = e.target.dataset.cc; let sel = splitC(ov.concerns !== undefined ? ov.concerns : dayData(i).concerns);
+      if (c === "None") sel = []; else sel = sel.includes(c) ? sel.filter(x => x !== c) : [...sel, c];
+      ov.concerns = sel.length ? sel.join(", ") : "None"; saveL(); box.innerHTML = ""; refreshProduct();
+    }
     if (e.target.dataset.addc){ if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).filter(c => c.type !== "None").map(c => ({ ...c })); ov.clouds.push({ type:"", cov:"", base:null, tops:null }); saveL(); box.innerHTML = ""; refreshProduct(); }
     if (e.target.dataset.delc != null){ if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).map(c => ({ ...c })); ov.clouds.splice(+e.target.dataset.delc, 1); saveL(); box.innerHTML = ""; refreshProduct(); }
   });
