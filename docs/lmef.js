@@ -31,11 +31,16 @@ async function fetchLaunches(){
     const c = (() => { try { return JSON.parse(localStorage.getItem("lmef:ll2") || "null"); } catch (e) { return null; } })();
     if (c && Date.now() - c.t < 3600e3) j = c.j;
     else {
-      try { j = await getJSON("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?location__ids=12,27&limit=15", 15000); try { localStorage.setItem("lmef:ll2", JSON.stringify({ t:Date.now(), j })); } catch (e) {} }
+      try {
+        j = await getJSON("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?location__ids=12,27&limit=15", 15000);
+        if (!j || !(j.results || []).length) j = await getJSON("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40", 15000);
+        try { localStorage.setItem("lmef:ll2", JSON.stringify({ t:Date.now(), j })); } catch (e) {}
+      }
       catch (e) { j = c ? c.j : null; }
     }
   }
-  const res = (j && j.results) || [];
+  const fl = r => /Cape Canaveral|Kennedy|Florida/i.test(((r.pad || {}).location || {}).name || (r.pad || {}).name || "");
+  const res = ((j && j.results) || []).filter(fl);
   return res.map(r => {
     const nm = String(r.name || ""), parts = nm.split(" | ");
     const padName = (r.pad && (r.pad.name || "")) || "";
@@ -127,6 +132,7 @@ const KT2MPH = 1.150779;
 const r5 = v => Math.max(5, Math.min(95, Math.round(v/5)*5));
 function derive(i){
   const w = (L.windows || [])[i]; if (!w) return {};
+  if (w.b < Date.now() - 30*60e3) return { past:true };
   const sid = SITES[0].id, OFs = typeof officialFor === "function" && S.agg[sid] ? officialFor(sid) : null;
   if (!OFs || !S.rows) return { pending:true };
   const o = OFs.o, rows = S.rows;
@@ -464,6 +470,7 @@ function mountPanels(){
 }
 function lmRenderStatus(){ /* the editor's status line covers guidance loading */ }
 function renderMissions(){
+  if (!SX.launches.length){ $("lmMission").innerHTML = `<option value="">No launch list yet. Run the planning MOS workflow, or type the mission below</option>`; return; }
   $("lmMission").innerHTML = `<option value="">Custom mission (type the details)</option>` + SX.launches.map(x => `<option value="${hesc(x.id)}" ${x.id === L.missionId ? "selected" : ""}>${hesc(lDate(x.net))} ${lHM(x.net)}L · ${hesc(x.vehicle)} · ${hesc(x.name)}${x.pad ? "" : " (pad not listed)"}</option>`).join("");
 }
 const opt = (list, v) => list.map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("");
@@ -484,6 +491,7 @@ function renderProductEditor(){
   box.innerHTML = (L.windows || []).map((w, i) => {
     const d = derive(i), ov = (L.days[i] && L.days[i].ov) || {}, D = dayData(i);
     if (d.pending) return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary><p class="mut">Waiting for guidance.</p></details>`;
+    if (d.past) return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary><p class="warnline">This window (${winText(w.a, w.b)}) has already passed, so there's no forecast for it. Pick an upcoming launch or move the window in the setup above.</p>${fields(i, d, ov)}</details>`;
     if (d.outOfRange) return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary><p class="mut">This window is beyond the guidance (about 8 days). Fill in the product fields by hand.</p>${fields(i, d, ov)}</details>`;
     const top = (d.ranks || []).filter(x => x[1] >= 1).slice(0, 5).map(([k, v]) => `${CONCERN_NAMES[k]} ${Math.round(v)}%`).join(", ");
     return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())} <span class="mut">${winText(w.a, w.b)}</span></summary>${fields(i, d, ov)}
@@ -595,8 +603,13 @@ async function initLM(){
   refreshProduct(); loadExtras();
   SX.launches = DEMO ? demoLaunches() : await fetchLaunches().catch(() => []);
   renderMissions();
-  /* first visit: start from the next launch */
-  if (!L.missionId && !L.mission && SX.launches.length){ $("lmMission").value = SX.launches[0].id; pickMission(SX.launches[0].id); }
+  /* first visit, or the saved launch has already gone: start from the next launch */
+  const stale = !(L.windows || []).some(w => w.b > Date.now());
+  if ((!L.missionId && !L.mission) || stale){
+    const next = SX.launches.find(x => x.w1 > Date.now());
+    if (next){ if (stale && L.mission) toast(`The saved windows had passed, so this opened on the next launch: ${next.name}`); $("lmMission").value = next.id; pickMission(next.id); }
+    else if (stale){ const t = Math.ceil(Date.now()/H)*H + 26*H; L.windows = [{ a:t, b:t + 4*H }, { a:t + 24*H, b:t + 28*H }]; L.days = []; L.missionId = ""; toast("The saved windows had passed; set the mission and windows for the next launch"); reconfigure(false); }
+  }
 }
 function demoLaunches(){ const t = Math.ceil(Date.now()/H)*H + 20*H; return [
   { id:"d1", name:"Starlink Group 10-11", vehicle:"Falcon 9", pad:"slc40", net:t, w0:t, w1:t + 4*H },

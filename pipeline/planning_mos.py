@@ -21,6 +21,7 @@ MODELS = ["LAV", "GFS", "NAM", "GFSX", "NBS", "NBE"]
 IEM = "https://mesonet.agron.iastate.edu/api/1/mos.json?{st}&model={model}"
 SPC = "https://www.spc.noaa.gov/products/outlook/day{d}otlk_cat.nolyr.geojson"
 LL2 = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?location__ids=12,27&limit=15"
+LL2_ALL = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40"
 KP = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json"
 PROTONS = "https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json"
 THREEDAY = "https://services.swpc.noaa.gov/text/3-day-forecast.txt"
@@ -79,6 +80,10 @@ def main():
     for name, url in (("launches.json", LL2), ("kp.json", KP), ("protons.json", PROTONS)):
         try:
             js = get(url)
+            if name == "launches.json" and not (js or {}).get("results"):
+                # fall back to the unfiltered list and keep the Florida launches
+                allj = get(LL2_ALL)
+                js = {"results": [r for r in (allj or {}).get("results", []) if any(k in str(((r.get("pad") or {}).get("location") or {}).get("name", "")) for k in ("Cape Canaveral", "Kennedy", "Florida"))]}
             if js:
                 with open(os.path.join(ROOT, "docs", "data", name + ".tmp"), "w") as f:
                     json.dump(js, f, separators=(",", ":"))
