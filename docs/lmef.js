@@ -190,17 +190,41 @@ function analyzeWindow(A, B){
   const maxIn = (m, k) => { let mx = null; for (let i = i0; i <= i1; i++){ const v = m[k] && m[k][i]; if (v != null && (mx == null || v > mx)) mx = v; } return mx; };
   const minIn = (m, k) => { let mn = null; for (let i = i0; i <= i1; i++){ const v = m[k] && m[k][i]; if (v != null && (mn == null || v < mn)) mn = v; } return mn; };
   const winAvg = ev => { const a = Math.floor(A/H)*H, b = Math.ceil(B/H)*H; const ps = srcs.map(s => G.srcWin(s, ev, a, b)).filter(v => v != null); return ps.length ? ps.reduce((x, y) => x + y, 0)/ps.length : null; };
-  const pLtg = winAvg("tst") ?? 0, pPop = winAvg("pop") ?? 0;
-  const lim = liftoffKt(), lk = liftoffKey(), gt = L.liftoff.op === ">=";
-  const pWind = frac(m => { const g = maxIn(m, lk); return g == null ? null : (gt ? g >= lim : g > lim); }) ?? 0;
-  const pThick = frac(m => { const c = maxIn(m, "cm"); return c == null ? null : c >= 75; }) ?? 0;
-  const pLowCu = frac(m => { const c = maxIn(m, "cl"); return c == null ? null : c >= 50; }) ?? 0;
-  const pCu = Math.min(0.95, 0.6*pPop + 0.25*pLowCu);
-  const parts = [["Cumulus Cloud Rule", pCu], ["Lightning Rule", pLtg*0.8], ["Thick Cloud Layers Rule", pThick*0.5], ["Liftoff Winds", pWind]];
-  if (pLtg >= 0.3) parts.push(["Anvil Cloud Rule", pLtg*0.4]);
-  if (L.ftp) parts.push(["Flight Through Precipitation", pPop*0.9]);
-  const pov = 1 - parts.reduce((q, [, p]) => q*(1 - Math.min(0.99, p)), 1);
-  const povR = Math.max(5, Math.min(95, Math.round(pov*100/5)*5));
+  /* constraint parts for any stretch of the window */
+  const partsFor = (a, b) => {
+    const j0 = TL.idx(Math.floor(a/H)*H), j1 = TL.idx(Math.ceil(b/H)*H);
+    const mx = (m, k) => { let v = null; for (let i = j0; i <= j1; i++){ const x = m[k] && m[k][i]; if (x != null && (v == null || x > v)) v = x; } return v; };
+    const avg = ev => { const ps = srcs.map(s => G.srcWin(s, ev, Math.floor(a/H)*H, Math.ceil(b/H)*H)).filter(v => v != null); return ps.length ? ps.reduce((x, y) => x + y, 0)/ps.length : null; };
+    const pLtg = avg("tst") ?? 0, pPop = avg("pop") ?? 0;
+    const lim = liftoffKt(), lk = liftoffKey(), gt = L.liftoff.op === ">=";
+    const pWind = frac(m => { const g = mx(m, lk); return g == null ? null : (gt ? g >= lim : g > lim); }) ?? 0;
+    const pThick = frac(m => { const c = mx(m, "cm"); return c == null ? null : c >= 75; }) ?? 0;
+    const pLowCu = frac(m => { const c = mx(m, "cl"); return c == null ? null : c >= 50; }) ?? 0;
+    const pCu = Math.min(0.95, 0.6*pPop + 0.25*pLowCu);
+    const parts = [["Cumulus Cloud Rule", pCu], ["Lightning Rule", pLtg*0.8], ["Thick Cloud Layers Rule", pThick*0.5], ["Liftoff Winds", pWind]];
+    if (pLtg >= 0.3) parts.push(["Anvil Cloud Rule", pLtg*0.4]);
+    if (L.ftp) parts.push(["Flight Through Precipitation", pPop*0.9]);
+    const pov = 1 - parts.reduce((q, [, p]) => q*(1 - Math.min(0.99, p)), 1);
+    return { parts, pov, pLtg, pPop };
+  };
+  const r5 = p => Math.max(5, Math.min(95, Math.round(p*100/5)*5));
+  /* long windows: PoV by segment; the headline is the chance at a random time, the segment average */
+  const segs = [];
+  const len = (B - A)/H;
+  if (len >= 2){
+    const step = len <= 12 ? 1 : len <= 24 ? 2 : 3;
+    for (let a = A; a < B - 1e-6; a += step*H){ const b = Math.min(B, a + step*H); const q = partsFor(a, b); segs.push({ a, b, pov: r5(q.pov), raw:q.pov, parts:q.parts }); }
+  }
+  const whole = partsFor(A, B);
+  const { pLtg, pPop } = whole;
+  let parts = whole.parts, povR = r5(whole.pov);
+  if (segs.length){
+    const wsum = segs.reduce((x, g) => x + (g.b - g.a), 0);
+    povR = r5(segs.reduce((x, g) => x + g.raw*(g.b - g.a), 0)/wsum);
+    /* segments can carry different rules (an anvil only where storms are likely), so match them by name */
+    const names = [...new Set([...whole.parts, ...segs.flatMap(g => g.parts)].map(p => p[0]))];
+    parts = names.map(n => [n, segs.reduce((x, g) => { const q = g.parts.find(p => p[0] === n); return x + (q ? q[1] : 0)*(g.b - g.a); }, 0)/wsum]);
+  }
   const concerns = parts.filter(x => x[1] >= 0.05).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]);
   const T = median(memW.map(([m]) => m.t && m.t[mid])), Td = median(memW.map(([m]) => m.td && m.td[mid]));
   const rh = T != null && Td != null ? Math.round(rhFrom(T, Td)) : null;
@@ -231,7 +255,7 @@ function analyzeWindow(A, B){
   }
   const rec = recoveryEval(A, B);
   if (rec.length){ risk.recovery = Math.max(...rec.map(r => r.lv)); why.recovery = rec.map(r => `${r.name}: gusts ${r.gmax == null ? "–" : Math.round(r.gmax) + " kt"}, seas ${r.wmax == null ? "–" : r.wmax.toFixed(1) + " ft"}`).join("; "); }
-  return { pov:povR, concerns: concerns.length ? concerns : ["None"], wx, vis:visMi, t: T == null ? null : Math.round(T), rh, dir, lo, hi, clouds, risk, why,
+  return { segs: segs.map(g => ({ a:g.a, b:g.b, pov:g.pov })), pov:povR, concerns: concerns.length ? concerns : ["None"], wx, vis:visMi, t: T == null ? null : Math.round(T), rh, dir, lo, hi, clouds, risk, why,
     parts: parts.map(([n, p]) => [n, Math.round(p*100)]), pLtg, pPop };
 }
 function analyzeAll(){
@@ -243,7 +267,7 @@ function analyzeAll(){
 function fromGuide(g, old){
   const risk = {};
   for (const r of L.risks){ const v = g.risk[r.id]; risk[r.id] = v != null ? RISK[v] : (old && old.risk && old.risk[r.id]) || "Low"; }
-  return { pov:g.pov, concerns:g.concerns.join(", "), wx:g.wx, vis:`${g.vis} mi.`, temp: g.t == null ? "" : `${g.t}°F`, rh: g.rh == null ? "" : `${g.rh}%`,
+  return { seg: g.segs.length ? g.segs : null, showSeg: old && old.showSeg === false ? false : true, pov:g.pov, concerns:g.concerns.join(", "), wx:g.wx, vis:`${g.vis} mi.`, temp: g.t == null ? "" : `${g.t}°F`, rh: g.rh == null ? "" : `${g.rh}%`,
     wind: g.lo == null ? "" : `${lpad3(g.dir)}° ${g.lo} - ${g.hi} mph`, clouds: g.clouds.map(c => ({ ...c })), risk, edited:false };
 }
 const lpad3 = n => String(n).padStart(3, "0");
@@ -259,6 +283,19 @@ function draftDiscussion(){
 }
 
 /* ---------- product (preview and HTML) ---------- */
+/* PoV through a long window: one bar per segment, plus the best and worst periods */
+const segOn = D => D && D.seg && D.seg.length > 1 && D.showSeg !== false;
+function segSummary(D){
+  const sg = D.seg, lo = Math.min(...sg.map(s => +s.pov)), hi = Math.max(...sg.map(s => +s.pov));
+  /* the longest unbroken stretch at that value (ties go to the earliest) */
+  const span = v => { let best = null, cur = null; sg.forEach(s => { if (+s.pov === v){ cur = cur ? { a:cur.a, b:s.b, n:cur.n + 1 } : { a:s.a, b:s.b, n:1 }; if (!best || cur.n > best.n) best = cur; } else cur = null; }); return `${lHM(best.a)}–${lHM(best.b)}L`; };
+  return lo === hi ? `PoV is about the same through the window (${lo}%).` : `Best opportunity ${span(lo)} (${lo}%). Highest risk ${span(hi)} (${hi}%).`;
+}
+function segStrip(D){
+  if (!segOn(D)) return "";
+  const top = Math.max(50, ...D.seg.map(x => +x.pov));
+  return `<div class="lm-seg"><h3>PoV through the window</h3><div class="lm-bars">${D.seg.map(s => { const [c] = POVC(+s.pov); return `<div class="b"><i style="height:${Math.max(5, 100*(+s.pov)/top)}%;background:${c}"></i><b>${s.pov}%</b><span>${lHM(s.a)}</span></div>`; }).join("")}</div><p>${segSummary(D)}</p></div>`;
+}
 const POVC = p => p >= 40 ? ["#B23A2E","High"] : p >= 20 ? ["#C98A1B","Moderate"] : ["#2F7A4A","Low"];
 const RISKC = { Low:"#2F7A4A", Moderate:"#C98A1B", High:"#B23A2E" };
 const risksOn = () => L.risks.filter(r => r.on && r.name);
@@ -274,6 +311,7 @@ function productHTML(logo){
         <div class="lm-gauge" style="--p:${+D.pov || 0};--c:${pc}"><div><b>${D.pov ?? "–"}<small>%</small></b><span>Probability of violation<sup>1</sup></span></div></div>
         <div class="lm-conc"><h3>Primary concerns</h3><div class="lm-chips">${String(D.concerns || "None").split(/\s*,\s*/).filter(Boolean).map(c => `<span>${hesc(c)}</span>`).join("")}</div><p class="lm-lvl" style="color:${pc}">${pl} weather risk</p></div>
       </div>
+      ${segStrip(D)}
       <div class="lm-grid ${rk.length ? "" : "two"}">
         <div class="lm-card"><h3>Weather conditions</h3>
           <dl><dt>Weather / visibility</dt><dd>${hesc(D.wx || "–")} / ${hesc(D.vis || "–")}</dd>
@@ -319,6 +357,8 @@ const LM_CSS = `.lm{font-family:"Barlow","Segoe UI",Arial,sans-serif;color:#1320
 .lm-gauge b{font:700 38px/1 "Barlow",Arial,sans-serif}.lm-gauge small{font-size:18px}.lm-gauge span{font-size:9.5px;line-height:1.2;color:#4B5A68;max-width:80px;letter-spacing:.3px;text-transform:uppercase}
 .lm-chips{display:flex;flex-wrap:wrap;gap:6px}.lm-chips span{background:#EEF3F7;border:1px solid #D4DBDF;border-radius:999px;padding:4px 12px;font-weight:600;font-size:14px}
 .lm-lvl{margin:8px 0 0;font-weight:700;font-size:13px;letter-spacing:.3px}
+.lm-seg{margin:0 0 14px;padding:10px 14px 8px;border:1px solid #E1E7EB;border-radius:10px;background:#FAFBFC}.lm-seg p{margin:6px 0 0;font-size:13px;font-weight:600}
+.lm-bars{display:flex;gap:6px;align-items:flex-end;height:110px}.lm-bars .b{flex:1;display:grid;grid-template-rows:1fr auto auto;height:100%;text-align:center;min-width:0;align-items:end}.lm-bars .b > i{height:100%}.lm-bars i{display:block;align-self:end;border-radius:4px 4px 0 0}.lm-bars b{font-size:11.5px;margin-top:2px}.lm-bars span{font-size:10.5px;color:#7D8B97}
 .lm-grid{display:grid;grid-template-columns:1.1fr 1.3fr 1fr;gap:12px}.lm-grid.two{grid-template-columns:1fr 1.3fr}.lm-card{border:1px solid #E1E7EB;border-radius:10px;padding:12px 14px;background:#FAFBFC}
 .lm-card dl{margin:0;display:grid;gap:4px}.lm-card dt{font-size:11.5px;color:#4B5A68}.lm-card dd{margin:0 0 4px;font-weight:600;font-size:14px}
 .lm-card table{width:100%;border-collapse:collapse;font-size:13px}.lm-card th{text-align:left;font-size:10.5px;color:#7D8B97;font-weight:600;padding:2px 4px;text-transform:uppercase;letter-spacing:.4px}.lm-card td{padding:4px;font-weight:600;border-top:1px solid #E6EBED}
@@ -333,7 +373,9 @@ function fieldRows(){
   out.push(["Mission", L.mission], ["Vehicle", L.vehicle], ["Pad", pad.full], ["Issued", issuedText(L.issued || Date.now())], ["Launch window", winText(W0.a, W0.b)], ["Forecast discussion", L.discussion]);
   (L.windows || []).forEach((w, i) => {
     const D = L.days[i] || {}, lab = winLabel(i);
-    out.push([`${lab} window`, winText(w.a, w.b)], [`${lab} PoV`, `${D.pov ?? ""}%`], [`${lab} primary concerns`, D.concerns], [`${lab} weather/visibility`, `${D.wx || ""} / ${D.vis || ""}`], [`${lab} temperature/humidity`, `${D.temp || ""} / ${D.rh || ""}`], [`${lab} liftoff winds (200 ft)`, D.wind]);
+    out.push([`${lab} window`, winText(w.a, w.b)], [`${lab} PoV`, `${D.pov ?? ""}%`]);
+    if (segOn(D)){ D.seg.forEach(sg => out.push([`${lab} PoV ${lHM(sg.a)}–${lHM(sg.b)}L`, `${sg.pov}%`])); out.push([`${lab} PoV through the window`, segSummary(D)]); }
+    out.push( [`${lab} primary concerns`, D.concerns], [`${lab} weather/visibility`, `${D.wx || ""} / ${D.vis || ""}`], [`${lab} temperature/humidity`, `${D.temp || ""} / ${D.rh || ""}`], [`${lab} liftoff winds (200 ft)`, D.wind]);
     (D.clouds || []).forEach((c, k) => out.push([`${lab} cloud layer ${k + 1}`, c.type === "None" ? "None" : `${c.type}, ${c.cov}, base ${c.base ?? "-"} ft, tops ${c.tops ?? "-"} ft`]));
     risksOn().forEach(r => out.push([`${lab} ${r.name.toLowerCase()}`, (D.risk || {})[r.id] || "Low"]));
   });
@@ -388,10 +430,10 @@ function pdfLMEF(logo){
   text("FORECAST DISCUSSION", M, y, 7.5, { bold:true, color:[75,90,104] }); y += 12;
   for (const ln of wrap(L.discussion, W - 2*M, 9.5, false).slice(0, 12)){ text(ln, M, y, 9.5); y += 12.5; }
   y += 6;
-  const rk = risksOn(), chH = Math.max(98, 34 + rk.length*22), secH = 28 + 92 + chH + 14, footH = 80;
+  const rk = risksOn(), chH = Math.max(98, 34 + rk.length*22), footH = 80;
   (L.windows || []).forEach((w, i) => {
+    const D = L.days[i] || {}, [pc] = POVC(+D.pov || 0), col = hex(pc), segH = segOn(D) ? 74 : 0, secH = 28 + 92 + segH + chH + 14;
     if (y + secH > Hp - footH){ pages.push(cs); cs = []; y = header(false) + 18; }
-    const D = L.days[i] || {}, [pc] = POVC(+D.pov || 0), col = hex(pc);
     rect(M, y, W - 2*M, 0.8, [212,219,223]); y += 16;
     text(winLabel(i).replace(/^./, c => c.toUpperCase()), M, y, 15, { bold:true }); text(winText(w.a, w.b), W - M, y, 8.5, { align:"r", color:[75,90,104] }); y += 12;
     const gy = y + 42; gauge(M + 42, gy, 32, +D.pov || 0, col);
@@ -401,6 +443,14 @@ function pdfLMEF(logo){
     for (const c of String(D.concerns || "None").split(/\s*,\s*/).filter(Boolean)){ const w2 = textW(c, 9.5, true) + 18; if (cx + w2 > W - M){ cx = M + 98; cy += 22; } rect(cx, cy, w2, 17, [238,243,247]); stroke(cx, cy, w2, 17, [212,219,223], .6); text(c, cx + 9, cy + 12, 9.5, { bold:true }); cx += w2 + 6; }
     text(`${POVC(+D.pov || 0)[1]} weather risk`, M + 98, cy + 34, 8.5, { bold:true, color:col });
     y = gy + 46;
+    if (segOn(D)){
+      rect(M, y, W - 2*M, segH - 8, [250,251,252]); stroke(M, y, W - 2*M, segH - 8, [225,231,235], .6);
+      text("POV THROUGH THE WINDOW", M + 9, y + 12, 7, { bold:true, color:[75,90,104] });
+      const n = D.seg.length, bx0 = M + 9, bw = (W - 2*M - 18)/n, base = y + 42, maxH = 20, top = Math.max(50, ...D.seg.map(x => +x.pov));
+      D.seg.forEach((sg, k) => { const hgt = Math.max(2, maxH*(+sg.pov)/top), c2 = hex(POVC(+sg.pov)[0]); rect(bx0 + k*bw + 2, base - hgt, bw - 4, hgt, c2); text(`${sg.pov}%`, bx0 + k*bw + bw/2, base - hgt - 2, 6.5, { bold:true, align:"c" }); text(lHM(sg.a), bx0 + k*bw + bw/2, base + 8, 6, { align:"c", color:[125,139,151] }); });
+      text(segSummary(D), M + 9, y + segH - 15, 7.5, { bold:true });
+      y += segH;
+    }
     const ncard = rk.length ? 3 : 2, cw = (W - 2*M - (ncard - 1)*8)/ncard;
     const card = (x, title2) => { rect(x, y, cw, chH, [250,251,252]); stroke(x, y, cw, chH, [225,231,235], .6); text(title2, x + 9, y + 13, 7, { bold:true, color:[75,90,104] }); };
     card(M, "WEATHER CONDITIONS");
@@ -454,7 +504,7 @@ function renderEditor(){
   if (!box.contains(ae)) box.innerHTML = (L.windows || []).map((w, i) => {
     const D = L.days[i] || {}, g = SX.guide[i];
     const note = g && g.outOfRange ? `<p class="mut">This window is beyond the guidance (about 8 days). Fill it in by hand.</p>` : g && g.parts ? `<p class="mut gd">Guidance first guess: PoV ${g.pov}% from ${g.parts.filter(p => p[1] > 0).map(p => `${p[0]}${p[0] === "Liftoff Winds" ? ` (${liftoffText()})` : ""} ${p[1]}%`).join(", ") || "no concerns"}.${Object.keys(g.why || {}).length ? " " + Object.entries(g.why).map(([k, v]) => `${(L.risks.find(r => r.id === k) || {}).name || k}: ${v}`).join(". ") + "." : ""}${D.edited ? ` <button type="button" class="lnk" data-reset="${i}">Use guidance</button>` : ""}</p>` : "";
-    return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary>${dayFields(i, D)}${note}</details>`;
+    return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary>${dayFields(i, D)}${segFields(i, D)}${note}</details>`;
   }).join("");
 }
 const liftoffText = () => `${L.liftoff.kind === "sust" ? "sustained" : "peak"} ${L.liftoff.op === ">=" ? "≥" : ">"} ${L.liftoff.v} ${L.liftoff.unit} at ${L.liftoff.h} ft`;
@@ -471,6 +521,11 @@ function dayFields(i, D){
     <div class="wide clouds"><span>Clouds</span>${clouds.map((c, k) => `<div class="crow" data-i="${k}"><input data-c="type" value="${hesc(c.type || "")}" placeholder="Type"><select data-c="cov">${opt(["","Few","Scattered","Broken","Overcast"], c.cov || "")}</select><input data-c="base" type="number" step="500" value="${c.base ?? ""}" placeholder="Base"><input data-c="tops" type="number" step="500" value="${c.tops ?? ""}" placeholder="Tops"><button type="button" class="x" data-delc="${k}" aria-label="Remove layer">×</button></div>`).join("")}<button type="button" class="lnk" data-addc="1">+ cloud layer</button></div>
     ${risksOn().map(r => `<label>${hesc(r.name)} <select data-risk="${r.id}">${opt(RISK, (D.risk || {})[r.id] || "Low")}</select></label>`).join("")}
   </div>`;
+}
+function segFields(i, D){
+  if (!D.seg || D.seg.length < 2) return "";
+  return `<div class="segs" data-day="${i}"><div class="segh"><label class="chk"><input type="checkbox" data-segon ${D.showSeg !== false ? "checked" : ""}> Show PoV through the window</label><button type="button" class="lnk" data-segavg="${i}">set headline to the average</button></div>
+    <div class="segrow">${D.seg.map((s, k) => `<label><span>${lHM(s.a)}</span><input type="number" min="0" max="100" step="5" data-seg="${k}" value="${s.pov}"></label>`).join("")}</div></div>`;
 }
 function renderPreview(){ $("lmPreview").innerHTML = productHTML(null); }
 function lmRenderAll(){ lmRenderStatus(); renderEditor(); renderPreview(); }
@@ -525,6 +580,8 @@ function bindLM(){
     const t = e.target;
     if (t.dataset.f) D[t.dataset.f] = t.dataset.f === "pov" ? (t.value === "" ? null : Math.max(0, Math.min(100, +t.value))) : t.value;
     if (t.dataset.risk) D.risk[t.dataset.risk] = t.value;
+    if (t.dataset.seg != null && D.seg){ D.seg[+t.dataset.seg].pov = t.value === "" ? 0 : Math.max(0, Math.min(100, +t.value)); }
+    if (t.hasAttribute && t.hasAttribute("data-segon")) D.showSeg = t.checked;
     if (t.dataset.c){ const k = +t.closest("[data-i]").dataset.i; D.clouds = D.clouds || []; D.clouds[k] = D.clouds[k] || {}; D.clouds[k][t.dataset.c] = t.type === "number" ? (t.value === "" ? null : +t.value) : t.value; }
     saveL(); renderPreview();
   };
@@ -534,6 +591,7 @@ function bindLM(){
     const grid = e.target.closest("details"); const i = grid ? +grid.querySelector("[data-day]").dataset.day : null;
     if (e.target.dataset.addc){ const D = L.days[i] = L.days[i] || { clouds:[], risk:{} }; D.clouds = (D.clouds || []).filter(c => c.type !== "None"); D.clouds.push({ type:"", cov:"", base:null, tops:null }); D.edited = true; saveL(); box.innerHTML = ""; lmRenderAll(); }
     if (e.target.dataset.delc != null){ const D = L.days[i]; D.clouds.splice(+e.target.dataset.delc, 1); D.edited = true; saveL(); box.innerHTML = ""; lmRenderAll(); }
+    if (e.target.dataset.segavg){ const k = +e.target.dataset.segavg, D = L.days[k]; if (D && D.seg){ const tot = D.seg.reduce((x, s) => x + (s.b - s.a), 0); D.pov = Math.round(D.seg.reduce((x, s) => x + (+s.pov)*(s.b - s.a), 0)/tot/5)*5; D.edited = true; saveL(); box.innerHTML = ""; lmRenderAll(); } }
     if (e.target.dataset.reset){ const k = +e.target.dataset.reset, g = SX.guide[k]; if (g && !g.outOfRange) L.days[k] = fromGuide(g, L.days[k]); saveL(); box.innerHTML = ""; lmRenderAll(); }
   });
   const stamp = () => { const p = lp(Date.now()); return `${p.y}${lpad(p.mo)}${lpad(p.d)}_${lpad(p.h)}${lpad(p.mi)}`; };

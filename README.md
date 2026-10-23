@@ -149,5 +149,10 @@ Additional risk criteria can each be switched off, and you can add your own:
 * Proton Flux: GOES >=10 MeV integral flux and the SWPC 3-day S1-or-greater probabilities
   (mirrored as `docs/data/protons.json` and `docs/data/3day.txt`).
 
+Windows of 2 hours or more get a PoV for each part of the window (hourly up to 12 h, then 2- or
+3-hour pieces). The headline PoV is their time-weighted average, the chance at a random time in the
+window, and the product adds a "PoV through the window" strip with the best opportunity and the
+highest-risk period. Each piece is editable; the strip can be switched off per window.
+
 Every field is editable and a live preview shows the finished product. Export as PDF, HTML, Excel or
 CSV. The first guess is a starting point; the PoV and concerns are the forecaster's call.
