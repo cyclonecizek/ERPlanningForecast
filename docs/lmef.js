@@ -1,49 +1,12 @@
 "use strict";
 /* ============================================================
-   Launch Mission Execution Forecast (LMEF)
-   First guess from the guidance blend at the pad for the primary
-   and 24-hour delay windows; every field can be edited.
+   Launch Mission Execution Forecast (LMEF) page
+   The editor (table and graphs) holds the hourly forecast for every launch
+   window; the product is built from those official values. Settings for the
+   mission, windows, constraints and risk criteria live in the setup panel.
    ============================================================ */
-const PADS = [
-  { id:"lc39a", name:"LC-39A", full:"Launch Complex 39A", lat:28.6083, lon:-80.6041, stn:"KTTS", match:/39A/i },
-  { id:"lc39b", name:"LC-39B", full:"Launch Complex 39B", lat:28.6272, lon:-80.6208, stn:"KTTS", match:/39B/i },
-  { id:"slc40", name:"SLC-40", full:"Space Launch Complex 40", lat:28.5620, lon:-80.5772, stn:"KXMR", match:/\b40\b/ },
-  { id:"slc41", name:"SLC-41", full:"Space Launch Complex 41", lat:28.5833, lon:-80.5830, stn:"KXMR", match:/\b41\b/ },
-  { id:"slc37", name:"SLC-37", full:"Space Launch Complex 37", lat:28.5314, lon:-80.5650, stn:"KXMR", match:/37/ },
-  { id:"lc36",  name:"LC-36",  full:"Launch Complex 36",       lat:28.4710, lon:-80.5378, stn:"KXMR", match:/\b36\b/ },
-  { id:"slc46", name:"SLC-46", full:"Space Launch Complex 46", lat:28.4585, lon:-80.5284, stn:"KXMR", match:/\b46\b/ },
-];
-const LMK = "lmef:v1";
-const RISK = ["Low","Moderate","High"];
-const CONCERNS = ["Cumulus Cloud Rule","Lightning Rule","Anvil Cloud Rule","Attached Anvil Rule","Thick Cloud Layers Rule","Disturbed Weather Rule","Flight Through Precipitation","Surface Electric Fields","Liftoff Winds","Ground Winds","Upper-Level Winds","None"];
-const VEHICLE_LIMITS = { "Falcon 9":30, "Falcon Heavy":30, "Vulcan":33, "Atlas V":33, "New Glenn":30, "SLS":34, "Starship":30 };
-/* additional risk criteria: three built in (each can be switched off) plus any the forecaster adds */
-const BUILTIN_RISKS = [
-  { id:"shear",    name:"Upper-Level Wind Shear",   auto:"GFS 300-200 hPa winds" },
-  { id:"recovery", name:"Booster Recovery Weather", auto:"recovery site winds and seas" },
-  { id:"proton",   name:"Proton Flux",              auto:"GOES ≥10 MeV protons and the SWPC 3-day forecast" },
-];
-const LS2 = {
-  get(d){ try { const v = localStorage.getItem(LMK); return v ? JSON.parse(v) : d; } catch (e){ return d; } },
-  set(v){ try { localStorage.setItem(LMK, JSON.stringify(v)); } catch (e){ /* storage unavailable */ } },
-};
-const L = Object.assign({ mission:"", vehicle:"Falcon 9", pad:"slc40", windows:null, discussion:"", next:"As Required", days:[], missionId:"",
-  liftoff:{ h:200, kind:"peak", op:">", v:30, unit:"kt" }, ftp:false, risks:null, recovery:[] }, LS2.get({}));
-/* older saves: one launch window plus one delay */
-if (!L.windows){
-  const w0 = L.w0, w1 = L.w1;
-  L.windows = w0 ? [{ a:w0, b:w1 }, { a:L.d0 || w0 + 24*H, b:L.d1 || w1 + 24*H }] : null;
-  if (L.days && !Array.isArray(L.days)) L.days = [L.days.day, L.days.delay].filter(Boolean);
-  if (L.limit) L.liftoff.v = L.limit;
-}
-if (!Array.isArray(L.days)) L.days = [];
-if (!L.risks) L.risks = BUILTIN_RISKS.map(r => ({ id:r.id, name:r.name, on:true, builtin:true }));
-L.risks.forEach(r => { if (r.id === "solar"){ r.id = "proton"; r.name = "Proton Flux"; } });
-const saveL = () => LS2.set(L);
-const SX = { launches:[], G:null, TL:null, status:{}, loading:false, upper:null, proton:null, recov:{}, guide:[], tok:0 };
-const winLabel = i => i === 0 ? "Launch day" : `${i*24}-hour delay`;
-const liftoffKt = () => (+L.liftoff.v || 0)*(WIND_UNITS[L.liftoff.unit] || 1);
-const liftoffKey = () => (L.liftoff.kind === "sust" ? "s" : "g") + (Math.round(+L.liftoff.h) || 200);
+const CONCERN_NAMES = Object.fromEntries([...RULES.map(r => [r.k, r.product]), ["rftp","Flight Through Precipitation"], ["xlw","Liftoff Winds"]]);
+const SX = { launches:[], upper:null, proton:null, recov:{}, lastPad:null };
 /* ---------- time formatting ---------- */
 const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const lpad = n => String(n).padStart(2, "0");
@@ -85,34 +48,6 @@ async function fetchLaunches(){
   }).filter(x => isFinite(x.net)).sort((a, b) => a.net - b.net);
 }
 
-/* ---------- guidance at the pad ---------- */
-async function loadGuidance(){
-  const tok = ++SX.tok;
-  const pad = PADS.find(p => p.id === L.pad) || PADS[2];
-  SITES.splice(0, SITES.length, { id:pad.id, name:pad.name, point:pad.name, stn:pad.stn, lat:pad.lat, lon:pad.lon });
-  setHeights();
-  SX.TL = makeTimeline(Date.now()); SX.G = new SiteGuidance(SITES[0], SX.TL, []); SX.status = {}; SX.loading = true;
-  lmRenderStatus();
-  const jobs = [];
-  const om = (d, ens) => (DEMO ? demoOM(d, ens, SX.TL) : fetchOM(d, ens, SX.TL)).then(per => { if (tok !== SX.tok) return; const ms = per[0] || []; if (ms.length){ SX.G.addSource(d, ms); SX.status[d.id] = 1; } }).catch(() => {}).finally(sched);
-  OM_DET.forEach(d => jobs.push(om(d, false))); OM_ENS.forEach(d => jobs.push(om(d, true)));
-  MOS.forEach(d => jobs.push((DEMO ? demoMOS(d, SX.TL) : fetchMOS(d, SX.TL)).then(per => { if (tok !== SX.tok) return; const x = per[pad.stn]; if (x && x.members[0].t.some(v => v != null)){ SX.G.addSource(d, x.members, { iv:x.iv, run:x.run }); SX.status[d.id] = 1; } }).catch(() => {}).finally(sched)));
-  jobs.push((DEMO ? demoPipeline(SX.TL) : fetchPipeline(SX.TL)).then(res => { if (tok !== SX.tok) return; for (const d of PIPE){ const x = res[d.id], p = x && x.per[pad.id]; if (p){ SX.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); SX.status[d.id] = 1; } } }).catch(() => {}).finally(sched));
-  jobs.push(fetchUpper(pad).then(u => { if (tok === SX.tok) SX.upper = u; }).catch(() => {}).finally(sched));
-  jobs.push(fetchProton().then(k => { if (tok === SX.tok) SX.proton = k; }).catch(() => {}).finally(sched));
-  jobs.push(loadRecovery());
-  await Promise.allSettled(jobs);
-  if (tok !== SX.tok) return;
-  SX.loading = false; sched();
-}
-/* the liftoff constraint height gets its own sustained / peak winds */
-function setHeights(){
-  const h = Math.round(+L.liftoff.h) || 200;
-  HEIGHTS.splice(0, HEIGHTS.length, ...[...new Set([54, 200, h])].sort((a, b) => a - b));
-  if (SX.G) for (const s of SX.G.src) for (const m of s.members) deriveHeights(m, SX.TL.n);
-}
-let schedT = null;
-function sched(){ if (schedT) return; schedT = setTimeout(() => { schedT = null; analyzeAll(); lmRenderAll(); }, 250); }
 /* upper-level winds from GFS (max speed 300-200 hPa, kt) */
 async function fetchUpper(pad){
   if (DEMO) return { t:[], max:[] };
@@ -176,112 +111,102 @@ function recoveryEval(A, B){
   return res;
 }
 
-/* ---------- first guess for one window ---------- */
+
+/* ---------- extra inputs for the risk criteria ---------- */
+function loadExtras(){
+  const pad = PADS.find(p => p.id === L.pad) || PADS[2];
+  fetchUpper(pad).then(u => { SX.upper = u; refreshProduct(); }).catch(() => {});
+  fetchProton().then(k => { SX.proton = k; refreshProduct(); }).catch(() => {});
+  loadRecovery();
+}
+const sched = () => refreshProduct();
+
+/* ---------- product values for one window, from the official forecast ---------- */
 const median = a => { a = a.filter(v => v != null && isFinite(v)).sort((x, y) => x - y); if (!a.length) return null; const k = a.length >> 1; return a.length % 2 ? a[k] : (a[k - 1] + a[k])/2; };
 const KT2MPH = 1.150779;
-function analyzeWindow(A, B){
-  const G = SX.G, TL = SX.TL; if (!G || !A || !B || B <= A) return null;
-  const i0 = TL.idx(Math.floor(A/H)*H), i1 = TL.idx(Math.ceil(B/H)*H);
-  if (i0 < 0 || i1 >= TL.n) return { outOfRange:true };
-  const mid = TL.idx(Math.round((A + B)/2/H)*H);
-  const srcs = G.src.filter(s => s.members.length || s.iv);
-  const memW = []; srcs.forEach(s => s.members.forEach(m => memW.push([m, 1/Math.max(1, s.members.length), s])));
-  const frac = f => { let w = 0, h = 0; for (const [m, wt] of memW){ const v = f(m); if (v == null) continue; w += wt; if (v) h += wt; } return w ? h/w : null; };
-  const maxIn = (m, k) => { let mx = null; for (let i = i0; i <= i1; i++){ const v = m[k] && m[k][i]; if (v != null && (mx == null || v > mx)) mx = v; } return mx; };
-  const minIn = (m, k) => { let mn = null; for (let i = i0; i <= i1; i++){ const v = m[k] && m[k][i]; if (v != null && (mn == null || v < mn)) mn = v; } return mn; };
-  const winAvg = ev => { const a = Math.floor(A/H)*H, b = Math.ceil(B/H)*H; const ps = srcs.map(s => G.srcWin(s, ev, a, b)).filter(v => v != null); return ps.length ? ps.reduce((x, y) => x + y, 0)/ps.length : null; };
-  /* constraint parts for any stretch of the window */
-  const partsFor = (a, b) => {
-    const j0 = TL.idx(Math.floor(a/H)*H), j1 = TL.idx(Math.ceil(b/H)*H);
-    const mx = (m, k) => { let v = null; for (let i = j0; i <= j1; i++){ const x = m[k] && m[k][i]; if (x != null && (v == null || x > v)) v = x; } return v; };
-    const avg = ev => { const ps = srcs.map(s => G.srcWin(s, ev, Math.floor(a/H)*H, Math.ceil(b/H)*H)).filter(v => v != null); return ps.length ? ps.reduce((x, y) => x + y, 0)/ps.length : null; };
-    const pLtg = avg("tst") ?? 0, pPop = avg("pop") ?? 0;
-    const lim = liftoffKt(), lk = liftoffKey(), gt = L.liftoff.op === ">=";
-    const pWind = frac(m => { const g = mx(m, lk); return g == null ? null : (gt ? g >= lim : g > lim); }) ?? 0;
-    const pThick = frac(m => { const c = mx(m, "cm"); return c == null ? null : c >= 75; }) ?? 0;
-    const pLowCu = frac(m => { const c = mx(m, "cl"); return c == null ? null : c >= 50; }) ?? 0;
-    const pCu = Math.min(0.95, 0.6*pPop + 0.25*pLowCu);
-    const parts = [["Cumulus Cloud Rule", pCu], ["Lightning Rule", pLtg*0.8], ["Thick Cloud Layers Rule", pThick*0.5], ["Liftoff Winds", pWind]];
-    if (pLtg >= 0.3) parts.push(["Anvil Cloud Rule", pLtg*0.4]);
-    if (L.ftp) parts.push(["Flight Through Precipitation", pPop*0.9]);
-    const pov = 1 - parts.reduce((q, [, p]) => q*(1 - Math.min(0.99, p)), 1);
-    return { parts, pov, pLtg, pPop };
-  };
-  const r5 = p => Math.max(5, Math.min(95, Math.round(p*100/5)*5));
-  /* long windows: PoV by segment; the headline is the chance at a random time, the segment average */
-  const segs = [];
-  const len = (B - A)/H;
-  if (len >= 2){
-    const step = len <= 12 ? 1 : len <= 24 ? 2 : 3;
-    for (let a = A; a < B - 1e-6; a += step*H){ const b = Math.min(B, a + step*H); const q = partsFor(a, b); segs.push({ a, b, pov: r5(q.pov), raw:q.pov, parts:q.parts }); }
+const r5 = v => Math.max(5, Math.min(95, Math.round(v/5)*5));
+function derive(i){
+  const w = (L.windows || [])[i]; if (!w) return {};
+  const sid = SITES[0].id, OFs = typeof officialFor === "function" && S.agg[sid] ? officialFor(sid) : null;
+  if (!OFs || !S.rows) return { pending:true };
+  const o = OFs.o, rows = S.rows;
+  /* rows inside the window, weighted by how much of each hour the window covers */
+  const inW = rows.map((r, ri) => [ri, Math.max(0, Math.min(r.b, w.b) - Math.max(r.a, w.a))/H]).filter(x => x[1] > 0 || (w.b === w.a && rows[x[0]].a <= w.a && rows[x[0]].b > w.a));
+  if (!inW.length) return { outOfRange:true };
+  const wsum = inW.reduce((s, x) => s + (x[1] || 1), 0);
+  const wmean = k => { let s = 0, n = 0; for (const [ri, wt] of inW){ const v = o[k] && o[k][ri]; if (v == null) continue; s += v*(wt || 1); n += (wt || 1); } return n ? s/n : null; };
+  const wmax = k => { const v = inW.map(([ri]) => o[k] && o[k][ri]).filter(x => x != null); return v.length ? Math.max(...v) : null; };
+  const pov = wmean("rpov");
+  const ranks = Object.keys(CONCERN_NAMES).filter(k => P[k]).map(k => [k, wmean(k) ?? 0]).sort((a, b) => b[1] - a[1]);
+  const concerns = ranks.filter(x => x[1] >= 5).slice(0, 2).map(x => CONCERN_NAMES[x[0]]);
+  /* PoV through the window: hourly up to 12 h, then 2- or 3-hour pieces */
+  let seg = null;
+  if ((w.b - w.a)/H >= 2){
+    const step = inW.length <= 12 ? 1 : inW.length <= 24 ? 2 : 3; seg = [];
+    for (let k = 0; k < inW.length; k += step){
+      const part = inW.slice(k, k + step); const a = Math.max(rows[part[0][0]].a, w.a), b = Math.min(rows[part[part.length - 1][0]].b, w.b);
+      const v = part.map(([ri]) => o.rpov[ri]).filter(x => x != null);
+      seg.push({ a, b, pov: v.length ? r5(v.reduce((x, y) => x + y, 0)/v.length) : null });
+    }
   }
-  const whole = partsFor(A, B);
-  const { pLtg, pPop } = whole;
-  let parts = whole.parts, povR = r5(whole.pov);
-  if (segs.length){
-    const wsum = segs.reduce((x, g) => x + (g.b - g.a), 0);
-    povR = r5(segs.reduce((x, g) => x + g.raw*(g.b - g.a), 0)/wsum);
-    /* segments can carry different rules (an anvil only where storms are likely), so match them by name */
-    const names = [...new Set([...whole.parts, ...segs.flatMap(g => g.parts)].map(p => p[0]))];
-    parts = names.map(n => [n, segs.reduce((x, g) => { const q = g.parts.find(p => p[0] === n); return x + (q ? q[1] : 0)*(g.b - g.a); }, 0)/wsum]);
-  }
-  const concerns = parts.filter(x => x[1] >= 0.05).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]);
-  const T = median(memW.map(([m]) => m.t && m.t[mid])), Td = median(memW.map(([m]) => m.td && m.td[mid]));
-  const rh = T != null && Td != null ? Math.round(rhFrom(T, Td)) : null;
-  const vis = median(memW.map(([m]) => minIn(m, "vis")));
-  const visMi = vis == null ? 7 : Math.min(7, Math.max(0, Math.round(vis/1609.34)));
-  const wx = pLtg >= 0.3 ? "Thunderstorms" : pPop >= 0.4 ? "Showers" : pPop >= 0.2 ? "Isolated showers" : "None";
-  let U = 0, V = 0; memW.forEach(([m, wt]) => { const d = m.d10 && m.d10[mid], s = m.s200 && m.s200[mid]; if (d == null || s == null) return; U += -Math.sin(d*Math.PI/180)*s*wt; V += -Math.cos(d*Math.PI/180)*s*wt; });
-  const dir = Math.round(((Math.atan2(-U, -V)*180/Math.PI + 360) % 360)/10)*10 || 360;
-  const sLo = median(memW.map(([m]) => minIn(m, "s200"))), gHi = median(memW.map(([m]) => maxIn(m, "g200")));
-  const lo = sLo == null ? null : Math.max(0, Math.floor(sLo*KT2MPH/5)*5), hi = gHi == null ? null : Math.max((lo ?? 0) + 5, Math.ceil(gHi*KT2MPH/5)*5);
-  const cl = median(memW.map(([m]) => maxIn(m, "cl"))), cm = median(memW.map(([m]) => maxIn(m, "cm"))), ch = median(memW.map(([m]) => maxIn(m, "ch")));
-  const lcb = median(memW.map(([m]) => minIn(m, "lcb")).filter(v => v != null && v < 12000));
+  const midRi = inW[Math.floor(inW.length/2)][0];
+  const pp = wmax("pp1") ?? 0, lt = wmax("lt1") ?? 0;
+  const wx = lt >= 30 ? "Thunderstorms" : pp >= 40 ? "Showers" : pp >= 20 ? "Isolated showers" : "None";
+  const T = o.t[midRi], Td = o.td[midRi];
+  const dir = o.dir[midRi], sLo = Math.min(...inW.map(([ri]) => o.s200[ri]).filter(v => v != null)), gHi = wmax("g200");
+  const lo = isFinite(sLo) ? Math.max(0, Math.floor(sLo*KT2MPH/5)*5) : null, hi = gHi != null ? Math.max((lo ?? 0) + 5, Math.ceil(gHi*KT2MPH/5)*5) : null;
+  /* clouds and visibility come from the guidance members */
+  const G = S.G[sid], TL = S.TL, i0 = TL.idx(Math.floor(w.a/H)*H), i1 = Math.min(TL.n - 1, TL.idx(Math.ceil(w.b/H)*H));
+  const mem = G ? G.src.flatMap(s => s.members) : [];
+  const mx = (m, k) => { let v = null; for (let x = i0; x <= i1; x++){ const q = m[k] && m[k][x]; if (q != null && (v == null || q > v)) v = q; } return v; };
+  const mn = (m, k) => { let v = null; for (let x = i0; x <= i1; x++){ const q = m[k] && m[k][x]; if (q != null && (v == null || q < v)) v = q; } return v; };
+  const vis = median(mem.map(m => mn(m, "vis"))), visMi = vis == null ? 7 : Math.min(7, Math.max(0, Math.round(vis/1609.34)));
+  const cl = median(mem.map(m => mx(m, "cl"))), cm = median(mem.map(m => mx(m, "cm"))), ch = median(mem.map(m => mx(m, "ch")));
+  const lcb = median(mem.map(m => mn(m, "lcb")).filter(v => v != null && v < 12000));
   const cov = p => p == null || p < 6.25 ? null : p < 31.25 ? "Few" : p < 56.25 ? "Scattered" : p < 93.75 ? "Broken" : "Overcast";
-  const r100 = v => Math.round(v/500)*500;
+  const rr = v => Math.round(v/500)*500, conv = Math.min(1, (pp + lt)/100);
   const clouds = [];
-  if (cov(cl)){ const base = r100(lcb != null ? Math.max(1000, lcb) : 4000); clouds.push({ type: cl >= 75 ? "Stratocumulus" : "Cumulus", cov: cov(cl), base, tops: r100(base + 4000 + 14000*Math.min(1, pPop + pLtg)) }); }
-  if (cov(cm)) clouds.push({ type: cm >= 75 ? "Altostratus" : "Altocumulus", cov: cov(cm), base:12000, tops:16000 });
-  if (cov(ch)) clouds.push({ type: ch >= 75 ? "Cirrostratus" : "Cirrus", cov: cov(ch), base:28000, tops:35000 });
+  if (cov(cl)){ const base = rr(lcb != null ? Math.max(1000, lcb) : 4000); clouds.push({ type: cl >= 75 ? "Stratocumulus" : "Cumulus", cov:cov(cl), base, tops: rr(base + 4000 + 14000*conv) }); }
+  if (cov(cm)) clouds.push({ type: cm >= 75 ? "Altostratus" : "Altocumulus", cov:cov(cm), base:12000, tops:16000 });
+  if (cov(ch)) clouds.push({ type: ch >= 75 ? "Cirrostratus" : "Cirrus", cov:cov(ch), base:28000, tops:35000 });
   if (!clouds.length) clouds.push({ type:"None", cov:"", base:null, tops:null });
   /* additional risk criteria */
-  const risk = {}, why = {};
-  if (SX.upper && SX.upper.t.length){ const v = SX.upper.t.map((t, i) => t >= Math.floor(A/H)*H && t <= Math.ceil(B/H)*H ? SX.upper.max[i] : null).filter(x => x != null); const mx = v.length ? Math.max(...v) : 0; risk.shear = mx >= 140 ? 2 : mx >= 100 ? 1 : 0; why.shear = `jet up to ${Math.round(mx)} kt`; }
+  const A = w.a, B = w.b, risk = {}, why = {};
+  if (SX.upper && SX.upper.t.length){ const v = SX.upper.t.map((t, k) => t >= Math.floor(A/H)*H && t <= Math.ceil(B/H)*H ? SX.upper.max[k] : null).filter(x => x != null); const m = v.length ? Math.max(...v) : 0; risk.shear = RISK[m >= 140 ? 2 : m >= 100 ? 1 : 0]; why.shear = `jet up to ${Math.round(m)} kt`; }
   if (SX.proton){
     const dayP = (SX.proton.days || []).filter(x => A < x.d + 86400e3 && B > x.d).map(x => x.p);
     const p = dayP.length ? Math.max(...dayP) : null, now = SX.proton.now, soon = A - Date.now() < 12*H;
-    risk.proton = (soon && now != null && now >= 100) || (p != null && p >= 50) ? 2 : (soon && now != null && now >= 10) || (p != null && p >= 10) ? 1 : 0;
+    risk.proton = RISK[(soon && now != null && now >= 100) || (p != null && p >= 50) ? 2 : (soon && now != null && now >= 10) || (p != null && p >= 10) ? 1 : 0];
     why.proton = [now != null ? `${now < 1 ? now.toFixed(2) : Math.round(now)} pfu now` : "", p != null ? `S1+ ${p}%` : "beyond the 3-day forecast"].filter(Boolean).join(", ");
   }
   const rec = recoveryEval(A, B);
-  if (rec.length){ risk.recovery = Math.max(...rec.map(r => r.lv)); why.recovery = rec.map(r => `${r.name}: gusts ${r.gmax == null ? "–" : Math.round(r.gmax) + " kt"}, seas ${r.wmax == null ? "–" : r.wmax.toFixed(1) + " ft"}`).join("; "); }
-  return { segs: segs.map(g => ({ a:g.a, b:g.b, pov:g.pov })), pov:povR, concerns: concerns.length ? concerns : ["None"], wx, vis:visMi, t: T == null ? null : Math.round(T), rh, dir, lo, hi, clouds, risk, why,
-    parts: parts.map(([n, p]) => [n, Math.round(p*100)]), pLtg, pPop };
+  if (rec.length){ risk.recovery = RISK[Math.max(...rec.map(r => r.lv))]; why.recovery = rec.map(r => `${r.name}: gusts ${r.gmax == null ? "–" : Math.round(r.gmax) + " kt"}, seas ${r.wmax == null ? "–" : r.wmax.toFixed(1) + " ft"}`).join("; "); }
+  return {
+    pov: pov == null ? null : r5(pov), concerns: concerns.length ? concerns.join(", ") : "None", seg, wx, vis:`${visMi} mi.`,
+    temp: T == null ? "" : `${Math.round(T)}°F`, rh: T != null && Td != null ? `${Math.round(rhFrom((T - 32)*5/9, (Td - 32)*5/9))}%` : "",
+    wind: lo == null || dir == null ? "" : `${String(Math.round(dir/10)*10 || 360).padStart(3, "0")}° ${lo} - ${hi} mph`, clouds, risk, why, ranks,
+  };
 }
-function analyzeAll(){
-  SX.guide = (L.windows || []).map(w => analyzeWindow(w.a, w.b));
-  SX.guide.forEach((g, i) => { if (g && !g.outOfRange && !(L.days[i] && L.days[i].edited)) L.days[i] = fromGuide(g, L.days[i]); });
-  if (!L.discussionEdited) L.discussion = draftDiscussion();
-  saveL();
+/* what the product shows: the derived values, with any field the forecaster overrode */
+const OV_FIELDS = ["pov","concerns","wx","vis","temp","rh","wind"];
+function dayData(i){
+  const d = derive(i), ov = (L.days[i] && L.days[i].ov) || {}, out = { ...d };
+  for (const f of OV_FIELDS) if (ov[f] !== undefined) out[f] = ov[f];
+  if (ov.clouds) out.clouds = ov.clouds;
+  out.risk = { ...(d.risk || {}) };
+  for (const r of L.risks){ if (ov.risk && ov.risk[r.id]) out.risk[r.id] = ov.risk[r.id]; else if (!out.risk[r.id]) out.risk[r.id] = "Low"; }
+  out.showSeg = !(L.days[i] && L.days[i].showSeg === false);
+  return out;
 }
-function fromGuide(g, old){
-  const risk = {};
-  for (const r of L.risks){ const v = g.risk[r.id]; risk[r.id] = v != null ? RISK[v] : (old && old.risk && old.risk[r.id]) || "Low"; }
-  return { seg: g.segs.length ? g.segs : null, showSeg: old && old.showSeg === false ? false : true, pov:g.pov, concerns:g.concerns.join(", "), wx:g.wx, vis:`${g.vis} mi.`, temp: g.t == null ? "" : `${g.t}°F`, rh: g.rh == null ? "" : `${g.rh}%`,
-    wind: g.lo == null ? "" : `${lpad3(g.dir)}° ${g.lo} - ${g.hi} mph`, clouds: g.clouds.map(c => ({ ...c })), risk, edited:false };
-}
-const lpad3 = n => String(n).padStart(3, "0");
 function draftDiscussion(){
-  const g = SX.guide[0]; if (!g || g.outOfRange) return "";
-  const dirWord = deg => ["north","northeast","east","southeast","south","southwest","west","northwest"][Math.round(((deg % 360) + 360) % 360/45) % 8];
-  const sky = g.clouds[0] && g.clouds[0].type !== "None" ? `${g.clouds[0].cov.toLowerCase()} ${g.clouds[0].type.toLowerCase()}` : "mostly clear skies";
-  const wxs = g.wx === "None" ? "no precipitation expected during the window" : `${g.wx.toLowerCase()} possible during the window (${Math.round(g.pPop*100)}% precipitation, ${Math.round(g.pLtg*100)}% lightning)`;
-  const conc = g.concerns[0] === "None" ? "Weather is not expected to be a concern for the primary window." : `The main concern for the primary window is the ${g.concerns.join(" and the ")}.`;
-  let s = `Guidance shows ${sky} at the pad with ${wxs}. Liftoff winds at 200 ft are forecast from the ${dirWord(g.dir)} at ${g.lo}–${g.hi} mph. ${conc}`;
-  SX.guide.slice(1).forEach((d, i) => { if (d && !d.outOfRange) s += ` For the ${winLabel(i + 1)}, the probability of violation is ${d.pov}%${d.concerns[0] !== "None" ? `, mainly for the ${d.concerns[0]}` : ""}.`; });
+  const g = dayData(0); if (!g || g.pending || g.outOfRange) return "";
+  const sky = g.clouds && g.clouds[0] && g.clouds[0].type !== "None" ? `${g.clouds[0].cov.toLowerCase()} ${g.clouds[0].type.toLowerCase()}` : "mostly clear skies";
+  const wxs = g.wx === "None" ? "no precipitation expected during the window" : `${g.wx.toLowerCase()} possible during the window`;
+  const conc = g.concerns === "None" ? "Weather is not expected to be a concern for the primary window." : `The main concern for the primary window is the ${g.concerns.split(", ").join(" and the ")}.`;
+  let s = `Guidance shows ${sky} at the pad with ${wxs}. ${g.wind ? `Liftoff winds at 200 ft are forecast from ${g.wind.replace(/^(\d+)°\s*/, "$1° at ")}. ` : ""}${conc}`;
+  (L.windows || []).slice(1).forEach((w, k) => { const d = dayData(k + 1); if (d && d.pov != null) s += ` For the ${winLabel(k + 1)}, the probability of violation is ${d.pov}%${d.concerns && d.concerns !== "None" ? `, mainly for the ${d.concerns.split(", ")[0]}` : ""}.`; });
   return s + " [Add the synoptic setup and forecaster reasoning.]";
 }
-
 /* ---------- product (preview and HTML) ---------- */
 /* PoV through a long window: one bar per segment, plus the best and worst periods */
 const segOn = D => D && D.seg && D.seg.length > 1 && D.showSeg !== false;
@@ -302,7 +227,7 @@ const risksOn = () => L.risks.filter(r => r.on && r.name);
 function productHTML(logo){
   const pad = PADS.find(p => p.id === L.pad) || PADS[2], issued = L.issued || Date.now(), W0 = (L.windows || [])[0] || {};
   const day = (i, w) => {
-    const D = L.days[i] || {}; const [pc, pl] = POVC(+D.pov || 0);
+    const D = dayData(i); const [pc, pl] = POVC(+D.pov || 0);
     const clouds = (D.clouds || []).filter(c => c.type);
     const rk = risksOn();
     return `<section class="lm-day">
@@ -372,7 +297,7 @@ function fieldRows(){
   const pad = PADS.find(p => p.id === L.pad) || PADS[2], W0 = (L.windows || [])[0] || {}, out = [];
   out.push(["Mission", L.mission], ["Vehicle", L.vehicle], ["Pad", pad.full], ["Issued", issuedText(L.issued || Date.now())], ["Launch window", winText(W0.a, W0.b)], ["Forecast discussion", L.discussion]);
   (L.windows || []).forEach((w, i) => {
-    const D = L.days[i] || {}, lab = winLabel(i);
+    const D = dayData(i), lab = winLabel(i);
     out.push([`${lab} window`, winText(w.a, w.b)], [`${lab} PoV`, `${D.pov ?? ""}%`]);
     if (segOn(D)){ D.seg.forEach(sg => out.push([`${lab} PoV ${lHM(sg.a)}–${lHM(sg.b)}L`, `${sg.pov}%`])); out.push([`${lab} PoV through the window`, segSummary(D)]); }
     out.push( [`${lab} primary concerns`, D.concerns], [`${lab} weather/visibility`, `${D.wx || ""} / ${D.vis || ""}`], [`${lab} temperature/humidity`, `${D.temp || ""} / ${D.rh || ""}`], [`${lab} liftoff winds (200 ft)`, D.wind]);
@@ -432,7 +357,7 @@ function pdfLMEF(logo){
   y += 6;
   const rk = risksOn(), chH = Math.max(98, 34 + rk.length*22), footH = 80;
   (L.windows || []).forEach((w, i) => {
-    const D = L.days[i] || {}, [pc] = POVC(+D.pov || 0), col = hex(pc), segH = segOn(D) ? 74 : 0, secH = 28 + 92 + segH + chH + 14;
+    const D = dayData(i), [pc] = POVC(+D.pov || 0), col = hex(pc), segH = segOn(D) ? 74 : 0, secH = 28 + 92 + segH + chH + 14;
     if (y + secH > Hp - footH){ pages.push(cs); cs = []; y = header(false) + 18; }
     rect(M, y, W - 2*M, 0.8, [212,219,223]); y += 16;
     text(winLabel(i).replace(/^./, c => c.toUpperCase()), M, y, 15, { bold:true }); text(winText(w.a, w.b), W - M, y, 8.5, { align:"r", color:[75,90,104] }); y += 12;
@@ -477,59 +402,118 @@ function htmlLMEF(logo){
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LMEF ${hesc(L.mission || "")}</title><link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet"><style>body{margin:0;padding:24px;background:#EEF2F4}${LM_CSS}@media print{body{background:#fff;padding:0}.lm{box-shadow:none}}</style></head><body>${productHTML(logo)}</body></html>`;
 }
 
-/* ---------- editor ---------- */
-function lmRenderStatus(){
-  const n = Object.keys(SX.status).length;
-  $("lmLive").textContent = DEMO ? "Demo guidance (synthetic data)" : SX.loading ? `Loading guidance for the pad, ${n} sources in` : `Guidance from ${n} sources at ${(PADS.find(p => p.id === L.pad) || {}).name}`;
+
+/* ---------- setup and product panels ---------- */
+const SETUP_HTML = `
+<section class="panel lmsetup" id="lmSetup" aria-label="Mission setup">
+  <div class="lmcols">
+    <div>
+      <h3>Mission</h3>
+      <div class="edgrid">
+        <label class="wide">Upcoming Space Coast launch <select id="lmMission"><option>Loading</option></select></label>
+        <label class="wide">Mission name <input id="lmName" autocomplete="off"></label>
+        <label>Vehicle <input id="lmVeh" list="lmVehList" autocomplete="off"></label>
+        <label>Pad <select id="lmPad"></select></label>
+        <label class="wide">Issued <input id="lmIss" type="datetime-local"></label>
+      </div>
+      <h3>Windows <small>local time, opens and closes</small></h3>
+      <div id="lmWins" class="wins"></div>
+    </div>
+    <div>
+      <h3>Constraints <small>shown on the product as "Liftoff Winds"</small></h3>
+      <div class="edgrid lift" id="lmLift"></div>
+      <label class="chk"><input type="checkbox" id="lmFtp"> This mission has a Flight Through Precipitation constraint</label>
+      <h3>Additional risk criteria <small>tick to show on the product</small></h3>
+      <div id="lmRisks" class="risks"></div>
+    </div>
+    <div>
+      <h3>Recovery weather <small>sites and limits for Booster Recovery Weather</small></h3>
+      <div id="lmRec" class="recs"></div>
+      <p class="mut lmnote">The table and graphs below hold the hourly forecast for every window: one row per NASA-STD-4010B lightning launch commit criterion, the liftoff wind constraint, and the hourly probability of violation built from them. Edit any hour; the product updates as you go.</p>
+    </div>
+  </div>
+  <datalist id="lmVehList"><option value="Falcon 9"><option value="Falcon Heavy"><option value="Vulcan"><option value="Atlas V"><option value="New Glenn"><option value="SLS"><option value="Starship"></datalist>
+</section>`;
+const PRODUCT_HTML = `
+<section class="panel lmprod" id="lmProduct" aria-label="LMEF product">
+  <div class="lmprodhead"><h2>LMEF product</h2><span class="mut">Built from the forecast above. Type in a field to override it for the product; ↺ goes back to the forecast.</span>
+    <div class="actions"><button class="btn" id="lmCsv">CSV</button><button class="btn" id="lmXlsx">Excel</button><button class="btn" id="lmHtml">HTML</button><button class="btn primary" id="lmPdf">Download PDF</button></div></div>
+  <div class="lmprodgrid">
+    <div class="lmed">
+      <h3>Forecast discussion <button type="button" class="lnk" id="lmDiscReset">redraft from the forecast</button></h3>
+      <textarea id="lmDisc" rows="7"></textarea>
+      <div id="lmDays"></div>
+      <h3>Footer</h3>
+      <div class="edgrid"><label class="wide">Next forecast will be issued <input id="lmNext"></label></div>
+      <datalist id="lmConcernList"></datalist>
+    </div>
+    <div class="lmprev"><div id="lmPreview"></div></div>
+  </div>
+</section>`;
+function mountPanels(){
+  const main = document.querySelector("main");
+  main.insertAdjacentHTML("afterbegin", SETUP_HTML);
+  const tablePanel = document.getElementById("matrix").closest("section") || main.lastElementChild;
+  tablePanel.insertAdjacentHTML("afterend", PRODUCT_HTML);
+  /* this page has its own outputs */
+  ["publish","briefBtn"].forEach(id => { const el = document.getElementById(id); if (el) el.hidden = true; });
+  document.querySelectorAll(".plan-only").forEach(x => x.hidden = true);
+  const t = document.getElementById("pageTitle"); if (t) t.textContent = "Launch forecast (LMEF)";
+  document.title = "Launch Mission Execution Forecast | 45th Weather Squadron";
+  document.querySelectorAll('.pagenav a[data-page="lmef"]').forEach(a => a.setAttribute("aria-current", "page"));
 }
+function lmRenderStatus(){ /* the editor's status line covers guidance loading */ }
 function renderMissions(){
   $("lmMission").innerHTML = `<option value="">Custom mission (type the details)</option>` + SX.launches.map(x => `<option value="${hesc(x.id)}" ${x.id === L.missionId ? "selected" : ""}>${hesc(lDate(x.net))} ${lHM(x.net)}L · ${hesc(x.vehicle)} · ${hesc(x.name)}${x.pad ? "" : " (pad not listed)"}</option>`).join("");
 }
 const opt = (list, v) => list.map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("");
-function renderEditor(){
+function renderSetup(){
   const ae = document.activeElement, set = (id, v) => { if ($(id) !== ae) $(id).value = v ?? ""; };
   set("lmName", L.mission); set("lmVeh", L.vehicle); $("lmPad").value = L.pad; set("lmIss", toInput(L.issued || Date.now()));
-  set("lmDisc", L.discussion); set("lmNext", L.next);
-  /* liftoff constraint and flight through precipitation */
-  if (!$("lmLift").contains(ae)) $("lmLift").innerHTML = `<label>Height <span class="u"><input data-l="h" type="number" min="10" max="600" value="${L.liftoff.h}"> ft</span></label><label>Wind <select data-l="kind">${[["peak","Peak"],["sust","Sustained"]].map(([v, l]) => `<option value="${v}" ${L.liftoff.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Limit <span class="u"><select data-l="op"><option value=">" ${L.liftoff.op === ">" ? "selected" : ""}>&gt;</option><option value=">=" ${L.liftoff.op === ">=" ? "selected" : ""}>≥</option></select><input data-l="v" type="number" min="0" value="${L.liftoff.v}"></span></label><label>Units <select data-l="unit">${Object.keys(WIND_UNITS).map(u => `<option ${u === L.liftoff.unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>`;
+  if (!$("lmLift").contains(ae)) $("lmLift").innerHTML = `<label>Height <span class="u"><input data-l="h" type="number" min="10" max="600" value="${L.liftoff.h}"> ft</span></label><label>Wind <select data-l="kind">${[["peak","Peak"],["sust","Sustained"]].map(([v, l]) => `<option value="${v}" ${L.liftoff.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Limit <span class="u"><select data-l="op"><option value=">" ${L.liftoff.op === ">" ? "selected" : ""}>&gt;</option><option value=">=" ${L.liftoff.op === ">=" ? "selected" : ""}>≥</option></select><input data-l="v" type="number" min="0" value="${L.liftoff.v}"></span></label><label>Units <select data-l="unit">${Object.keys(LIFT_UNITS).map(u => `<option ${u === L.liftoff.unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>`;
   $("lmFtp").checked = !!L.ftp;
-  /* windows */
   if (!$("lmWins").contains(ae)) $("lmWins").innerHTML = (L.windows || []).map((w, i) => `<div class="wrow" data-w="${i}"><span>${winLabel(i)}</span><input type="datetime-local" data-wa="a" value="${toInput(w.a)}"><input type="datetime-local" data-wa="b" value="${toInput(w.b)}">${i ? `<button type="button" class="x" data-delw="${i}" aria-label="Remove ${winLabel(i)}">×</button>` : "<i></i>"}</div>`).join("") + `<button type="button" class="lnk" id="lmAddWin">+ add delay day</button>`;
-  /* risk criteria */
   if (!$("lmRisks").contains(ae)) $("lmRisks").innerHTML = L.risks.map((r, i) => { const b = BUILTIN_RISKS.find(x => x.id === r.id); return `<div class="rrow" data-r="${i}"><input type="checkbox" data-ron ${r.on ? "checked" : ""} aria-label="Show ${hesc(r.name)}">${b ? `<span>${hesc(r.name)}<small>auto from ${b.auto}</small></span><i></i>` : `<input data-rname value="${hesc(r.name)}" placeholder="Criterion name"><button type="button" class="x" data-delr="${i}" aria-label="Remove">×</button>`}</div>`; }).join("") + `<button type="button" class="lnk" id="lmAddRisk">+ custom criterion</button>`;
-  /* recovery sites */
-  if (!$("lmRec").contains(ae)) $("lmRec").innerHTML = ((L.recovery || []).length ? `<div class="recrow hd"><span>Site</span><span>Latitude</span><span>Longitude</span><span>Max wind</span><span>Max seas</span><i></i></div>` : `<p class="mut">Add the booster or fairing recovery site to evaluate its winds and seas against your limits for Booster Recovery Weather.</p>`) + (L.recovery || []).map((r, i) => `<div class="recrow" data-k="${i}"><input data-rc="name" value="${hesc(r.name || "")}" placeholder="Site (e.g. ASDS)"><input data-rc="lat" inputmode="decimal" value="${r.lat ?? ""}" placeholder="Lat"><input data-rc="lon" inputmode="decimal" value="${r.lon ?? ""}" placeholder="Lon"><span class="u"><input data-rc="windKt" type="number" value="${r.windKt ?? ""}" placeholder="Wind"> kt</span><span class="u"><input data-rc="waveFt" type="number" step="0.5" value="${r.waveFt ?? ""}" placeholder="Seas"> ft</span><button type="button" class="x" data-delrec="${i}" aria-label="Remove site">×</button></div>`).join("") + `<button type="button" class="lnk" id="lmAddRec">+ recovery site</button>`;
-  /* one editor per window */
-  const box = $("lmDays");
-  if (!box.contains(ae)) box.innerHTML = (L.windows || []).map((w, i) => {
-    const D = L.days[i] || {}, g = SX.guide[i];
-    const note = g && g.outOfRange ? `<p class="mut">This window is beyond the guidance (about 8 days). Fill it in by hand.</p>` : g && g.parts ? `<p class="mut gd">Guidance first guess: PoV ${g.pov}% from ${g.parts.filter(p => p[1] > 0).map(p => `${p[0]}${p[0] === "Liftoff Winds" ? ` (${liftoffText()})` : ""} ${p[1]}%`).join(", ") || "no concerns"}.${Object.keys(g.why || {}).length ? " " + Object.entries(g.why).map(([k, v]) => `${(L.risks.find(r => r.id === k) || {}).name || k}: ${v}`).join(". ") + "." : ""}${D.edited ? ` <button type="button" class="lnk" data-reset="${i}">Use guidance</button>` : ""}</p>` : "";
-    return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary>${dayFields(i, D)}${segFields(i, D)}${note}</details>`;
+  if (!$("lmRec").contains(ae)) $("lmRec").innerHTML = ((L.recovery || []).length ? `<div class="recrow hd"><span>Site</span><span>Latitude</span><span>Longitude</span><span>Max wind</span><span>Max seas</span><i></i></div>` : `<p class="mut">Add the booster or fairing recovery site to evaluate its winds and seas against your limits.</p>`) + (L.recovery || []).map((r, i) => `<div class="recrow" data-k="${i}"><input data-rc="name" value="${hesc(r.name || "")}" placeholder="Site (e.g. ASDS)"><input data-rc="lat" inputmode="decimal" value="${r.lat ?? ""}" placeholder="Lat"><input data-rc="lon" inputmode="decimal" value="${r.lon ?? ""}" placeholder="Lon"><span class="u"><input data-rc="windKt" type="number" value="${r.windKt ?? ""}" placeholder="Wind"> kt</span><span class="u"><input data-rc="waveFt" type="number" step="0.5" value="${r.waveFt ?? ""}" placeholder="Seas"> ft</span><button type="button" class="x" data-delrec="${i}" aria-label="Remove site">×</button></div>`).join("") + `<button type="button" class="lnk" id="lmAddRec">+ recovery site</button>`;
+}
+function renderProductEditor(){
+  const ae = document.activeElement, box = $("lmDays");
+  if ($("lmDisc") !== ae){ if (!L.discussionEdited) L.discussion = draftDiscussion(); $("lmDisc").value = L.discussion || ""; }
+  if ($("lmNext") !== ae) $("lmNext").value = L.next || "";
+  if (box.contains(ae)) return;
+  box.innerHTML = (L.windows || []).map((w, i) => {
+    const d = derive(i), ov = (L.days[i] && L.days[i].ov) || {}, D = dayData(i);
+    if (d.pending) return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary><p class="mut">Waiting for guidance.</p></details>`;
+    if (d.outOfRange) return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())}</summary><p class="mut">This window is beyond the guidance (about 8 days). Fill in the product fields by hand.</p>${fields(i, d, ov)}</details>`;
+    const top = (d.ranks || []).filter(x => x[1] >= 1).slice(0, 5).map(([k, v]) => `${CONCERN_NAMES[k]} ${Math.round(v)}%`).join(", ");
+    return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())} <span class="mut">${winText(w.a, w.b)}</span></summary>${fields(i, d, ov)}
+      ${d.seg ? `<label class="chk"><input type="checkbox" data-segon="${i}" ${D.showSeg ? "checked" : ""}> Show PoV through the window on the product</label>` : ""}
+      <p class="mut gd">From the forecast: window PoV ${d.pov ?? "–"}% (average of the hourly PoV row). Rule averages: ${top || "all near zero"}.${Object.keys(d.why || {}).length ? " " + Object.entries(d.why).map(([k, v]) => `${(L.risks.find(r => r.id === k) || {}).name || k}: ${v}`).join(". ") + "." : ""}</p></details>`;
   }).join("");
 }
-const liftoffText = () => `${L.liftoff.kind === "sust" ? "sustained" : "peak"} ${L.liftoff.op === ">=" ? "≥" : ">"} ${L.liftoff.v} ${L.liftoff.unit} at ${L.liftoff.h} ft`;
-function dayFields(i, D){
-  const clouds = (D.clouds && D.clouds.length ? D.clouds : [{ type:"None" }]);
+function fields(i, d, ov){
+  const fld = (f, label, cls) => `<label class="${cls || ""} ${ov[f] !== undefined ? "ov" : ""}">${label}<span class="u"><input data-f="${f}" ${f === "concerns" ? 'list="lmConcernList"' : ""} value="${hesc(ov[f] !== undefined ? ov[f] : (d[f] ?? ""))}">${ov[f] !== undefined ? `<button type="button" class="rs" data-rs="${f}" title="Back to the forecast value (${hesc(d[f] ?? "")})">↺</button>` : ""}</span></label>`;
+  const D = dayData(i);
   return `<div class="edgrid" data-day="${i}">
-    <label class="pv">PoV % <input data-f="pov" type="number" min="0" max="100" step="5" value="${D.pov ?? ""}"></label>
-    <label class="wide">Primary concerns <input data-f="concerns" list="lmConcernList" value="${hesc(D.concerns || "")}" placeholder="e.g. Cumulus Cloud Rule, Liftoff Winds"></label>
-    <label>Weather <input data-f="wx" value="${hesc(D.wx || "")}"></label>
-    <label>Visibility <input data-f="vis" value="${hesc(D.vis || "")}"></label>
-    <label>Temperature <input data-f="temp" value="${hesc(D.temp || "")}"></label>
-    <label>Humidity <input data-f="rh" value="${hesc(D.rh || "")}"></label>
-    <label class="wide">Liftoff winds (200 ft) <input data-f="wind" value="${hesc(D.wind || "")}" placeholder="150° 5 - 10 mph"></label>
-    <div class="wide clouds"><span>Clouds</span>${clouds.map((c, k) => `<div class="crow" data-i="${k}"><input data-c="type" value="${hesc(c.type || "")}" placeholder="Type"><select data-c="cov">${opt(["","Few","Scattered","Broken","Overcast"], c.cov || "")}</select><input data-c="base" type="number" step="500" value="${c.base ?? ""}" placeholder="Base"><input data-c="tops" type="number" step="500" value="${c.tops ?? ""}" placeholder="Tops"><button type="button" class="x" data-delc="${k}" aria-label="Remove layer">×</button></div>`).join("")}<button type="button" class="lnk" data-addc="1">+ cloud layer</button></div>
-    ${risksOn().map(r => `<label>${hesc(r.name)} <select data-risk="${r.id}">${opt(RISK, (D.risk || {})[r.id] || "Low")}</select></label>`).join("")}
+    ${fld("pov", "PoV %", "pv")}${fld("concerns", "Primary concerns", "wide")}
+    ${fld("wx", "Weather")}${fld("vis", "Visibility")}${fld("temp", "Temperature")}${fld("rh", "Humidity")}${fld("wind", "Liftoff winds (200 ft)", "wide")}
+    <div class="wide clouds"><span>Clouds ${ov.clouds ? `<button type="button" class="rs" data-rs="clouds" title="Back to the forecast layers">↺</button>` : ""}</span>${(D.clouds || []).map((c, k) => `<div class="crow" data-i="${k}"><input data-c="type" value="${hesc(c.type || "")}" placeholder="Type"><select data-c="cov">${opt(["","Few","Scattered","Broken","Overcast"], c.cov || "")}</select><input data-c="base" type="number" step="500" value="${c.base ?? ""}" placeholder="Base"><input data-c="tops" type="number" step="500" value="${c.tops ?? ""}" placeholder="Tops"><button type="button" class="x" data-delc="${k}" aria-label="Remove layer">×</button></div>`).join("")}<button type="button" class="lnk" data-addc="1">+ cloud layer</button></div>
+    ${risksOn().map(r => `<label class="${ov.risk && ov.risk[r.id] ? "ov" : ""}">${hesc(r.name)} <select data-risk="${r.id}">${opt(RISK, D.risk[r.id] || "Low")}</select></label>`).join("")}
   </div>`;
 }
-function segFields(i, D){
-  if (!D.seg || D.seg.length < 2) return "";
-  return `<div class="segs" data-day="${i}"><div class="segh"><label class="chk"><input type="checkbox" data-segon ${D.showSeg !== false ? "checked" : ""}> Show PoV through the window</label><button type="button" class="lnk" data-segavg="${i}">set headline to the average</button></div>
-    <div class="segrow">${D.seg.map((s, k) => `<label><span>${lHM(s.a)}</span><input type="number" min="0" max="100" step="5" data-seg="${k}" value="${s.pov}"></label>`).join("")}</div></div>`;
-}
 function renderPreview(){ $("lmPreview").innerHTML = productHTML(null); }
-function lmRenderAll(){ lmRenderStatus(); renderEditor(); renderPreview(); }
-function refresh(full){ saveL(); if (full) loadGuidance(); else { analyzeAll(); lmRenderAll(); } }
+let prodT = null;
+function refreshProduct(){ clearTimeout(prodT); prodT = setTimeout(() => { renderSetup(); renderProductEditor(); renderPreview(); }, 120); }
+/* settings that change the editor itself (pad, windows, constraints) */
+function reconfigure(full){
+  saveL();
+  EDITOR_HOOKS.config(); rebuildViews();
+  prefs.site = SITES[0].id; savePrefs();
+  if (!P[prefs.param] && !VIEWS[prefs.param]) prefs.param = "rpov";
+  if (full || SX.lastPad !== L.pad){ SX.lastPad = L.pad; loadAll(); loadExtras(); }
+  else rebuildGuidance();
+  refreshProduct();
+}
 function pickMission(id){
   const x = SX.launches.find(l => l.id === id); L.missionId = id || "";
   if (x){
@@ -539,60 +523,57 @@ function pickMission(id){
     const lim = Object.keys(VEHICLE_LIMITS).find(v => (x.vehicle || "").includes(v)); if (lim){ L.liftoff.v = VEHICLE_LIMITS[lim]; L.liftoff.unit = "kt"; }
     L.days = []; L.discussionEdited = false;
   }
-  saveL(); loadGuidance(); lmRenderAll();
+  reconfigure(false);
 }
+function ovOf(i){ L.days[i] = L.days[i] || {}; L.days[i].ov = L.days[i].ov || {}; return L.days[i].ov; }
 function bindLM(){
   $("lmMission").onchange = e => pickMission(e.target.value);
-  const fld = (id, key, conv, full) => $(id).addEventListener("change", e => { L[key] = conv ? conv(e.target.value) : e.target.value; if (key === "pad") L.days = []; refresh(full); });
-  fld("lmName", "mission"); fld("lmVeh", "vehicle"); fld("lmPad", "pad", null, true); fld("lmIss", "issued", fromInput); fld("lmNext", "next");
-  ["lmName","lmVeh","lmNext"].forEach(id => $(id).addEventListener("input", e => { L[{ lmName:"mission", lmVeh:"vehicle", lmNext:"next" }[id]] = e.target.value; saveL(); renderPreview(); }));
+  $("lmName").addEventListener("input", e => { L.mission = e.target.value; saveL(); renderPreview(); });
+  $("lmVeh").addEventListener("input", e => { L.vehicle = e.target.value; saveL(); renderPreview(); });
+  $("lmPad").addEventListener("change", e => { L.pad = e.target.value; reconfigure(true); });
+  $("lmIss").addEventListener("change", e => { L.issued = fromInput(e.target.value); saveL(); renderPreview(); });
+  $("lmNext").addEventListener("input", e => { L.next = e.target.value; saveL(); renderPreview(); });
   $("lmDisc").addEventListener("input", e => { L.discussion = e.target.value; L.discussionEdited = true; saveL(); renderPreview(); });
-  $("lmDiscReset").onclick = () => { L.discussionEdited = false; L.discussion = draftDiscussion(); saveL(); lmRenderAll(); };
-  $("lmLift").addEventListener("change", e => { const k = e.target.dataset.l; if (!k) return; L.liftoff[k] = e.target.type === "number" ? +e.target.value : e.target.value; setHeights(); L.days.forEach(d => d && !d.edited && (d.concerns = d.concerns)); refresh(false); });
-  $("lmFtp").onchange = e => { L.ftp = e.target.checked; refresh(false); };
-  /* windows */
-  $("lmWins").addEventListener("change", e => { const row = e.target.closest("[data-w]"); if (!row || !e.target.dataset.wa) return; const i = +row.dataset.w, v = fromInput(e.target.value); if (v == null) return; L.windows[i][e.target.dataset.wa] = v; if (i === 0){ const dur = L.windows[0].b - L.windows[0].a; L.windows.forEach((w, k) => { if (k && !w.custom){ w.a = L.windows[0].a + k*24*H; w.b = w.a + dur; } }); } else L.windows[i].custom = true; if (L.days[i]) L.days[i].edited = false; refresh(false); });
+  $("lmDiscReset").onclick = () => { L.discussionEdited = false; L.discussion = draftDiscussion(); saveL(); $("lmDisc").value = L.discussion; renderPreview(); };
+  $("lmLift").addEventListener("change", e => { const k = e.target.dataset.l; if (!k) return; L.liftoff[k] = e.target.type === "number" ? +e.target.value : e.target.value; reconfigure(false); });
+  $("lmFtp").onchange = e => { L.ftp = e.target.checked; reconfigure(false); };
+  $("lmWins").addEventListener("change", e => { const row = e.target.closest("[data-w]"); if (!row || !e.target.dataset.wa) return; const i = +row.dataset.w, v = fromInput(e.target.value); if (v == null) return; L.windows[i][e.target.dataset.wa] = v; if (i === 0){ const dur = L.windows[0].b - L.windows[0].a; L.windows.forEach((w, k) => { if (k && !w.custom){ w.a = L.windows[0].a + k*24*H; w.b = w.a + dur; } }); } else L.windows[i].custom = true; reconfigure(false); });
   $("lmWins").addEventListener("click", e => {
     if (e.target.tagName === "BUTTON") e.target.blur();
-    if (e.target.id === "lmAddWin"){ const last = L.windows[L.windows.length - 1]; L.windows.push({ a:last.a + 24*H, b:last.b + 24*H }); refresh(false); }
-    if (e.target.dataset.delw){ const i = +e.target.dataset.delw; L.windows.splice(i, 1); L.days.splice(i, 1); refresh(false); }
+    if (e.target.id === "lmAddWin"){ const last = L.windows[L.windows.length - 1]; L.windows.push({ a:last.a + 24*H, b:last.b + 24*H }); reconfigure(false); }
+    if (e.target.dataset.delw){ const i = +e.target.dataset.delw; L.windows.splice(i, 1); L.days.splice(i, 1); reconfigure(false); }
   });
-  /* risk criteria */
-  $("lmRisks").addEventListener("change", e => { const row = e.target.closest("[data-r]"); if (!row) return; const r = L.risks[+row.dataset.r]; if (e.target.hasAttribute("data-ron")) r.on = e.target.checked; if (e.target.hasAttribute("data-rname")) r.name = e.target.value; refresh(false); });
-  $("lmRisks").addEventListener("input", e => { if (!e.target.hasAttribute("data-rname")) return; const r = L.risks[+e.target.closest("[data-r]").dataset.r]; r.name = e.target.value; saveL(); renderPreview(); });
+  $("lmRisks").addEventListener("change", e => { const row = e.target.closest("[data-r]"); if (!row) return; const r = L.risks[+row.dataset.r]; if (e.target.hasAttribute("data-ron")) r.on = e.target.checked; if (e.target.hasAttribute("data-rname")) r.name = e.target.value; saveL(); refreshProduct(); });
+  $("lmRisks").addEventListener("input", e => { if (!e.target.hasAttribute("data-rname")) return; L.risks[+e.target.closest("[data-r]").dataset.r].name = e.target.value; saveL(); renderPreview(); });
   $("lmRisks").addEventListener("click", e => {
     if (e.target.tagName === "BUTTON") e.target.blur();
-    if (e.target.id === "lmAddRisk"){ L.risks.push({ id:"c" + Date.now().toString(36), name:"", on:true }); saveL(); lmRenderAll(); const ins = $("lmRisks").querySelectorAll("[data-rname]"); if (ins.length) ins[ins.length - 1].focus(); }
-    if (e.target.dataset.delr){ L.risks.splice(+e.target.dataset.delr, 1); refresh(false); }
+    if (e.target.id === "lmAddRisk"){ L.risks.push({ id:"c" + Date.now().toString(36), name:"", on:true }); saveL(); renderSetup(); renderProductEditor(); const ins = $("lmRisks").querySelectorAll("[data-rname]"); if (ins.length) ins[ins.length - 1].focus(); }
+    if (e.target.dataset.delr){ L.risks.splice(+e.target.dataset.delr, 1); saveL(); refreshProduct(); }
   });
-  /* recovery sites */
-  $("lmRec").addEventListener("change", e => { const row = e.target.closest("[data-k]"); if (!row) return; const r = L.recovery[+row.dataset.k], k = e.target.dataset.rc; r[k] = ["lat","lon","windKt","waveFt"].includes(k) ? (e.target.value === "" ? null : +e.target.value) : e.target.value; saveL(); if (k === "lat" || k === "lon") loadRecovery(); else refresh(false); });
+  $("lmRec").addEventListener("change", e => { const row = e.target.closest("[data-k]"); if (!row) return; const r = L.recovery[+row.dataset.k], k = e.target.dataset.rc; r[k] = ["lat","lon","windKt","waveFt"].includes(k) ? (e.target.value === "" ? null : +e.target.value) : e.target.value; saveL(); if (k === "lat" || k === "lon") loadRecovery(); else refreshProduct(); });
   $("lmRec").addEventListener("click", e => {
     if (e.target.tagName === "BUTTON") e.target.blur();
-    if (e.target.id === "lmAddRec"){ L.recovery.push({ id:"r" + Date.now().toString(36), name:"ASDS", lat:null, lon:null, windKt:25, waveFt:8 }); saveL(); lmRenderAll(); }
-    if (e.target.dataset.delrec){ L.recovery.splice(+e.target.dataset.delrec, 1); saveL(); loadRecovery(); }
+    if (e.target.id === "lmAddRec"){ L.recovery.push({ id:"r" + Date.now().toString(36), name:"ASDS", lat:null, lon:null, windKt:25, waveFt:8 }); saveL(); renderSetup(); }
+    if (e.target.dataset.delrec){ L.recovery.splice(+e.target.dataset.delrec, 1); saveL(); renderSetup(); loadRecovery(); }
   });
-  /* per-window editors */
+  /* product overrides */
   const box = $("lmDays");
   const upd = e => {
-    const grid = e.target.closest("[data-day]"); if (!grid) return; const i = +grid.dataset.day;
-    const D = L.days[i] = L.days[i] || { clouds:[], risk:{} }; D.edited = true; D.risk = D.risk || {};
-    const t = e.target;
-    if (t.dataset.f) D[t.dataset.f] = t.dataset.f === "pov" ? (t.value === "" ? null : Math.max(0, Math.min(100, +t.value))) : t.value;
-    if (t.dataset.risk) D.risk[t.dataset.risk] = t.value;
-    if (t.dataset.seg != null && D.seg){ D.seg[+t.dataset.seg].pov = t.value === "" ? 0 : Math.max(0, Math.min(100, +t.value)); }
-    if (t.hasAttribute && t.hasAttribute("data-segon")) D.showSeg = t.checked;
-    if (t.dataset.c){ const k = +t.closest("[data-i]").dataset.i; D.clouds = D.clouds || []; D.clouds[k] = D.clouds[k] || {}; D.clouds[k][t.dataset.c] = t.type === "number" ? (t.value === "" ? null : +t.value) : t.value; }
+    const grid = e.target.closest("[data-day]"), t = e.target;
+    if (t.dataset.segon != null){ const i = +t.dataset.segon; L.days[i] = L.days[i] || {}; L.days[i].showSeg = t.checked; saveL(); renderPreview(); return; }
+    if (!grid) return; const i = +grid.dataset.day, ov = ovOf(i);
+    if (t.dataset.f) ov[t.dataset.f] = t.dataset.f === "pov" ? (t.value === "" ? undefined : Math.max(0, Math.min(100, +t.value))) : t.value;
+    if (t.dataset.risk){ ov.risk = ov.risk || {}; ov.risk[t.dataset.risk] = t.value; }
+    if (t.dataset.c){ const k = +t.closest("[data-i]").dataset.i; if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).map(c => ({ ...c })); ov.clouds[k] = ov.clouds[k] || {}; ov.clouds[k][t.dataset.c] = t.type === "number" ? (t.value === "" ? null : +t.value) : t.value; }
     saveL(); renderPreview();
   };
-  box.addEventListener("input", upd); box.addEventListener("change", upd);
+  box.addEventListener("input", upd); box.addEventListener("change", e => { upd(e); if (e.target.dataset.f || e.target.dataset.risk) { e.target.blur && null; } });
   box.addEventListener("click", e => {
     if (e.target.tagName === "BUTTON") e.target.blur();
-    const grid = e.target.closest("details"); const i = grid ? +grid.querySelector("[data-day]").dataset.day : null;
-    if (e.target.dataset.addc){ const D = L.days[i] = L.days[i] || { clouds:[], risk:{} }; D.clouds = (D.clouds || []).filter(c => c.type !== "None"); D.clouds.push({ type:"", cov:"", base:null, tops:null }); D.edited = true; saveL(); box.innerHTML = ""; lmRenderAll(); }
-    if (e.target.dataset.delc != null){ const D = L.days[i]; D.clouds.splice(+e.target.dataset.delc, 1); D.edited = true; saveL(); box.innerHTML = ""; lmRenderAll(); }
-    if (e.target.dataset.segavg){ const k = +e.target.dataset.segavg, D = L.days[k]; if (D && D.seg){ const tot = D.seg.reduce((x, s) => x + (s.b - s.a), 0); D.pov = Math.round(D.seg.reduce((x, s) => x + (+s.pov)*(s.b - s.a), 0)/tot/5)*5; D.edited = true; saveL(); box.innerHTML = ""; lmRenderAll(); } }
-    if (e.target.dataset.reset){ const k = +e.target.dataset.reset, g = SX.guide[k]; if (g && !g.outOfRange) L.days[k] = fromGuide(g, L.days[k]); saveL(); box.innerHTML = ""; lmRenderAll(); }
+    const grid = e.target.closest(".dayed"); if (!grid) return; const g2 = grid.querySelector("[data-day]"); if (!g2) return; const i = +g2.dataset.day, ov = ovOf(i);
+    if (e.target.dataset.rs){ delete ov[e.target.dataset.rs]; saveL(); box.innerHTML = ""; refreshProduct(); }
+    if (e.target.dataset.addc){ if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).filter(c => c.type !== "None").map(c => ({ ...c })); ov.clouds.push({ type:"", cov:"", base:null, tops:null }); saveL(); box.innerHTML = ""; refreshProduct(); }
+    if (e.target.dataset.delc != null){ if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).map(c => ({ ...c })); ov.clouds.splice(+e.target.dataset.delc, 1); saveL(); box.innerHTML = ""; refreshProduct(); }
   });
   const stamp = () => { const p = lp(Date.now()); return `${p.y}${lpad(p.mo)}${lpad(p.d)}_${lpad(p.h)}${lpad(p.mi)}`; };
   const base = () => `LMEF_${(L.mission || "Mission").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}_${stamp()}`;
@@ -600,18 +581,22 @@ function bindLM(){
   $("lmHtml").onclick = async () => download(new Blob([htmlLMEF(await loadLogo())], { type:"text/html" }), base() + ".html");
   $("lmXlsx").onclick = async () => download(xlsxLMEF(await loadLogo()), base() + ".xlsx");
   $("lmCsv").onclick = () => download(new Blob([csvLMEF()], { type:"text/csv" }), base() + ".csv");
-  $("lmRefresh").onclick = () => { fetchLaunches().then(l => { SX.launches = l; renderMissions(); }); loadGuidance(); };
   $("lmPad").innerHTML = PADS.map(p => `<option value="${p.id}">${p.name} (${p.full})</option>`).join("");
-  $("lmConcernList").innerHTML = CONCERNS.map(c => `<option value="${c}">`).join("");
+  $("lmConcernList").innerHTML = [...Object.values(CONCERN_NAMES), "None"].map(c => `<option value="${c}">`).join("");
 }
 async function initLM(){
   const st = document.createElement("style"); st.textContent = LM_CSS; document.head.appendChild(st);
-  document.querySelectorAll('.pagenav a[data-page="lmef"]').forEach(a => a.setAttribute("aria-current", "page"));
-  if (!L.windows || !L.windows.length){ const t = Math.ceil(Date.now()/H)*H + 26*H; L.windows = [{ a:t, b:t + 4*H }, { a:t + 24*H, b:t + 28*H }]; }
-  bindLM(); lmRenderAll();
+  mountPanels(); bindLM();
+  SX.lastPad = L.pad;
+  EDITOR_HOOKS.rendered = refreshProduct;
+  /* open on the PoV graph the first time */
+  if ((!P[prefs.param] && !VIEWS[prefs.param]) || !L.chartInit){ prefs.param = "rpov"; L.chartInit = true; saveL(); savePrefs(); renderAll(); }
+  const sitesNav = document.getElementById("sites"); if (sitesNav) sitesNav.hidden = true;
+  refreshProduct(); loadExtras();
   SX.launches = DEMO ? demoLaunches() : await fetchLaunches().catch(() => []);
   renderMissions();
-  loadGuidance();
+  /* first visit: start from the next launch */
+  if (!L.missionId && !L.mission && SX.launches.length){ $("lmMission").value = SX.launches[0].id; pickMission(SX.launches[0].id); }
 }
 function demoLaunches(){ const t = Math.ceil(Date.now()/H)*H + 20*H; return [
   { id:"d1", name:"Starlink Group 10-11", vehicle:"Falcon 9", pad:"slc40", net:t, w0:t, w1:t + 4*H },

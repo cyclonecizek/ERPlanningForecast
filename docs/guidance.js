@@ -530,7 +530,7 @@ function aggregate(G, prefs){
     for (const s of on){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W(s)]); if (per) per[s.def.id] = p; }
     return wmean(pairs);
   };
-  for (const pk of ["pp1","pp3","pp6","lt1","lt3","lt6"]){
+  for (const pk of ["pp1","pp3","pp6","lt1","lt3","lt6"].filter(k => P[k])){
     const p = P[pk]; val[pk] = []; srcv[pk] = {};
     rows.forEach((r, ri) => {
       const cell = probCell(r, p.win);

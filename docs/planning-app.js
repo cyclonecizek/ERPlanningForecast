@@ -4,7 +4,10 @@
 /* this script runs the planning page and, with window.PAGE = "exposure", the exposure page */
 const PAGE = (typeof window !== "undefined" && window.PAGE) || "planning";
 const EXPO = PAGE === "exposure";
-const LS = EXPO ? { edits:"expfx:v1:edits", prefs:"expfx:v1:prefs", pub:"expfx:v1:published" } : { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
+const LMEF = PAGE === "lmef";
+const LS = EXPO ? { edits:"expfx:v1:edits", prefs:"expfx:v1:prefs", pub:"expfx:v1:published" } : LMEF ? { edits:"lmfx:v1:edits", prefs:"lmfx:v1:prefs", pub:"lmfx:v1:published" } : { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
+/* the LMEF page supplies its own points, parameters, rows and rule guidance through these hooks */
+const HOOKS = (typeof window !== "undefined" && (window.EDITOR_HOOKS = window.EDITOR_HOOKS || {})) || {};
 const PLANNING_PARAMS = PARAMS.map(p => ({ ...p }));
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
@@ -86,6 +89,7 @@ function constraintSummary(){
   return cons.length ? "Constraints: " + cons.map((p, j) => j ? p.title.charAt(0).toLowerCase() + p.title.slice(1) : p.title).join("; ") + "." : "No constraints set.";
 }
 if (EXPO) applyExposureConfig(expStored);
+if (LMEF && HOOKS.config) HOOKS.config();
 const prefs = Object.assign({ enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param:"t" }, store.get(LS.prefs, {}));
 let edits = store.get(LS.edits, {});
 if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
@@ -207,7 +211,7 @@ function officialFor(sid, fast){
   /* precip and lightning: keep 1, 3 and 6 hr consistent */
   const fits = [];
   if (prefs.linkWin !== false && S.agg[sid]){
-    for (const ev of ["pp","lt"]){
+    for (const ev of ["pp","lt"].filter(ev => P[ev + "3"] && P[ev + "6"])){
       const res = linkProbs(ev, rows, S.agg[sid].val, ed);
       for (const k of [ev + "1", ev + "3", ev + "6"]){
         o[k] = rows.map((r, i) => {
@@ -237,7 +241,9 @@ function officialFor(sid, fast){
   if (fast && OF && OF.site === sid){
     /* while dragging: keep the exceedance probabilities from the last full pass */
     for (const p of PARAMS.filter(p => p.k.startsWith("x"))){ o[p.k] = OF.o[p.k] || []; gx[p.k] = OF.g[p.k] || []; src[p.k] = OF.xsrc[p.k] || {}; }
-    return { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
+    const outF = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
+    if (HOOKS.official) HOOKS.official(outF, ed, rows);
+    return outF;
   }
   for (const p of PARAMS.filter(p => p.k.startsWith("x"))){
     o[p.k] = []; gx[p.k] = []; src[p.k] = {};
@@ -256,7 +262,9 @@ function officialFor(sid, fast){
       o[p.k][i] = x !== undefined ? x : probRound(clampP(shifted.v));
     });
   }
-  return { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
+  const out = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
+  if (HOOKS.official) HOOKS.official(out, ed, rows);
+  return out;
 }
 
 /* QC: impossible or inconsistent combinations */
@@ -266,12 +274,12 @@ function qcIssues(sid, OF){
   S.rows.forEach((r, i) => {
     if (o.t[i] != null && o.td[i] != null && o.td[i] > o.t[i]) flag("td", i, "Dew point above temperature");
     for (const p of PARAMS.filter(p => p.peakOf)){ const sv = o[p.peakOf] && o[p.peakOf][i], gv = o[p.k] && o[p.k][i]; if (sv != null && gv != null && gv < sv) flag(p.k, i, `${p.l} peak below sustained`); }
-    for (const ev of ["pp","lt"]){
+    for (const ev of ["pp","lt"].filter(ev => o[ev + "3"] && o[ev + "6"])){
       const a = o[ev+"1"][i], b = o[ev+"3"][i], c = o[ev+"6"][i];
       if (r.len === 1 && a != null && b != null && a > b) flag(ev+"3", i, (ev === "pp" ? "Precip" : "Lightning") + " 3 hr below 1 hr");
       if (b != null && c != null && b > c) flag(ev+"6", i, (ev === "pp" ? "Precip" : "Lightning") + " 6 hr below 3 hr");
     }
-    for (const w of ["1","3","6"]){ const a = o["lt" + w][i], b = o["pp" + w][i]; if (a != null && b != null && a > b + 5) flag("lt" + w, i, `Lightning ${w} hr (${a}%) is above precipitation ${w} hr (${b}%)`); }
+    for (const w of ["1","3","6"].filter(w => o["lt" + w] && o["pp" + w])){ const a = o["lt" + w][i], b = o["pp" + w][i]; if (a != null && b != null && a > b + 5) flag("lt" + w, i, `Lightning ${w} hr (${a}%) is above precipitation ${w} hr (${b}%)`); }
     for (const [lo, hi] of [["x50","x35"],["x35","x25"],["x32","x40"]]) if (o[lo] && o[hi] && o[lo][i] != null && o[hi][i] != null && o[lo][i] > o[hi][i]) flag(lo, i, `${P[lo].l} more likely than ${P[hi].l}`);
   });
   for (const f of OF.fits || []) if (Math.abs(f.fit - f.anchor) > 2.5) flag(f.k, f.i, `${P[f.k].title} ${f.anchor}% can't be met by the values you've set inside it (they give ${Math.round(f.fit)}%)`);
@@ -399,11 +407,18 @@ function renderLocator(){
   $("locator").innerHTML = `<polygon class="water" points="${pts} 80,118 80,0"/><polyline class="coast" points="${pts}"/>` +
     SITES.map(s => { const x = X(s.lon), y = Y(s.lat), o = off[s.id], on = s.id === prefs.site; return `<g data-site="${s.id}" style="cursor:pointer"><title>${s.name} (${s.point})</title><circle class="pt ${on ? "on" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${on ? 4.4 : 3.2}"/>${EXPO && !on ? "" : `<text x="${(x + o[0]).toFixed(1)}" y="${(y + o[1]).toFixed(1)}" text-anchor="${o[2]}" style="${on ? "fill:var(--accent)" : ""}">${tags[s.id]}</text>`}</g>`; }).join("");
 }
-const chartGroups = () => [
-  ["Sky and temperature", ["sky","t","td","wbgt"].filter(k => P[k])],
-  ["Precipitation and lightning", ["pp","lt"].filter(k => P[k + "1"])],
+const chartGroups = () => LMEF ? [
+  ["Probability of violation", ["rpov"].filter(k => P[k])],
+  ["LLCC rules", PARAMS.filter(p => /^r/.test(p.k) && p.k !== "rpov").map(p => p.k)],
+  ["Constraints", PARAMS.filter(p => p.k.startsWith("x")).map(p => p.k)],
+  ["Pad weather", ["sky","t","td","pp1","lt1"].filter(k => P[k])],
   ["Wind", [...HEIGHTS.map(ft => "w" + ft).filter(v => VIEWS[v]), ...(P.dir ? ["dir"] : [])]],
-  [EXPO ? "Constraint probability" : "Exceedance probability", PARAMS.filter(p => p.k.startsWith("x")).map(p => p.k)],
+].filter(g => g[1].length) : [
+  ["Sky and temperature", ["sky","t","td","wbgt"].filter(k => P[k])],
+  ["Precipitation and lightning", ["pp","lt"].flatMap(k => !P[k + "1"] ? [] : P[k + "3"] ? [k] : [k + "1"])],
+  ["Wind", [...HEIGHTS.map(ft => "w" + ft).filter(v => VIEWS[v]), ...(P.dir ? ["dir"] : [])]],
+  [EXPO ? "Constraint probability" : LMEF ? "Constraints" : "Exceedance probability", PARAMS.filter(p => p.k.startsWith("x")).map(p => p.k)],
+  ...(LMEF ? [["Probability of violation", PARAMS.filter(p => p.k === "rpov").map(p => p.k)], ["LLCC rules", PARAMS.filter(p => /^r/.test(p.k) && p.k !== "rpov").map(p => p.k)]] : []),
 ].filter(g => g[1].length);
 const chipName = k => ({ sky:"Sky", t:"Temp", td:"Dew pt", wbgt:"WBGT", pp:"Precipitation", lt:"Lightning", dir:"Direction", xhot:`>${hotOf(site())}°F` }[k] || (VIEWS[k] ? VIEWS[k].chip : P[k] ? (P[k].chip || P[k].l) : k));
 function renderParams(){
@@ -552,7 +567,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); }
+function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- editing ---------- */
 function parseInput(p, txt){
@@ -682,7 +697,7 @@ function rebuildViews(){
   for (const ft of HEIGHTS) if (P["s" + ft] && P["g" + ft]) VIEWS["w" + ft] = { title:`${ft} ft wind`, chip:`${ft} ft`, keys:["s" + ft, "g" + ft], names:["Sustained","Peak"] };
 }
 rebuildViews();
-const viewOf = k => /^[sg]\d+$/.test(k) && VIEWS["w" + k.slice(1)] ? "w" + k.slice(1) : /^pp\d$/.test(k) ? "pp" : /^lt\d$/.test(k) ? "lt" : k;
+const viewOf = k => /^[sg]\d+$/.test(k) && VIEWS["w" + k.slice(1)] ? "w" + k.slice(1) : /^pp\d$/.test(k) && P.pp3 ? "pp" : /^lt\d$/.test(k) && P.lt3 ? "lt" : k;
 const isProbView = v => !!(VIEWS[v] && VIEWS[v].prob);
 /* the cell that sets a row's own value (1 hr on hourly rows, 3 hr on 3 h blocks, 6 hr on 6 h blocks) */
 const isBaseCell = (k, i) => { const p = P[k]; if (!p.win) return true; const len = S.rows[i].len; return p.win === (len === 1 ? 1 : len <= 3 ? 3 : 6); };
@@ -1696,10 +1711,10 @@ function toast(msg){ const t = $("toast"); t.textContent = msg; t.classList.add(
 /* ============================================================
    Loading
    ============================================================ */
-function recomputeAgg(){ for (const s of SITES) if (S.G[s.id]) S.agg[s.id] = aggregate(S.G[s.id], prefs); }
+function recomputeAgg(){ for (const s of SITES) if (S.G[s.id]){ S.agg[s.id] = aggregate(S.G[s.id], prefs); if (HOOKS.agg) HOOKS.agg(s.id, S.agg[s.id], S.G[s.id]); } }
 let renderT = null;
 function scheduleRender(){ if (renderT) return; renderT = setTimeout(() => { renderT = null; recomputeAgg(); renderAll(); renderSources(); }, 120); }
-const rowsNow = () => EXPO ? buildRowsRange(prefs.exp.start, prefs.exp.end, prefs.exp.hourly === "all" ? Infinity : +prefs.exp.hourly) : buildRows(Date.now());
+const rowsNow = () => LMEF && HOOKS.rows ? HOOKS.rows() : EXPO ? buildRowsRange(prefs.exp.start, prefs.exp.end, prefs.exp.hourly === "all" ? Infinity : +prefs.exp.hourly) : buildRows(Date.now());
 /* keep every source's members so a new range or new wind heights can be applied without refetching */
 function addSrc(sid, d, members, extra){ (S.raw[sid] = S.raw[sid] || []).push([d, members, extra]); S.G[sid].addSource(d, members, extra); }
 function rebuildGuidance(){
@@ -1953,9 +1968,8 @@ function bind(){
   bindChart();
 }
 /* the LMEF page loads this file as a library (exports, logo, PDF writer) and runs its own UI */
-if (PAGE !== "lmef"){
-  bind();
-  bindExp();
-  bindBrief();
-  loadAll();
-}
+bind();
+bindExp();
+if (!LMEF) bindBrief();
+if (HOOKS.bind) HOOKS.bind();
+loadAll();

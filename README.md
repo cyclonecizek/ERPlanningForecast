@@ -19,7 +19,7 @@ docs/index.html                       the planning forecast page
 docs/exposure.html                    exposure forecasts for one operation (pads, SLF, XMR or a custom point)
 docs/planning-app.js                  the editor shared by the planning and exposure pages
 docs/taf.html                         TAF generator: KCOF, KTTS, KXMR or any ICAO
-docs/lmef.html, docs/lmef.js           Launch Mission Execution Forecast (LMEF) builder
+docs/lmef.html, docs/lmef-config.js, docs/lmef.js   Launch Mission Execution Forecast (LMEF)
 docs/guidance.js                      guidance engine shared by both pages (fetching, blending, MOS, pipeline)
 docs/data/mos/                        MOS, LAMP, NBM text and SPC outlook mirror (written by the workflow)
 docs/data/hires.json                  RRFS, REFS members and calibrated thunder (written by the high-res workflow)
@@ -132,27 +132,33 @@ key concerns; "Show hazards even when they stay low" keeps all-green rows. Edite
 when settings change; Regenerate rewrites it from the forecast.
 
 ## Launch forecast (LMEF)
-`lmef.html` builds the public Launch Mission Execution Forecast. Pick an upcoming Space Coast launch
-(Launch Library 2, mirrored by the MOS workflow into `docs/data/launches.json`) or enter the mission,
-vehicle, pad and windows yourself. The page loads the guidance blend at the pad and fills in a first
-guess for the launch day and every delay day (add as many as you need):
-* probability of violation and primary concerns from the blend's chances of cumulus/showers,
-  lightning, thick mid-level cloud, the liftoff wind constraint (any height, sustained or peak, any
-  unit; the product just says "Liftoff Winds") and, for missions that have it, Flight Through
-  Precipitation,
-* weather and visibility, temperature and humidity, 200 ft liftoff winds, cloud layers.
+`lmef.html` uses the same editor as the planning and exposure forecasts, tailored to the launch.
+It opens on the next upcoming Space Coast launch (Launch Library 2, mirrored by the MOS workflow into
+`docs/data/launches.json`); pick another or enter the mission, vehicle, pad and windows yourself.
 
-Additional risk criteria can each be switched off, and you can add your own:
+**Editor.** Hourly rows across the launch window and every delay day (add as many as you need), with:
+* one row per NASA-STD-4010B lightning launch commit criterion: lightning, cumulus cloud, attached
+  anvil, detached anvil, debris cloud, disturbed weather, thick cloud layers, smoke plume and surface
+  electric fields; plus Flight Through Precipitation for missions that have it,
+* the liftoff wind constraint (any height, sustained or peak, any unit), which follows wind edits,
+* the hourly probability of violation combined from those rows: the electrified-cloud rules count as
+  one related group (largest rule plus 35 % of the remainder) and thick cloud layers, smoke, flight
+  through precipitation and liftoff winds add independently. Edit it directly to override.
+* pad weather (sky, temperature, dew point, precipitation and lightning) and 200 ft winds.
+
+The rule first guesses come from the guidance: calibrated (HREF/REFS) and LAMP/MOS thunder for the
+electrified-cloud rules (with a 30-minute look-back for lightning and the previous 3 hours for
+detached anvils and debris), precipitation and low cloud for the cumulus rule, deep mid-level cloud
+for thick layers and disturbed weather. The guidance can't see cloud tops, anvil age or field mills
+directly, so these are starting points for the forecaster.
+
+**Product.** Built from the official hourly values: the window PoV is the average of the hourly PoV
+(the chance at a random time), the primary concerns are the rules with the highest window averages,
+and windows of 2 hours or more get a "PoV through the window" strip. Weather, temperature, humidity,
+liftoff winds and clouds come from the same forecast. Any product field can be overridden (shown in
+amber, ↺ to go back). Additional risk criteria can be switched off or added:
 * Upper-Level Wind Shear: GFS 300-200 hPa winds (100 kt moderate, 140 kt high),
-* Booster Recovery Weather: winds (forecast API) and wave heights (marine API) at each recovery site
-  against your limits (80 % of a limit moderate, at or over high),
-* Proton Flux: GOES >=10 MeV integral flux and the SWPC 3-day S1-or-greater probabilities
-  (mirrored as `docs/data/protons.json` and `docs/data/3day.txt`).
+* Booster Recovery Weather: gusts and wave heights at each recovery site against your limits,
+* Proton Flux: GOES >=10 MeV flux and the SWPC 3-day S1-or-greater probabilities.
 
-Windows of 2 hours or more get a PoV for each part of the window (hourly up to 12 h, then 2- or
-3-hour pieces). The headline PoV is their time-weighted average, the chance at a random time in the
-window, and the product adds a "PoV through the window" strip with the best opportunity and the
-highest-risk period. Each piece is editable; the strip can be switched off per window.
-
-Every field is editable and a live preview shows the finished product. Export as PDF, HTML, Excel or
-CSV. The first guess is a starting point; the PoV and concerns are the forecaster's call.
+Export as PDF, HTML, Excel or CSV.

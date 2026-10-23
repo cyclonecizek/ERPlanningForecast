@@ -326,8 +326,21 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 <style>
-.lmmain{ grid-template-columns:440px minmax(0,1fr); align-items:start; }
-.lmed{ padding:14px 16px 18px; position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto; }
+.lmsetup{ padding:14px 16px; }
+.lmcols{ display:grid; grid-template-columns:1.1fr 1fr 1fr; gap:18px 26px; }
+.lmsetup h3,.lmprod h3{ margin:12px 0 8px; font:700 15px var(--cond); letter-spacing:.3px; display:flex; gap:10px; align-items:baseline; }
+.lmsetup h3:first-child{ margin-top:0; }
+.lmnote{ margin-top:12px; }
+.lmprod{ padding:14px 16px 18px; }
+.lmprodhead{ display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; margin-bottom:10px; }
+.lmprodhead h2{ margin:0; font:700 21px var(--cond); }
+.lmprodhead .actions{ margin-left:auto; display:flex; gap:8px; }
+.lmprodgrid{ display:grid; grid-template-columns:430px minmax(0,1fr); gap:18px; align-items:start; }
+.edgrid label.ov input{ border-color:var(--edit); background:var(--edit-bg); }
+.rs{ border:0; background:none; color:var(--edit); cursor:pointer; font-size:15px; padding:0 2px; }
+@media (max-width:1200px){ .lmcols{ grid-template-columns:1fr 1fr; } .lmprodgrid{ grid-template-columns:1fr; } }
+@media (max-width:760px){ .lmcols{ grid-template-columns:1fr; } }
+.lmed{ position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto; padding-right:4px; }
 .lmed h3{ margin:16px 0 8px; font:700 15px var(--cond); letter-spacing:.3px; display:flex; gap:10px; align-items:baseline; }
 .lmed h3:first-child{ margin-top:0; }
 .lmed h3 small{ font:500 12px var(--font); color:var(--ink-3); }
@@ -343,7 +356,7 @@ document.addEventListener("DOMContentLoaded", function(){
 .lnk{ border:0; background:none; color:var(--accent); cursor:pointer; font:500 12.5px var(--font); padding:0; justify-self:start; }
 .mut{ color:var(--ink-3); font-size:12.5px; } .gd{ margin:8px 0 0; }
 .lmprev{ min-width:0; }
-.edgrid.lift{ grid-template-columns:repeat(4, 1fr); }
+.edgrid.lift{ grid-template-columns:.9fr 1fr 1.3fr .9fr; }
 .u{ display:flex; gap:4px; align-items:center; } .u input{ min-width:0; width:100%; } .u select{ flex:none; width:52px; padding:6px 4px; }
 .recrow.hd span{ font:600 11.5px var(--cond); color:var(--ink-3); }
 .chk{ display:flex; gap:8px; align-items:center; font:13.5px var(--font); margin-top:8px; cursor:pointer; }
@@ -366,52 +379,150 @@ document.addEventListener("DOMContentLoaded", function(){
 .lmprev .lm{ box-shadow:0 10px 30px rgba(0,0,0,.12); }
 .lmtop .unitlogo{ height:70px; }
 @media (max-width:1100px){ .lmmain{ grid-template-columns:1fr; } .lmed{ position:static; max-height:none; } }
-</style>
-</head>
+#sites[hidden]{ display:none !important; }
+</style></head>
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
-<header class="top lmtop">
+<header class="top">
   <div class="brand">
     <img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">
-    <div><h1>Launch forecast (LMEF)</h1><div class="where">Launch Mission Execution Forecast for public release. Start from an upcoming launch or enter the mission yourself; every field is a first guess you can edit.</div></div>
+    <svg class="locator" id="locator" viewBox="0 0 80 118" aria-label="Forecast point locator"></svg>
+    <div>
+      <h1 id="pageTitle">Daily planning forecast</h1>
+      <div class="where" id="where"></div>
+    </div>
   </div>
+  <nav class="sites" id="sites" aria-label="Forecast point"></nav>
   <div class="actions">
-    <button class="btn" id="lmCsv">CSV</button><button class="btn" id="lmXlsx">Excel</button><button class="btn" id="lmHtml">HTML</button><button class="btn primary" id="lmPdf">Download PDF</button>
+    <button class="btn icon" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>&#8630;</button>
+    <button class="btn icon" id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>&#8631;</button>
+    <button class="btn" id="resetSite" title="Clear every edit for this point">Reset to guidance</button>
+    <button class="btn plan-only" id="briefBtn" title="One-page summary of the main concerns for leadership">Leadership brief</button>
+    <button class="btn primary" id="publish">Save and publish</button>
   </div>
 </header>
-<div class="statusline"><span class="live" id="lmLive">Loading</span><span class="sp"></span><button class="btn" id="lmRefresh" style="padding:4px 10px;font-size:13px">Refresh missions and guidance</button></div>
-<main class="lmmain">
-  <section class="panel lmed" aria-label="Forecast editor">
-    <h3>Mission</h3>
-    <div class="edgrid">
-      <label class="wide">Upcoming Space Coast launch <select id="lmMission"><option>Loading</option></select></label>
-      <label class="wide">Mission name <input id="lmName" autocomplete="off"></label>
-      <label>Vehicle <input id="lmVeh" list="lmVehList" autocomplete="off"></label>
-      <label>Pad <select id="lmPad"></select></label>
-      <label class="wide">Issued <input id="lmIss" type="datetime-local"></label>
+<div class="statusline">
+  <span class="live" id="live">Loading guidance</span>
+  <span><span class="k">Last published</span><span id="lastPub">not yet</span></span>
+  <span><span class="k">Edits</span><span id="editCount">0</span></span>
+  <span class="spacer"></span>
+  <span class="seg" role="group" aria-label="Matrix layout"><button id="orD" aria-pressed="false" title="Time runs down the rows">Time down</button><button id="orA" aria-pressed="true" title="Time runs across the columns">Time across</button></span>
+  <span class="seg" id="wuSel" role="group" aria-label="Wind units"><button type="button" data-u="kt">kt</button><button type="button" data-u="mph">mph</button><button type="button" data-u="m/s">m/s</button><button type="button" data-u="ft/s">ft/s</button></span>
+  <span class="seg" role="group" aria-label="Time zone"><button id="tzL" aria-pressed="true">Local</button><button id="tzZ" aria-pressed="false">Zulu</button></span>
+  <button class="btn" id="refresh" style="padding:4px 10px;font-size:13px">Refresh guidance</button>
+  <label>Forecaster <input type="text" id="initials" maxlength="5" placeholder="Init" autocomplete="off"></label>
+</div>
+<div class="banner" id="banner"></div>
+
+<main>
+  <section class="panel expsetup" id="expSetup" hidden aria-label="Operation setup">
+    <div class="esrow">
+      <label class="grow">Operation <input id="expOp" placeholder="e.g. Crane lift, vehicle rollout, propellant load" autocomplete="off"></label>
+      <label>Start <input type="datetime-local" id="expStart"></label>
+      <label>End <input type="datetime-local" id="expEnd"></label>
+      <span class="tzn" id="expTz"></span>
+      <span class="seg" id="expQuick" role="group" aria-label="Quick range"><button type="button" data-q="12">12 h</button><button type="button" data-q="24">24 h</button><button type="button" data-q="48">48 h</button><button type="button" data-q="72">3 days</button><button type="button" data-q="168">7 days</button></span>
+      <label>Hourly for the first <select id="expHourly"><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option><option value="36">36 h</option><option value="48">48 h</option><option value="72">72 h</option><option value="all">whole window</option></select>, then 3-hourly</label>
+      <span class="mut" id="expLen"></span>
     </div>
-    <h3>Constraints for the PoV <small>shown on the product as "Liftoff Winds"</small></h3>
-    <div class="edgrid lift" id="lmLift"></div>
-    <label class="chk"><input type="checkbox" id="lmFtp"> This mission has a Flight Through Precipitation constraint</label>
-    <h3>Windows <small>local time, opens and closes</small></h3>
-    <div id="lmWins" class="wins"></div>
-    <h3>Additional risk criteria <small>tick to show on the product</small></h3>
-    <div id="lmRisks" class="risks"></div>
-    <h3>Recovery weather <small>sites and limits for Booster Recovery Weather</small></h3>
-    <div id="lmRec" class="recs"></div>
-    <h3>Forecast discussion <button type="button" class="lnk" id="lmDiscReset">redraft from guidance</button></h3>
-    <textarea id="lmDisc" rows="7"></textarea>
-    <h3>Forecast by window</h3><div id="lmDays"></div>
-    <h3>Footer</h3>
-    <div class="edgrid"><label class="wide">Next forecast will be issued <input id="lmNext"></label></div>
-    <datalist id="lmConcernList"></datalist>
-    <datalist id="lmVehList"><option value="Falcon 9"><option value="Falcon Heavy"><option value="Vulcan"><option value="Atlas V"><option value="New Glenn"><option value="SLS"><option value="Starship"></datalist>
+    <div class="esrow" id="expCustom" hidden>
+      <strong>Custom point</strong>
+      <label>Name <input id="cuName" maxlength="24" autocomplete="off"></label>
+      <label>Latitude <input id="cuLat" inputmode="decimal" style="width:100px"></label>
+      <label>Longitude <input id="cuLon" inputmode="decimal" style="width:100px"></label>
+      <button class="btn" type="button" id="cuLoad">Load point</button>
+    </div>
+    <div class="cons">
+      <h3>Constraints</h3>
+      <div id="expCons"></div>
+      <div class="actions"><button class="btn" type="button" id="addWind">+ Wind constraint</button><button class="btn" type="button" id="addTemp">+ Temperature constraint</button></div>
+    </div>
   </section>
-  <section class="lmprev" aria-label="Product preview"><div id="lmPreview"></div></section>
+  <section class="panel editor" aria-label="Graph editor">
+    <div class="params" id="params"></div>
+    <div class="charthead">
+      <h2 id="ptitle">Temperature</h2><span class="unit" id="punit"></span>
+      <span class="hint" id="phint">Drag across the graph to draw the forecast. Hold Alt while dragging to erase back to guidance. Double-click a point to reset it.</span>
+<div class="legend" id="legend"></div>
+    </div>
+    <div class="chartwrap" id="chartwrap">
+      <svg id="chart" tabindex="0" role="application" aria-label="Forecast graph editor. Select points, then use the up and down arrow keys to move them."></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="tools">
+      <span class="seg" id="modeSel" role="group" aria-label="Editing mode"><button type="button" data-m="select" title="Select points, then drag or nudge them">Select and drag</button><button type="button" data-m="draw" title="Paint the line by dragging across the graph">Draw</button></span>
+      <span id="drawWrap" hidden>Line <span class="seg" id="drawSel" role="group" aria-label="Line to draw"></span></span>
+      <span class="selinfo" id="selinfo"></span>
+      <span class="sp"></span>
+      <button class="btn" id="nudgeDn">Lower all</button>
+      <button class="btn" id="nudgeUp">Raise all</button>
+      <span class="setv"><input id="setVal" inputmode="decimal" placeholder="Value" aria-label="Value to set"><button class="btn" id="setGo">Set all</button></span>
+      <button class="btn" id="smooth">Smooth</button>
+      <button class="btn" id="resetParam">Reset parameter to guidance</button>
+    </div>
+  </section>
+
+  <details class="panel sources" id="sourcesPanel">
+    <summary><span class="chev">&#9656;</span>Guidance sources <span class="sum" id="srcSum"></span></summary>
+    <div class="srcgrid" id="srcgrid"></div>
+    <div class="srcfoot">
+      <label><input type="checkbox" id="linkProbs" checked> Shift exceedance probabilities with my wind and temperature edits</label>
+      <label><input type="checkbox" id="linkWin" checked> Link 1, 3 and 6 hr precipitation and lightning probabilities</label>
+      <label><input type="checkbox" id="clampProbs" checked> Cap guidance probabilities at 99% (1% rounds down to 0)</label>
+      <span class="limits plan-only">Hot threshold (°F) <input type="number" id="hotThr" step="1"></span>
+    </div>
+  </details>
+
+  <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
+
+  <div class="foot">
+    <p id="foot1">Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). With linking on, the 3 and 6 hr values are built from the 1 hr (or 3-hour block) values inside them, using how the guidance itself combines hours for that period; edit a 3 or 6 hr value and the hours inside it scale together to match. In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Guidance probabilities are whole percents, with 1% rounded down to 0. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
+    <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
+  </div>
 </main>
+
+<dialog id="briefDlg" class="wide">
+  <div class="dlg">
+    <div class="brhead"><h2>Leadership quick look</h2><span class="sub">Built from the official forecast, including your edits. Edit the bottom line and concerns, then download or copy.</span></div>
+    <div class="brgrid">
+      <div class="brside">
+        <label>Bottom line<textarea id="brBottom" rows="5"></textarea></label>
+        <label>Key concerns (one per line)<textarea id="brConcerns" rows="9"></textarea></label>
+        <button class="btn" id="brRegen" type="button">Regenerate from forecast</button>
+        <details class="brcfg" open><summary>What the brief shows</summary>
+          <div class="brh"><span>Hazards</span><button type="button" class="lnk" id="brAll">all on</button></div>
+          <div class="brchk" id="brHaz"></div>
+          <label class="brone"><input type="checkbox" id="brLow"> Show hazards even when they stay low</label>
+          <div class="brh"><span>Daily rows</span></div>
+          <div class="brchk" id="brSum"></div>
+        </details>
+      </div>
+      <div class="brprev" id="brPreview"></div>
+    </div>
+    <div class="row"><button class="btn" id="brClose" type="button">Close</button><button class="btn" id="brCopy" type="button">Copy as text</button><button class="btn" id="brHtml" type="button">Download HTML</button><button class="btn primary" id="brPdf" type="button">Download PDF</button></div>
+  </div>
+</dialog>
+<dialog id="pubDlg">
+  <form method="dialog" class="dlg" id="pubForm">
+    <h2>Save and publish</h2>
+    <p class="sub">Downloads the official forecast. Points you haven't edited go out as guidance. The PDF and HTML show the table with time across, one page per few days.</p>
+    <fieldset><legend>Forecast points</legend><div class="opts" id="pubSites"></div></fieldset>
+    <fieldset><legend>Files</legend><div class="opts">
+      <label><input type="checkbox" id="fmtX" checked> Excel workbook</label>
+      <label><input type="checkbox" id="fmtC" checked> CSV</label>
+      <label><input type="checkbox" id="fmtP" checked> PDF</label>
+      <label><input type="checkbox" id="fmtH" checked> HTML page</label>
+    </div></fieldset>
+    <fieldset><legend>Forecaster</legend><input type="text" id="pubInit" maxlength="5" placeholder="Init" required></fieldset>
+    <div class="qc" id="qc"></div>
+    <div class="row"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" id="pubGo" value="ok">Publish</button></div>
+  </form>
+</dialog>
 <div class="toast" id="toast"></div>
+
 <script>window.PAGE = "lmef";</script>
 <script src="guidance.js"></script>
+<script src="lmef-config.js"></script>
 <script src="planning-app.js"></script>
 <script src="lmef.js"></script>
 </body>
