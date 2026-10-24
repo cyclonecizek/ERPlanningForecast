@@ -650,6 +650,30 @@ async function recentObsDay(key){
 }
 const dayKeyZ = t => new Date(t).toISOString().slice(0, 10).replace(/-/g, "");
 function obsAt(pid, key, t){ const od = RECENT.obs[dayKeyZ(t)]; if (!od) return undefined; const p = (od.points || {})[pid]; if (!p) return null; const f = key === "dir" ? "d54" : key; const a = p[f]; return a ? a[new Date(t).getUTCHours()] : null; }
+/* any tower near a point, at any height: exact, interpolated in log height between two sensors on the
+   same tower, or the nearest sensor within 35 % of the height. field: s (hour mean), g (peak), t */
+function towerChoice(lat, lon, ft, field, od){
+  const tw = od && od.towers; if (!tw) return null;
+  const near = Object.entries(tw).map(([id, r]) => ({ id, r, d: kmBetween(lat, lon, r.lat, r.lon) })).filter(x => x.d <= 4).sort((a, b) => a.d - b.d);
+  for (const { id, r, d } of near){
+    const hs = Object.keys(r.h).map(Number).sort((a, b) => a - b); if (!hs.length) continue;
+    if (field === "t"){ const lo = hs.find(h => r.h[h].t && r.h[h].t.some(v => v != null)); if (lo != null) return { id, d, how:"temp", h:[lo] }; continue; }
+    if (hs.includes(ft)) return { id, d, how:"exact", h:[ft] };
+    const below = hs.filter(h => h < ft).pop(), above = hs.find(h => h > ft);
+    if (below != null && above != null) return { id, d, how:"interp", h:[below, above] };
+    const nearest = hs.reduce((a, b) => Math.abs(b - ft) < Math.abs(a - ft) ? b : a);
+    if (Math.abs(nearest - ft)/ft <= 0.35) return { id, d, how:"nearest", h:[nearest] };
+  }
+  return null;
+}
+function towerValue(od, ch, ft, field, hour){
+  if (!ch) return null; const r = od.towers[ch.id]; const f = field === "t" ? "t" : field;
+  const v = h => (r.h[h] && r.h[h][f]) ? r.h[h][f][hour] : null;
+  if (ch.h.length === 1) return v(ch.h[0]);
+  const a = v(ch.h[0]), b = v(ch.h[1]); if (a == null || b == null) return null;
+  return a + (b - a)*Math.log(ft/ch.h[0])/Math.log(ch.h[1]/ch.h[0]);
+}
+const towerLabel = (ch, ft) => !ch ? "" : ch.how === "temp" ? `tower ${ch.id}, ${ch.d.toFixed(1)} km` : `tower ${ch.id}${ch.how === "interp" ? `, ${ch.h[0]}–${ch.h[1]} ft interpolated to ${ft} ft` : ch.how === "nearest" ? `, ${ch.h[0]} ft sensor` : `, ${ft} ft`}, ${ch.d.toFixed(1)} km`;
 /* demo: observations near the guidance, so the panel can be tried without the workflow */
 function demoObsDay(key){
   const G = S.G[prefs.site]; if (!G) return null;
@@ -665,7 +689,24 @@ function demoObsDay(key){
     }
     pts[pid] = p;
   }
-  return { points: pts };
+  /* a demo tower at each point on the page, at its wind heights */
+  const towers = {};
+  for (const st of SITES){
+    const Gs = S.G[st.id]; if (!Gs) continue;
+    const rec = { lat: st.lat + 0.004, lon: st.lon, h:{} };
+    for (const ft of HEIGHTS){
+      const hh = rec.h[ft] = { s:new Array(24).fill(null), sx:new Array(24).fill(null), g:new Array(24).fill(null), t:new Array(24).fill(null) };
+      for (let h = 0; h < 24; h++){
+        const t = t0 + h*H; if (t > Date.now() - H) continue; const i = S.TL.idx(t); if (i < 0) continue;
+        const mean = k => { const v = Gs.src.flatMap(s2 => s2.members.map(m => m[k] && m[k][i])).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0)/v.length : null; };
+        const sv = mean("s" + ft), gv = mean("g" + ft), tv = mean("t"), j = Math.sin(t/2.9e6 + ft);
+        hh.s[h] = sv == null ? null : Math.round((sv + 2*j)*10)/10; hh.sx[h] = sv == null ? null : Math.round((sv*1.2 + 2*j)*10)/10;
+        hh.g[h] = gv == null ? null : Math.round((gv + 3*j)*10)/10; hh.t[h] = tv == null ? null : Math.round((tv + j)*10)/10;
+      }
+    }
+    towers[st.tag || st.id] = rec;
+  }
+  return { points: pts, towers };
 }
 function pastMean(src, key, i){
   const v = src.members.map(m => m[key] ? m[key][i] : null).filter(x => x != null); if (!v.length) return null;
@@ -675,21 +716,32 @@ function pastMean(src, key, i){
 function renderRecent(){
   const box = $("recentBody"); if (!box) return;
   const s = site(), G = S.G[s.id]; if (!G || !S.TL){ box.innerHTML = `<p class="mut">Waiting for guidance.</p>`; return; }
-  const keysAll = keysOf(prefs.param), checkable = ["t","td","s54","g54","s200","g200","dir"];
-  let keys = keysAll.filter(k => checkable.includes(k));
-  const [pid, dist] = obsPointFor(s);
+  const keysAll = keysOf(prefs.param);
+  const cons = P[keysAll[0]] && P[keysAll[0]].cons ? P[keysAll[0]] : null;
+  let keys = cons ? [cons.ex === "tmax" || cons.ex === "tmin" ? "t" : cons.ex] : keysAll.filter(k => /^(t|td|dir)$/.test(k) || /^[sg]\d+$/.test(k));
+  const [pid0, dist0] = obsPointFor(s);
+  const pid = pid0, dist = dist0;
   const now = Math.floor(Date.now()/H)*H, hours = []; for (let t = now - 24*H; t < now; t += H) hours.push(t);
   if (DEMO) [...new Set(hours.map(dayKeyZ))].forEach(k => { RECENT.obs[k] = demoObsDay(k); });
   else [...new Set(hours.map(dayKeyZ))].forEach(recentObsDay);
-  if (!pid){ box.innerHTML = `<p class="mut">No tower or METAR observations within 9 km of ${s.name}.</p>`; $("recentSum").textContent = ""; return; }
   if (!keys.length){
-    const alt = /^[sg]\d+$/.test(keysAll[0] || "") ? "Observations are at 54 and 200 ft; pick those heights to compare winds." : "Pick temperature, dew point, 54 or 200 ft winds, or direction on the graph to compare with observations.";
-    box.innerHTML = `<p class="mut">${alt}</p>`; $("recentSum").textContent = ""; return;
+    box.innerHTML = `<p class="mut">Pick temperature, dew point, a wind height, direction or a constraint on the graph to compare with observations.</p>`; $("recentSum").textContent = ""; return;
   }
   if (RECENT.part >= keys.length) RECENT.part = 0;
   const key = keys[RECENT.part], mkey = key === "dir" ? "d10" : key, p = P[key] || { l:key, unit:"" };
-  const obs = hours.map(t => obsAt(pid, key, t));
+  /* observations: the forecast point's own record for its standard fields, otherwise the nearest tower at this height */
+  const hm = key.match(/^([sg])(\d+)$/), ft = hm ? +hm[2] : null;
+  const ownPoint = pid && !dist && (!hm || ft === 54 || ft === 200);
+  let obsLabel = "", ch = null;
+  const obs = hours.map(t => {
+    const od = RECENT.obs[dayKeyZ(t)]; if (od === undefined) return undefined; if (!od) return null;
+    if (ownPoint || (!hm && key !== "t") || (key === "t" && pid && dist < 3)) return obsAt(pid, key, t);
+    if (hm || key === "t"){ ch = ch || towerChoice(s.lat, s.lon, ft || 6, hm ? hm[1] : "t", od); return towerValue(od, ch, ft, hm ? hm[1] : "t", new Date(t).getUTCHours()); }
+    return pid ? obsAt(pid, key, t) : null;
+  });
+  obsLabel = ch ? towerLabel(ch, ft) : pid ? `${PNAMES[pid] || pid}${dist ? `, ${dist.toFixed(1)} km away` : ""}` : "";
   if (obs.every(v => v === undefined)){ box.innerHTML = `<p class="mut">Loading observations…</p>`; return; }
+  if (obs.every(v => v == null)){ box.innerHTML = `<p class="mut">No observations for ${p.title || p.l} near ${s.name} in the last 24 hours${hm ? ` (no tower within 4 km has a sensor near ${ft} ft)` : ""}.</p>`; $("recentSum").textContent = "no observations"; return; }
   const on = G.src.filter(x => prefs.enabled[x.def.id] !== false && x.members.length);
   const series = on.map(x => ({ id:x.def.id, name:x.def.name, fam:x.def.fam, ys: hours.map(t => { const i = S.TL.idx(t); return i >= 0 && i < S.TL.n ? pastMean(x, mkey, i) : null; }) })).filter(x => x.ys.some(v => v != null));
   const err = (a, b) => key === "dir" ? ((a - b + 540) % 360) - 180 : a - b;
@@ -703,7 +755,7 @@ function renderRecent(){
   const top = ranked.slice(0, 3).map(x => x.id);
   /* chart */
   const Wd = 760, Hd = 230, L = 44, Rr = 12, T = 14, B = 26, sc = isWind(p) ? wfac() : 1;
-  const all = [...obs, ...blend, ...series.flatMap(x => x.ys)].filter(v => v != null && isFinite(v)).map(v => v*sc);
+  const all = [...obs, ...blend, ...series.flatMap(x => x.ys), ...(cons && cons.v != null ? [cons.v] : [])].filter(v => v != null && isFinite(v)).map(v => v*sc);
   let lo = Math.min(...all), hi = Math.max(...all); if (key === "dir"){ lo = 0; hi = 360; } else { const pad = Math.max(1, (hi - lo)*0.08); lo = Math.floor(lo - pad); hi = Math.ceil(hi + pad); }
   const x = i => L + (i + 0.5)*(Wd - L - Rr)/hours.length, y = v => T + (1 - (v*sc - lo)/(hi - lo || 1))*(Hd - T - B);
   const path = ys => { const pts = ys.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`); let d = "", pen = false; pts.forEach(q => { if (!q){ pen = false; return; } d += (pen ? "L" : "M") + q; pen = true; }); return d; };
@@ -715,9 +767,11 @@ function renderRecent(){
   top.forEach((id, k) => { const xs = series.find(q => q.id === id); if (xs && id !== sel) g += `<path d="${path(xs.ys)}" fill="none" stroke="${COL[k]}" stroke-width="1.8"/>`; });
   if (sel){ const xs = series.find(q => q.id === sel); g += `<path d="${path(xs.ys)}" fill="none" stroke="#C0462F" stroke-width="2.6"/>`; }
   g += `<path d="${path(blend)}" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-dasharray="6 4"/>`;
+  if (cons && cons.v != null && cons.v*sc >= lo && cons.v*sc <= hi) g += `<line x1="${L}" x2="${Wd - Rr}" y1="${y(cons.v)}" y2="${y(cons.v)}" stroke="#B23A2E" stroke-width="1.6" stroke-dasharray="3 3"/><text x="${Wd - Rr - 4}" y="${y(cons.v) - 5}" class="ax" text-anchor="end" fill="#B23A2E">limit ${Math.round(cons.v*sc)}</text>`;
   obs.forEach((v, i) => { if (v != null) g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.6" class="robs"><title>${hhmm(hours[i], zulu())} observed ${Math.round(v*sc)}${isWind(p) ? " " + wuLabel() : p.unit === "°F" ? "°F" : ""}</title></circle>`; });
   g += `</svg>`;
-  const legend = `<div class="rleg"><span><i class="o"></i>Observed${dist ? ` (${PNAMES[pid] || pid}, ${dist.toFixed(1)} km away)` : ""}</span><span><i style="border-top:2px dashed var(--ink)"></i>Blend</span>${top.map((id, k) => `<span><i style="background:${COL[k]}"></i>${series.find(q => q.id === id).name}</span>`).join("")}${sel ? `<span><i style="background:#C0462F"></i>${series.find(q => q.id === sel).name}</span>` : ""}<span><i style="background:var(--rule)"></i>Other sources</span></div>`;
+  const met = cons ? obs.filter(v => v != null && (cons.op === ">" ? v > cons.v : cons.op === ">=" ? v >= cons.v : cons.op === "<=" ? v <= cons.v : v < cons.v)).length : null;
+  const legend = `<div class="rleg"><span><i class="o"></i>Observed${obsLabel ? ` (${obsLabel})` : ""}</span><span><i style="border-top:2px dashed var(--ink)"></i>Blend</span>${top.map((id, k) => `<span><i style="background:${COL[k]}"></i>${series.find(q => q.id === id).name}</span>`).join("")}${sel ? `<span><i style="background:#C0462F"></i>${series.find(q => q.id === sel).name}</span>` : ""}<span><i style="background:var(--rule)"></i>Other sources</span></div>`;
   const fmtE = v => (isWind(p) ? v*wfac() : v).toFixed(1);
   const tbl = `<table class="rtab"><thead><tr><th>Source</th><th>MAE</th><th>Bias</th><th>Hours</th><th>Auto</th></tr></thead><tbody>
     ${bst ? `<tr class="bl"><th>Blend</th><td>${fmtE(bst.mae)}</td><td>${bst.bias >= 0 ? "+" : ""}${fmtE(bst.bias)}</td><td>${bst.n}</td><td></td></tr>` : ""}
@@ -725,7 +779,7 @@ function renderRecent(){
   const unitTxt = key === "dir" ? "degrees" : isWind(p) ? wuLabel() : p.unit || "";
   box.innerHTML = `${keys.length > 1 ? `<div class="seg rpart" role="group">${keys.map((k, i) => `<button type="button" data-rp="${i}" aria-pressed="${i === RECENT.part}">${(P[k] || {}).s || k}</button>`).join("")}</div>` : ""}
     <div class="rgrid"><div>${g}${legend}</div><div class="rtw">${tbl}<p class="mut">Last 24 hours at ${s.name}, ${p.l}${p.s ? " " + p.s : ""}, ${unitTxt}. Model values for past hours come from their recent runs. Click a source to highlight it.</p></div></div>`;
-  $("recentSum").textContent = ranked.length ? `best last 24 h: ${ranked[0].name} (${fmtE(ranked[0].st.mae)} ${unitTxt})${bst ? `, blend ${fmtE(bst.mae)}` : ""}` : obs.some(v => v != null) ? "" : "no observations yet";
+  $("recentSum").textContent = (ranked.length ? `best last 24 h: ${ranked[0].name} (${fmtE(ranked[0].st.mae)} ${unitTxt})${bst ? `, blend ${fmtE(bst.mae)}` : ""}` : "") + (cons ? ` · ${met} of ${obs.filter(v => v != null).length} observed hours met the constraint` : "");
 }
 const PNAMES = { "ksc-inland":"SLF towers", "ksc-pads":"LC-39B towers", "cape-inland":"KXMR towers", "cape-pad37":"SLC-37 towers", "patrick":"KCOF" };
 
@@ -1377,7 +1431,9 @@ function csvFor(list, issued, by){
 /* exposure CSV: one column per parameter on the page */
 function csvGeneric(list, issued, by){
   const colOf = p => { const c = p.csv || (p.kind === "prob" ? `${p.k}_pct` : p.k); return isWind(p) ? c.replace(/_kt$/, "_" + wuLabel().replace("/", "p")) : c; };
-  const head = ["point","lat","lon","valid_start_utc","valid_end_utc","valid_start_local","period_h", ...PARAMS.map(colOf), "issued_utc","forecaster"];
+  /* guidance beside the official value for the constraints and winds, so verification can show what the edits added */
+  const GD = PARAMS.filter(p => p.cons || /^[sg]\d+$/.test(p.k));
+  const head = ["point","lat","lon","valid_start_utc","valid_end_utc","valid_start_local","period_h", ...PARAMS.map(colOf), "issued_utc","forecaster", ...GD.map(p => colOf(p) + "_guidance")];
   const q = v => { if (v === undefined || v === null) return ""; const t = String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
   const lines = [`# ${productName()}. ${constraintSummary()}`, head.join(",")];
   for (const [s, OFs] of list){
@@ -1385,7 +1441,8 @@ function csvGeneric(list, issued, by){
     S.rows.forEach((r, i) => {
       const p = lp(r.a), loc = `${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:00`;
       const val = pp => { const v = o[pp.k][i]; if (v == null) return ""; if (pp.kind === "sky") return skyCat(v); if (pp.kind === "dir") return Math.round(v); if (pp.kind === "sev") return v; return Math.round(isWind(pp) ? v*wfac() : v); };
-      lines.push([s.point, s.lat.toFixed(4), s.lon.toFixed(4), new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, ...PARAMS.map(val), new Date(issued).toISOString().slice(0,16) + "Z", by].map(q).join(","));
+      const gval = pp => { const v = OFs.g && OFs.g[pp.k] ? OFs.g[pp.k][i] : null; return v == null ? "" : Math.round(isWind(pp) ? v*wfac() : v); };
+      lines.push([s.point, s.lat.toFixed(4), s.lon.toFixed(4), new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, ...PARAMS.map(val), new Date(issued).toISOString().slice(0,16) + "Z", by, ...GD.map(gval)].map(q).join(","));
     });
   }
   return lines.join("\r\n") + "\r\n";
@@ -2060,6 +2117,7 @@ function bind(){
   $("linkWin").checked = prefs.linkWin !== false; $("linkWin").onchange = e => { prefs.linkWin = e.target.checked; savePrefs(); renderAll(); };
   $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
   $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
+  if (EXPO) document.querySelectorAll('.pagenav a[data-page="verify"]').forEach(a => { a.href = "verify.html#exposure"; a.addEventListener("click", () => { try { localStorage.setItem("erwx:verifyMode", "exposure"); } catch (e) { /* ignore */ } }); });
   const rb = document.getElementById("recentBody");
   if (rb) rb.addEventListener("click", ev => {
     const r = ev.target.closest("[data-rs]"); if (r){ RECENT.sel = RECENT.sel === r.dataset.rs ? null : r.dataset.rs; renderRecent(); return; }

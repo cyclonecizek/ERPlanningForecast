@@ -253,7 +253,7 @@ function renderStatus(){
   $("vBand").innerHTML = `<option value="all">All lead times</option>` + ((s && s.bands) || []).map(b => `<option ${b === V.band ? "selected" : ""}>${b}</option>`).join("");
   document.querySelectorAll("#vWin button").forEach(b => b.setAttribute("aria-pressed", b.dataset.w === V.win));
 }
-function renderAll(){ renderStatus(); renderScorecard(); renderLead(); renderReliability(); renderWeights(); renderCase(); }
+function renderAll(){ renderStatus(); renderScorecard(); renderLead(); renderReliability(); renderWeights(); renderCase(); if (V.mode === "exposure") renderExposure(); }
 function scorecardCSV(){
   if (!V.lastScore) return "";
   const { order, m } = V.lastScore, q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
@@ -292,3 +292,195 @@ function bind(){
 }
 bind();
 loadAll().then(prefetchOfficialObs).then(() => { if (V.official.length) renderAll(); });
+
+/* ============================================================
+   Exposure forecast verification
+   Published exposure CSVs (constraint probabilities, winds at constraint heights, and the guidance
+   beside them) scored against the tower at the forecast point and height. Everything stays on this
+   computer: constraint values can be proprietary.
+   ============================================================ */
+const EX = { ops:[], sel:null, csel:null };
+const UNIT_KT = { kt:1, mph:0.868976, ms:1.943844, mps:1.943844, fts:0.592484, ftps:0.592484 };
+async function loadExposureStore(){ try { const db = await idb(); EX.ops = await new Promise(r => { const t = db.transaction(DB.store).objectStore(DB.store).get("exposure"); t.onsuccess = () => r(t.result || []); t.onerror = () => r([]); }); } catch (e) { EX.ops = []; } }
+async function saveExposureStore(){ try { const db = await idb(); db.transaction(DB.store, "readwrite").objectStore(DB.store).put(EX.ops, "exposure"); } catch (e) { /* storage unavailable */ } }
+function parseConstraintCol(col){
+  let m = col.match(/^p_(sust|peak)(\d+)ft_(gt|ge)([\d.]+)(kt|mph|ms|fts)_pct$/);
+  if (m) return { col, type:"wind", kind:m[1], ft:+m[2], op: m[3] === "gt" ? ">" : ">=", v:+m[4]*(UNIT_KT[m[5]] || 1), unitTxt:m[5] === "ms" ? "m/s" : m[5] === "fts" ? "ft/s" : m[5], raw:+m[4], label:`${m[1] === "sust" ? "Sustained" : "Peak"} ${m[2]} ft ${m[3] === "gt" ? ">" : "≥"} ${m[4]} ${m[5] === "ms" ? "m/s" : m[5] === "fts" ? "ft/s" : m[5]}` };
+  m = col.match(/^p_temp_(lt|gt)([\d.]+)(F|C)_pct$/);
+  if (m){ const f = m[3] === "C" ? +m[2]*9/5 + 32 : +m[2]; return { col, type:"temp", op: m[1] === "lt" ? "<" : ">", v:f, raw:+m[2], unitTxt:"°" + m[3], label:`Temperature ${m[1] === "lt" ? "<" : ">"} ${m[2]}°${m[3]}` }; }
+  return null;
+}
+function addExposureCSV(text, fname){
+  const lines = text.replace(/\r/g, "").split("\n");
+  const comment = (lines.find(l => l.startsWith("#")) || "").replace(/^#\s*/, "");
+  const rows = parseCSV(text); if (!rows.length) return 0;
+  const head = Object.keys(rows[0]);
+  if (!head.includes("lat") || !head.includes("lon")) return 0;
+  const cons = head.map(parseConstraintCol).filter(Boolean);
+  const winds = head.map(c => { const m = c.match(/^wind(\d+)ft_(sust|peak)_(kt|mph|mps|ftps)$/); return m ? { col:c, ft:+m[1], kind:m[2], f:UNIT_KT[m[3]] || 1 } : null; }).filter(Boolean);
+  if (!cons.length && !winds.length) return 0;
+  const iss = Date.parse(rows[0].issued_utc);
+  const name = comment.split(". Constraints")[0] || fname.replace(/\.csv$/i, "");
+  const id = `${name}|${iss}|${rows[0].point}|${rows[0].valid_start_utc}`;
+  if (EX.ops.some(o => o.id === id)) return 0;
+  const num = v => v === "" || v == null ? null : +v;
+  EX.ops.push({ id, name, file:fname, issued:iss, by:rows[0].forecaster || "", cons, winds,
+    rows: rows.map(r => ({ point:r.point, lat:+r.lat, lon:+r.lon, a:Date.parse(r.valid_start_utc), b:Date.parse(r.valid_end_utc), len:+r.period_h || 1,
+      f:Object.fromEntries([...cons.map(c => [c.col, num(r[c.col])]), ...winds.map(w => [w.col, num(r[w.col]) == null ? null : num(r[w.col])*w.f])]),
+      g:Object.fromEntries([...cons.map(c => [c.col, num(r[c.col + "_guidance"])]), ...winds.map(w => [w.col, num(r[w.col + "_guidance"]) == null ? null : num(r[w.col + "_guidance"])*w.f])]) })).filter(r => isFinite(r.a)) });
+  saveExposureStore();
+  return 1;
+}
+/* towers near a point at a height (same rules as the forecast editor) */
+function vTowerChoice(lat, lon, ft, field, od){
+  const tw = od && od.towers; if (!tw) return null;
+  const near = Object.entries(tw).map(([id, r]) => ({ id, r, d: kmBetween(lat, lon, r.lat, r.lon) })).filter(x => x.d <= 4).sort((a, b) => a.d - b.d);
+  for (const { id, r, d } of near){
+    const hs = Object.keys(r.h).map(Number).sort((a, b) => a - b); if (!hs.length) continue;
+    if (field === "t"){ const lo = hs.find(h => r.h[h].t && r.h[h].t.some(v => v != null)); if (lo != null) return { id, d, h:[lo] }; continue; }
+    if (hs.includes(ft)) return { id, d, h:[ft] };
+    const below = hs.filter(h => h < ft).pop(), above = hs.find(h => h > ft);
+    if (below != null && above != null) return { id, d, h:[below, above] };
+    const nearest = hs.reduce((a, b) => Math.abs(b - ft) < Math.abs(a - ft) ? b : a);
+    if (Math.abs(nearest - ft)/ft <= 0.35) return { id, d, h:[nearest] };
+  }
+  return null;
+}
+function vTowerValue(od, ch, ft, field, hour){
+  if (!ch || !od.towers[ch.id]) return null; const r = od.towers[ch.id];
+  const v = h => (r.h[h] && r.h[h][field]) ? r.h[h][field][hour] : null;
+  if (ch.h.length === 1) return v(ch.h[0]);
+  const a = v(ch.h[0]), b = v(ch.h[1]); if (a == null || b == null) return null;
+  return a + (b - a)*Math.log(ft/ch.h[0])/Math.log(ch.h[1]/ch.h[0]);
+}
+/* observed for one row: strongest wind (sust uses the highest one-minute mean), lowest/highest temperature */
+function exObs(row, need){
+  const out = {}; let any = false;
+  for (const n of need){
+    const vals = [];
+    for (let t = row.a; t < row.b; t += H){
+      const od = V.obs[new Date(t).toISOString().slice(0, 10).replace(/-/g, "")]; if (!od) continue;
+      const field = n.type === "temp" ? "t" : n.kind === "sust" ? "sx" : "g";
+      const ch = vTowerChoice(row.lat, row.lon, n.ft || 6, field === "t" ? "t" : "s", od);
+      const v = vTowerValue(od, ch, n.ft, field, new Date(t).getUTCHours());
+      if (v != null){ vals.push(v); n._tower = n._tower || ch; }
+    }
+    if (vals.length){ any = true; out[n.key] = n.type === "temp" && n.op === "<" ? Math.min(...vals) : Math.max(...vals); }
+  }
+  return any ? out : null;
+}
+const meets = (v, op, thr) => op === ">" ? v > thr : op === ">=" ? v >= thr : op === "<=" ? v <= thr : v < thr;
+function exposureScores(){
+  const now = Date.now(), from = now - (+V.win)*86400e3;
+  const perCon = [], pool = { off:mkAcc(), gd:mkAcc() }, wind = {};
+  for (const op of EX.ops){
+    for (const c of op.cons){
+      const acc = { op, c, off:mkAcc(), gd:mkAcc(), rows:[] };
+      for (const r of op.rows){
+        if (r.b > now - 3*H || r.a < from) continue;
+        const ob = exObs(r, [{ key:"v", type:c.type, kind:c.kind, ft:c.ft, op:c.op }]); if (!ob) continue;
+        const ev = meets(ob.v, c.op, c.v) ? 1 : 0, pf = r.f[c.col], pg = r.g[c.col];
+        acc.rows.push({ r, obs:ob.v, ev, pf, pg });
+        if (pf != null){ addAcc(acc.off, pf/100, ev); addAcc(pool.off, pf/100, ev); }
+        if (pg != null){ addAcc(acc.gd, pg/100, ev); addAcc(pool.gd, pg/100, ev); }
+      }
+      if (acc.rows.length) perCon.push(acc);
+    }
+    for (const w of op.winds){
+      const k = `${w.ft} ft ${w.kind}`, a = (wind[k] = wind[k] || { off:[0,0,0], gd:[0,0,0] });
+      for (const r of op.rows){
+        if (r.b > now - 3*H || r.a < from) continue;
+        const ob = exObs(r, [{ key:"v", type:"wind", kind:w.kind === "sust" ? "mean" : "peak", ft:w.ft }]);
+        if (!ob) continue;
+        const o = w.kind === "sust" ? maxField(r, w.ft, "s") : ob.v; if (o == null) continue;
+        const f = r.f[w.col], g = r.g[w.col];
+        if (f != null){ a.off[0]++; a.off[1] += f - o; a.off[2] += Math.abs(f - o); }
+        if (g != null){ a.gd[0]++; a.gd[1] += g - o; a.gd[2] += Math.abs(g - o); }
+      }
+    }
+  }
+  return { perCon, pool, wind };
+}
+function maxField(r, ft, field){ const vals = []; for (let t = r.a; t < r.b; t += H){ const od = V.obs[new Date(t).toISOString().slice(0, 10).replace(/-/g, "")]; if (!od) continue; const ch = vTowerChoice(r.lat, r.lon, ft, "s", od); const v = vTowerValue(od, ch, ft, field, new Date(t).getUTCHours()); if (v != null) vals.push(v); } return vals.length ? Math.max(...vals) : null; }
+function mkAcc(){ return { n:0, bs:0, o:0, p:0, rel:Array.from({ length:10 }, () => [0, 0, 0]), hit:0, miss:0, fa:0, cn:0 }; }
+function addAcc(a, p, o){ a.n++; a.bs += (p - o)**2; a.o += o; a.p += p; const b = Math.min(9, Math.floor(p*10)); a.rel[b][0]++; a.rel[b][1] += p; a.rel[b][2] += o; const yes = p >= 0.5; if (yes && o) a.hit++; else if (!yes && o) a.miss++; else if (yes && !o) a.fa++; else a.cn++; }
+function accStats(a){
+  if (!a.n) return null; const bs = a.bs/a.n, ob = a.o/a.n, ref = ob*(1 - ob);
+  return { n:a.n, ev:a.o, bs, bss: ref > 0 ? 1 - bs/ref : null, pod: a.hit + a.miss ? a.hit/(a.hit + a.miss) : null, far: a.hit + a.fa ? a.fa/(a.hit + a.fa) : null, csi: a.hit + a.miss + a.fa ? a.hit/(a.hit + a.miss + a.fa) : null };
+}
+async function prefetchExposureObs(){
+  const days = new Set(), from = Date.now() - 90*86400e3;
+  for (const op of EX.ops) for (const r of op.rows) if (r.a > from) for (let t = r.a; t < r.b; t += H) days.add(new Date(t).toISOString().slice(0, 10).replace(/-/g, ""));
+  await Promise.all([...days].map(obsDay));
+}
+function renderExposure(){
+  const box = $("exBody"); if (!box) return;
+  $("exNote").textContent = EX.ops.length ? `${EX.ops.length} exposure forecast${EX.ops.length === 1 ? "" : "s"} stored on this computer.` : "";
+  if (!EX.ops.length){ box.innerHTML = `<p class="mut">Load the CSV files the exposure page publishes. Each one is scored against the WINDS tower nearest its point, at each constraint's height (interpolated between sensors when needed). Older exports without guidance columns still score; the guidance comparison needs files published after this update.</p>`; return; }
+  const S2 = exposureScores(), po = accStats(S2.pool.off), pg = accStats(S2.pool.gd);
+  const pct = v => v == null ? "–" : Math.round(v*100) + "%", f2 = v => v == null || !isFinite(v) ? "–" : v.toFixed(2), f3 = v => v == null ? "–" : v.toFixed(3);
+  const kp = `<div class="kpis">
+    <div><b>${EX.ops.length}</b><span>forecasts loaded</span></div>
+    <div><b>${po ? po.n.toLocaleString() : 0}</b><span>constraint periods scored</span></div>
+    <div><b>${po ? po.ev : 0}</b><span>periods the constraint was met</span></div>
+    <div><b>${po ? f2(po.bss) : "–"}</b><span>Brier skill, official</span></div>
+    <div><b>${pg ? f2(pg.bss) : "–"}</b><span>Brier skill, guidance</span></div>
+    <div><b>${po && pg ? (pg.bs > 0 ? Math.round((1 - po.bs/pg.bs)*100) + "%" : "–") : "–"}</b><span>forecaster improvement on the guidance (Brier)</span></div></div>`;
+  const rowsHtml = S2.perCon.map((a, i) => { const o = accStats(a.off), g = accStats(a.gd); return `<tr data-ci="${i}" class="${EX.csel === i ? "on" : ""}"><th>${hesc(a.op.name)}<small>${hesc(a.c.label)} · issued ${new Date(a.op.issued).toISOString().slice(0, 16).replace("T", " ")}Z${a.op.by ? " by " + hesc(a.op.by) : ""}</small></th><td>${a.rows.length}</td><td>${a.rows.filter(x => x.ev).length}</td><td>${o ? f3(o.bs) : "–"}</td><td>${g ? f3(g.bs) : "–"}</td><td>${o ? pct(o.pod) : "–"}</td><td>${o ? pct(o.far) : "–"}</td><td>${o ? pct(o.csi) : "–"}</td><td>${Math.max(0, ...a.rows.map(x => x.pf ?? 0))}%</td><td>${a.c.type === "temp" ? Math.round(a.c.op === "<" ? Math.min(...a.rows.map(x => x.obs)) : Math.max(...a.rows.map(x => x.obs))) + "°F" : Math.round(Math.max(...a.rows.map(x => x.obs))) + " kt"}</td></tr>`; }).join("");
+  const table = S2.perCon.length ? `<div class="scroll"><table class="sc ex"><thead><tr><th>Operation and constraint</th><th>Periods</th><th>Met</th><th>Brier<small>official</small></th><th>Brier<small>guidance</small></th><th>POD<small>≥50%</small></th><th>FAR<small>≥50%</small></th><th>CSI<small>≥50%</small></th><th>Highest<small>forecast</small></th><th>Observed<small>extreme</small></th></tr></thead><tbody>${rowsHtml}</tbody></table></div><p class="mut">Brier score: lower is better. POD, FAR and CSI treat 50% or more as a "yes" forecast. Click a row for its timeline.</p>` : `<p class="mut">None of the loaded forecasts have finished periods with tower observations yet${V.summary ? "" : " (the verification workflow hasn't published observations yet)"}.</p>`;
+  const wrows = Object.entries(S2.wind).filter(([, a]) => a.off[0] || a.gd[0]).map(([k, a]) => `<tr><th>${k}</th><td>${a.off[0] ? (a.off[2]/a.off[0]).toFixed(1) : "–"}<small>${a.off[0] ? ((a.off[1]/a.off[0]) >= 0 ? "+" : "") + (a.off[1]/a.off[0]).toFixed(1) : ""}</small></td><td>${a.gd[0] ? (a.gd[2]/a.gd[0]).toFixed(1) : "–"}<small>${a.gd[0] ? ((a.gd[1]/a.gd[0]) >= 0 ? "+" : "") + (a.gd[1]/a.gd[0]).toFixed(1) : ""}</small></td><td class="n">${a.off[0]}</td></tr>`).join("");
+  const wt = wrows ? `<h3>Winds at the constraint heights</h3><table class="sc"><thead><tr><th>Height</th><th>Official<small>MAE kt (bias)</small></th><th>Guidance<small>MAE kt (bias)</small></th><th>Periods</th></tr></thead><tbody>${wrows}</tbody></table>` : "";
+  box.innerHTML = kp + `<div class="vgrid"><section class="vpanel"><h2>Constraint forecasts</h2>${table}</section><section class="vpanel wide"><h2>Timeline</h2><div id="exTl"></div></section><section class="vpanel narrow"><h2>Reliability, all constraints</h2><div id="exRel"></div>${wt}</section></div>`;
+  /* reliability: official vs guidance */
+  const W = 340, Hh = 320, L = 44, R = 12, T = 12, B = 40, x = p => L + p*(W - L - R), y = p => T + (1 - p)*(Hh - T - B);
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" class="ch sq" role="img" aria-label="Reliability of constraint forecasts">`;
+  for (let k = 0; k <= 10; k += 2) s += `<line x1="${x(k/10)}" x2="${x(k/10)}" y1="${T}" y2="${Hh - B}" class="gr"/><line x1="${L}" x2="${W - R}" y1="${y(k/10)}" y2="${y(k/10)}" class="gr"/><text x="${x(k/10)}" y="${Hh - B + 14}" class="ax" text-anchor="middle">${k*10}</text><text x="${L - 6}" y="${y(k/10) + 4}" class="ax" text-anchor="end">${k*10}</text>`;
+  s += `<line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="#7E8A97" stroke-dasharray="4 4"/><text x="${(L + W - R)/2}" y="${Hh - 6}" class="ax" text-anchor="middle">Forecast probability (%)</text>`;
+  [[S2.pool.off, "#B5862B"], [S2.pool.gd, "#13202E"]].forEach(([a, c]) => { const pts = a.rel.map(r => r[0] >= 3 ? [r[1]/r[0], r[2]/r[0], r[0]] : null).filter(Boolean); if (pts.length >= 2) s += `<path d="M${pts.map(p => `${x(p[0])},${y(p[1])}`).join("L")}" fill="none" stroke="${c}" stroke-width="2.5"/>` + pts.map(p => `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="${Math.min(7, 2 + Math.log10(p[2]))}" fill="${c}"/>`).join(""); });
+  $("exRel").innerHTML = s + `</svg><div class="lg"><span><i style="background:#B5862B"></i>Official</span><span><i style="background:#13202E"></i>Guidance</span></div>`;
+  renderExTimeline(S2);
+}
+function renderExTimeline(S2){
+  const box = $("exTl"); if (!box) return;
+  if (EX.csel == null || !S2.perCon[EX.csel]) EX.csel = S2.perCon.length ? 0 : null;
+  if (EX.csel == null){ box.innerHTML = `<p class="mut">Nothing to show yet.</p>`; return; }
+  const a = S2.perCon[EX.csel], rows = a.rows.slice().sort((p, q) => p.r.a - q.r.a), c = a.c;
+  const W = 760, Hh = 260, L = 44, R = 44, T = 14, B = 34, n = rows.length;
+  const obsV = rows.map(r => r.obs), lo = Math.min(...obsV, c.v)*0.9, hi = Math.max(...obsV, c.v)*1.1;
+  const x = i => L + (i + 0.5)*(W - L - R)/n, y = v => T + (1 - (v - lo)/(hi - lo || 1))*(Hh - T - B), yp = p => T + (1 - p/100)*(Hh - T - B), bw = Math.max(3, (W - L - R)/n*0.6);
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" class="ch" role="img" aria-label="${hesc(c.label)} timeline">`;
+  for (const p of [0, 50, 100]) s += `<line x1="${L}" x2="${W - R}" y1="${yp(p)}" y2="${yp(p)}" class="gr"/><text x="${W - R + 4}" y="${yp(p) + 4}" class="ax">${p}%</text>`;
+  rows.forEach((r, i) => { if (r.ev) s += `<rect x="${x(i) - (W - L - R)/n/2}" y="${T}" width="${(W - L - R)/n}" height="${Hh - T - B}" fill="rgba(178,58,46,.10)"/>`; if (r.pf != null) s += `<rect x="${x(i) - bw/2}" y="${yp(r.pf)}" width="${bw}" height="${yp(0) - yp(r.pf)}" fill="#B5862B" opacity=".75"><title>${new Date(r.r.a).toISOString().slice(5, 16).replace("T", " ")}Z official ${r.pf}%${r.pg != null ? `, guidance ${r.pg}%` : ""}, observed ${Math.round(r.obs)}${c.type === "temp" ? "°F" : " kt"}</title></rect>`; });
+  const gp = rows.map((r, i) => r.pg == null ? null : `${x(i)},${yp(r.pg)}`).filter(Boolean); if (gp.length) s += `<path d="M${gp.join("L")}" fill="none" stroke="#13202E" stroke-width="1.8" stroke-dasharray="5 4"/>`;
+  s += `<path d="M${rows.map((r, i) => `${x(i)},${y(r.obs)}`).join("L")}" fill="none" stroke="#0E7C86" stroke-width="2.2"/>` + rows.map((r, i) => `<circle cx="${x(i)}" cy="${y(r.obs)}" r="2.6" fill="#0E7C86"/>`).join("");
+  s += `<line x1="${L}" x2="${W - R}" y1="${y(c.v)}" y2="${y(c.v)}" stroke="#B23A2E" stroke-dasharray="3 3"/><text x="${L + 4}" y="${y(c.v) - 5}" class="ax" fill="#B23A2E">limit ${c.type === "temp" ? Math.round(c.v) + "°F" : Math.round(c.v) + " kt"}</text>`;
+  for (let k = 0; k <= 4; k++){ const v = lo + (hi - lo)*k/4; s += `<text x="${L - 6}" y="${y(v) + 4}" class="ax" text-anchor="end">${Math.round(v)}</text>`; }
+  rows.forEach((r, i) => { if (i % Math.ceil(n/8) === 0) s += `<text x="${x(i)}" y="${Hh - 12}" class="ax" text-anchor="middle">${new Date(r.r.a).toISOString().slice(8, 13).replace("T", " ")}Z</text>`; });
+  const tw = rows.length && c._tower;
+  box.innerHTML = `<p class="mut">${hesc(a.op.name)}: ${hesc(c.label)}. Observed ${c.type === "temp" ? "temperature" : c.kind === "sust" ? "highest one-minute mean wind" : "peak wind"} in each period at the nearest tower${c.type === "wind" ? ` at ${c.ft} ft` : ""}; shaded periods met the constraint.</p>` + s + `</svg><div class="lg"><span><i style="background:#B5862B"></i>Official probability</span><span><i style="border-top:2px dashed #13202E"></i>Guidance probability</span><span><i style="background:#0E7C86"></i>Observed</span><span><i style="background:rgba(178,58,46,.4)"></i>Constraint met</span></div>`;
+}
+const hesc = s2 => String(s2).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function bindExposure(){
+  const take = async files => {
+    let n = 0; for (const f of files){ if (!/\.csv$/i.test(f.name)) continue; n += addExposureCSV(await f.text(), f.name); }
+    $("exNote").textContent = n ? `Added ${n} exposure forecast${n === 1 ? "" : "s"}. Scoring…` : "No new exposure forecasts found (use the CSV the exposure page publishes).";
+    await prefetchExposureObs(); renderExposure();
+  };
+  $("exFiles").onchange = e => { take([...e.target.files]); e.target.value = ""; };
+  $("exFolder").onclick = async () => { if (!window.showDirectoryPicker){ $("exFiles").click(); return; } try { const dir = await window.showDirectoryPicker(); const files = []; for await (const h of dir.values()) if (h.kind === "file" && /\.csv$/i.test(h.name)) files.push(await h.getFile()); take(files); } catch (e) { /* cancelled */ } };
+  const dz = $("exDrop");
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("on"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("on"));
+  dz.addEventListener("drop", e => { e.preventDefault(); dz.classList.remove("on"); take([...e.dataTransfer.files]); });
+  $("exClear").onclick = () => { if (!confirm("Remove the exposure forecasts stored on this computer?")) return; EX.ops = []; saveExposureStore(); renderExposure(); };
+  $("exBody").addEventListener("click", e => { const r = e.target.closest("[data-ci]"); if (!r) return; EX.csel = +r.dataset.ci; renderExposure(); });
+  $("vMode").onclick = e => { const b = e.target.closest("[data-m]"); if (!b) return; setMode(b.dataset.m); };
+}
+function setMode(m){
+  V.mode = m; document.body.dataset.vmode = m;
+  document.querySelectorAll("#vMode button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === m));
+  try { localStorage.setItem("erwx:verifyMode", m); } catch (e) { /* ignore */ }
+  if (m === "exposure") prefetchExposureObs().then(renderExposure);
+}
+bindExposure();
+loadExposureStore().then(() => { let m = "planning"; try { m = localStorage.getItem("erwx:verifyMode") || (location.hash === "#exposure" ? "exposure" : "planning"); } catch (e) { /* ignore */ } if (location.hash === "#exposure") m = "exposure"; setMode(m); });

@@ -229,3 +229,20 @@ verify here" in Guidance sources turns it off. The **Verification** tab shows th
 by lead time, reliability diagrams, the weights and a day-by-day case browser. Official forecasts
 are scored there from the published CSVs you load (files or a whole folder); they stay on that
 computer and are never uploaded.
+
+## Exposure forecast verification
+The verification workflow also keeps every WINDS tower and sensor height hourly (`towers` in each
+obs file: hour mean, highest one-minute mean, highest peak, and temperature), so exposure
+constraints can be checked at the pad and height they're written for.
+* **Forecast editor:** on the exposure page the "How the guidance is verifying" panel compares any
+  wind height or constraint with the nearest tower within 4 km at that height (exact, interpolated
+  between two sensors in log height, or the nearest sensor within 35 %), draws the constraint's limit,
+  and counts the observed hours that met it.
+* **Exports:** exposure CSVs now carry the guidance value beside the official one for every constraint
+  and wind column (`..._guidance`), so verification can show what the forecaster's edits added.
+* **Verification tab, Exposure forecasts:** load published exposure CSVs (files or a folder). For each
+  operation and constraint it shows the periods scored, how often the constraint was met, Brier scores
+  for the official forecast and the guidance, POD/FAR/CSI at 50 %, the highest forecast and observed
+  extreme, a timeline of forecast probability against the observed wind and limit, a reliability
+  diagram, and wind accuracy at the constraint heights. Exposure forecasts are kept only in that
+  browser; nothing (operation names, constraint values) is uploaded.

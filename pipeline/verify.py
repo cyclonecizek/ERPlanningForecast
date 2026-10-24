@@ -268,6 +268,7 @@ def winds_hour(store, t):
             out.append((sa + (sb - sa) * f, None if pa is None or pb is None else pa + (pb - pa) * f, wnum(b.get("avg_dir_1min"))))
         return out
 
+    tower_hour(store, t, by)
     for pid, p in POINTS.items():
         if "w54" in p:
             m = minutes(p["w54"])
@@ -297,6 +298,63 @@ def winds_hour(store, t):
                     store.put(t, pid, "td", r1(sum(dd) / len(dd)) if len(dd) >= 20 else None)
                     break
     return len(rows)
+
+
+PAD_COORDS = {"LC39A": (28.6083, -80.6041)}   # the API reports 0,0 for the LC-39A pad sensors
+
+
+def tower_group(name):
+    """tower or pad id without its side: 0313NE -> 0313, LC39BSW -> LC39B, LC40N -> LC40"""
+    import re
+    m = re.match(r"^(\d{4}|LC\d+[AB]?|[A-Z]+_[A-Z]+\d*)(NE|NW|SE|SW|N|S|E|W)?$", str(name or ""))
+    return m.group(1) if m else str(name or "")
+
+
+def tower_hour(store, t, by):
+    """every tower and height: hour mean and highest one-minute mean (sust), highest peak, lowest-sensor temperature"""
+    day = store.day(t)
+    towers = day.setdefault("towers", {})
+    groups = {}
+    for (tw, hg), rows in by.items():
+        if hg < 0:
+            continue
+        groups.setdefault(tower_group(tw), {}).setdefault(hg, []).extend(rows)
+    for g, hs in groups.items():
+        lat = lon = None
+        for rows in hs.values():
+            for r in rows:
+                if r.get("lat") and abs(float(r["lat"])) > 1:
+                    lat, lon = float(r["lat"]), float(r["lon"]); break
+            if lat:
+                break
+        if g in PAD_COORDS:
+            lat, lon = PAD_COORDS[g]
+        if lat is None:
+            continue
+        rec = towers.setdefault(g, {"h": {}})
+        rec["lat"], rec["lon"] = round(lat, 4), round(lon, 4)
+        for hg, rows in hs.items():
+            per = {}
+            for r in rows:
+                per.setdefault(r["reading_datetime"], []).append(r)
+            s, pk, tt = [], [], []
+            for _, rs in per.items():
+                rs.sort(key=lambda r: 0 if r.get("prevailing") else 1)
+                r = next((x for x in rs if wnum(x.get("avg_spd_1min")) is not None), None)
+                if r:
+                    s.append(wnum(r["avg_spd_1min"]))
+                    if wnum(r.get("peak_spd_1min")) is not None:
+                        pk.append(wnum(r["peak_spd_1min"]))
+                for x in rs:
+                    if wnum(x.get("tmp")) is not None:
+                        tt.append(wnum(x["tmp"])); break
+            key = str(int(round(hg)))
+            h = rec["h"].setdefault(key, {"s": [None] * 24, "sx": [None] * 24, "g": [None] * 24, "t": [None] * 24})
+            if len(s) >= 20:
+                h["s"][t.hour] = r1(sum(s) / len(s)); h["sx"][t.hour] = r1(max(s))
+                h["g"][t.hour] = r1(max(pk)) if pk else None
+            if len(tt) >= 20:
+                h["t"][t.hour] = r1(sum(tt) / len(tt))
 
 
 def ltg_rows(kind, a, b):
