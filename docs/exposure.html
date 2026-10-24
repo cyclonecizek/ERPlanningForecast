@@ -93,6 +93,7 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
 .pagenav{ align-items:center; }
 .pagenav .navsp{ flex:1; }
+.pagenav a.offl{ font:500 13px var(--font); border-bottom:0; margin-right:10px; }
 .pagenav .theme{ margin:0 0 4px; }
 .pagenav .theme button{ padding:4px 10px; font-size:12.5px; }
 .pagenav a{ padding:8px 16px 9px; font:600 15px var(--cond); letter-spacing:.2px; color:var(--ink-2); text-decoration:none; border-bottom:3px solid transparent; }
@@ -106,6 +107,13 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .esrow label.grow input{ flex:1; }
 .esrow input,.esrow select,.con input,.con select{ border:1px solid var(--rule); border-radius:7px; padding:5px 8px; background:var(--panel); }
 .esrow[hidden]{ display:none; }
+.tplrow{ padding-bottom:12px; border-bottom:1px solid var(--rule-2); }
+.tplrow .sp{ flex:1; }
+.tplrow select,.tplrow input{ border:1px solid var(--rule); border-radius:7px; padding:6px 8px; background:var(--panel); }
+.tplrow select{ min-width:240px; }
+.tplsave{ display:inline-flex; gap:6px; align-items:center; }
+.fileb{ position:relative; overflow:hidden; }
+.fileb input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 .esrow .tzn{ font:600 12px var(--cond); color:var(--ink-3); }
 .cons h3{ margin:0 0 6px; font:600 13px var(--cond); color:var(--ink-3); letter-spacing:.3px; }
 #expCons{ display:grid; gap:6px; margin-bottom:8px; }
@@ -327,7 +335,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 </head>
 <body>
-<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><span class="navsp"></span><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
   <div class="brand">
     <img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">
@@ -361,6 +369,16 @@ document.addEventListener("DOMContentLoaded", function(){
 
 <main>
   <section class="panel expsetup" id="expSetup" hidden aria-label="Operation setup">
+    <div class="esrow tplrow">
+      <strong>Templates</strong>
+      <label class="tplsel"><select id="tplSel" aria-label="Saved operation templates"><option value="">Choose a saved operation</option></select></label>
+      <button class="btn" type="button" id="tplLoad">Load</button>
+      <span class="tplsave"><input id="tplName" placeholder="Template name" maxlength="60" autocomplete="off" aria-label="Template name"><button class="btn" type="button" id="tplSave">Save current as template</button></span>
+      <button class="btn ghost" type="button" id="tplDel">Delete</button>
+      <span class="sp"></span>
+      <button class="btn ghost" type="button" id="tplExport" title="Download your templates to share with other forecasters">Export</button>
+      <span class="btn ghost fileb">Import<input type="file" id="tplImport" accept=".json,application/json" aria-label="Import templates"></span>
+    </div>
     <div class="esrow">
       <label class="grow">Operation <input id="expOp" placeholder="e.g. Crane lift, vehicle rollout, propellant load" autocomplete="off"></label>
       <label>Start <input type="datetime-local" id="expStart"></label>
@@ -465,7 +483,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </dialog>
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "exposure";</script>
-<script src="guidance.js?v=0180e0cbce"></script>
-<script src="planning-app.js?v=81ae6955eb"></script>
+<script src="guidance.js?v=d0e2e51159"></script>
+<script src="planning-app.js?v=027d5429cd"></script>
 </body>
 </html>

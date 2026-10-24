@@ -26,7 +26,7 @@ function fromInput(v){
 /* ---------- upcoming launches (Launch Library 2, mirrored by the workflow) ---------- */
 async function fetchLaunches(){
   let j = null;
-  try { j = await getJSON(`data/launches.json?ts=${Date.now()}`, 8000); } catch (e) { j = null; }
+  try { j = await getJSON(`${DATA_BASE}data/launches.json?ts=${Date.now()}`, 8000); } catch (e) { j = null; }
   if (!j || !j.results){
     const c = (() => { try { return JSON.parse(localStorage.getItem("lmef:ll2") || "null"); } catch (e) { return null; } })();
     if (c && Date.now() - c.t < 3600e3) j = c.j;
@@ -66,13 +66,13 @@ async function fetchProton(){
   if (DEMO) return { now: 0.4, days: [{ d: Date.now(), p: 1 }, { d: Date.now() + 86400e3, p: 1 }, { d: Date.now() + 2*86400e3, p: 1 }] };
   const out = { now:null, days:[] };
   try {
-    let j = null; try { j = await getJSON(`data/protons.json?ts=${Date.now()}`, 8000); } catch (e) { j = null; }
+    let j = null; try { j = await getJSON(`${DATA_BASE}data/protons.json?ts=${Date.now()}`, 8000); } catch (e) { j = null; }
     if (!j) j = await getJSON("https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json", 15000);
     const ten = (Array.isArray(j) ? j : []).filter(r => /10 MeV/.test(r.energy || "") && r.flux != null);
     if (ten.length) out.now = +ten[ten.length - 1].flux;
   } catch (e) { /* unavailable */ }
   try {
-    let t = null; try { const r = await fetch(`data/3day.txt?ts=${Date.now()}`, { cache:"no-store" }); if (r.ok) t = await r.text(); } catch (e) { t = null; }
+    let t = null; try { const r = await fetch(`${DATA_BASE}data/3day.txt?ts=${Date.now()}`, { cache:"no-store" }); if (r.ok) t = await r.text(); } catch (e) { t = null; }
     if (!t){ const r = await fetch("https://services.swpc.noaa.gov/text/3-day-forecast.txt", { cache:"no-store" }); if (r.ok) t = await r.text(); }
     if (t){
       const blk = t.split(/Solar Radiation Activity Forecast/i)[1] || "";
@@ -257,7 +257,7 @@ function productHTML(logo){
   };
   return `<div class="lm">
     <header class="lm-head">
-      ${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">`}
+      ${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="${LOGO_SRC}" alt="45th Weather Squadron" onerror="this.remove()">`}
       <div class="lm-title"><p class="lm-kicker">45th Weather Squadron</p><h1>Launch Mission Execution Forecast</h1>
         <div class="lm-mission"><b>${hesc(L.mission || "Mission name")}</b><span>${hesc(L.vehicle || "")}${pad ? " · " + pad.name : ""}</span></div></div>
       <div class="lm-meta"><div><span>Issued</span><b>${issuedText(issued)}</b></div><div><span>Launch window</span><b>${winText(W0.a, W0.b)}</b></div></div>
@@ -538,7 +538,7 @@ function pickMission(id){
     L.mission = x.name; L.vehicle = x.vehicle; if (x.pad) L.pad = x.pad;
     const b = Math.max(x.w1, x.w0);
     L.windows = [{ a:x.w0, b }, { a:x.w0 + 24*H, b:b + 24*H }];
-    const lim = Object.keys(VEHICLE_LIMITS).find(v => (x.vehicle || "").includes(v)); if (lim){ L.liftoff.v = VEHICLE_LIMITS[lim]; L.liftoff.unit = "kt"; }
+    /* the liftoff wind constraint stays as the forecaster set it */
     L.days = []; L.discussionEdited = false;
   }
   reconfigure(false);

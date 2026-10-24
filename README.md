@@ -108,6 +108,11 @@ row (the chance it's met at any time in the row, from all guidance members), whi
 wind and temperature edits. Settings and edits are saved in the browser separately from the
 planning page. Publishing writes Excel, CSV, PDF and HTML named after the operation.
 
+**Operation templates.** Save the current setup (operation name, point, constraints, hourly setting
+and window length) as a named template, then load it for the next one: the start time stays as set
+and the end moves to match the template's window length. Templates are kept in the browser, travel
+with a workspace file in the offline copy, and Export / Import shares them as a JSON file.
+
 ## Leadership quick look
 The **Leadership brief** button on the planning page builds a one-page summary from the official
 forecast (guidance plus forecaster edits) for all five points: an editable bottom line, a stoplight
@@ -162,3 +167,20 @@ amber, ↺ to go back). Additional risk criteria can be switched off or added:
 * Proton Flux: GOES >=10 MeV flux and the SWPC 3-day S1-or-greater probabilities.
 
 Export as PDF, HTML, Excel or CSV.
+
+## Offline copy (one HTML file)
+`docs/ER_Weather_Tools.html` has the planning, exposure, LMEF and TAF tools in a single file with
+everything built in. Download it from the "Offline copy" link in the tab bar (or from the repo),
+save it anywhere, and double-click it to open in Edge or Chrome. Nothing to install and no Python.
+* Guidance comes straight from the public services (Open-Meteo, IEM, SPC, aviationweather.gov,
+  Launch Library 2, SWPC); the data this repo mirrors (MOS, RRFS/REFS and calibrated thunder, SPC,
+  launches, protons) is read from the GitHub Pages site, so the machine needs internet access to them.
+* Edits, settings and drafts are saved in that browser on that computer. To share them between
+  forecasters, use **Workspace** in the tab bar: "Save workspace file…" writes everyone's
+  in-progress planning, exposure, LMEF and TAF work (and an optional handoff note) to one JSON file
+  for the shared drive; "Open workspace file…" loads a teammate's file and reloads the tools. Each
+  person's initials, time zone, wind units and theme stay their own. In Edge and Chrome the file
+  stays linked for the session, so Save updates the same file; otherwise it downloads a new one.
+  Opening a file replaces your current work in the tools you tick, after showing who saved it and when.
+* The file is rebuilt automatically by the "Build standalone file" workflow whenever the pages change;
+  download it again to get updates. To build it by hand: `python pipeline/build_standalone.py`.

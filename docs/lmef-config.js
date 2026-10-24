@@ -16,7 +16,8 @@ const PADS = [
 ];
 const LMK = "lmef:v1";
 const RISK = ["Low","Moderate","High"];
-const VEHICLE_LIMITS = { "Falcon 9":30, "Falcon Heavy":30, "Vulcan":33, "Atlas V":33, "New Glenn":30, "SLS":34, "Starship":30 };
+/* vehicle constraint values are entered by the forecaster and kept on this computer only */
+const VEHICLE_LIMITS = {};
 const BUILTIN_RISKS = [
   { id:"shear",    name:"Upper-Level Wind Shear",   auto:"GFS 300-200 hPa winds" },
   { id:"recovery", name:"Booster Recovery Weather", auto:"recovery site winds and seas" },

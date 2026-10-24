@@ -1,4 +1,7 @@
 "use strict";
+/* where the mirrored data lives: this site, or the GitHub Pages copy when the tools run from a file */
+const DATA_BASE = (typeof window !== "undefined" && window.DATA_BASE) || "";
+const LOGO_SRC = (typeof window !== "undefined" && window.LOGO_SRC) || "45ws-logo.png";
 /* ============================================================
    Daily Planning Forecast — KSC / CCSFS / Patrick SFB
    Guidance: Open-Meteo deterministic + ensemble models, IEM MOS
@@ -274,7 +277,7 @@ async function fetchOM(src, ens, TL){
 /* IEM MOS: prefer a same-origin mirror written by the workflow (data/mos/<MODEL>.json), then IEM */
 async function fetchMOS(src, TL){
   let js = null, from = "";
-  try { js = await getJSON(`data/mos/${src.model}.json?ts=${Date.now()}`, 8000); from = "mirror"; } catch (e) { js = null; }
+  try { js = await getJSON(`${DATA_BASE}data/mos/${src.model}.json?ts=${Date.now()}`, 8000); from = "mirror"; } catch (e) { js = null; }
   if (!js || !rowsOf(js).length){
     const st = stationsNow().map(s => "station=" + s).join("&");
     js = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?${st}&model=${src.model}`, 30000); from = "IEM";
@@ -354,7 +357,7 @@ function parseMOS(rs, src, TL){
 
 /* High-res pipeline output: RRFS, REFS members, HREF / REFS calibrated thunder */
 async function fetchPipeline(TL){
-  const js = await getJSON(`data/hires.json?ts=${Date.now()}`, 15000);
+  const js = await getJSON(`${DATA_BASE}data/hires.json?ts=${Date.now()}`, 15000);
   const out = {};
   for (const src of js.sources || []){
     const per = {};
@@ -381,7 +384,7 @@ async function fetchSPC(){
   for (const d of [1,2,3]){
     try {
       let js = null;
-      try { js = await getJSON(`data/mos/spc_day${d}.json?ts=${Date.now()}`, 8000); } catch (e) { js = null; }
+      try { js = await getJSON(`${DATA_BASE}data/mos/spc_day${d}.json?ts=${Date.now()}`, 8000); } catch (e) { js = null; }
       if (!js || !js.features) js = await getJSON(`https://www.spc.noaa.gov/products/outlook/day${d}otlk_cat.nolyr.geojson`, 15000);
       for (const f of js.features || []){
         const pr = f.properties || {}; const lab = String(pr.LABEL || pr.label || "").toUpperCase();

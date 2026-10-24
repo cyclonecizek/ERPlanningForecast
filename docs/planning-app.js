@@ -13,7 +13,7 @@ const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
 };
-const DEMO = /[?&]demo=1\b/.test(location.search);
+const DEMO = /[?&]demo=1\b/.test(location.search) || !!(typeof window !== "undefined" && window.FORCE_DEMO);
 
 /* ============================================================
    Exposure forecasts: points, constraints and valid range
@@ -358,6 +358,60 @@ function expChanged(full){
   savePrefs(); applyExposureConfig(prefs.exp); rebuildViews();
   clearTimeout(expT); expT = setTimeout(() => { if (full) loadAll(); else rebuildGuidance(); renderExpSetup(); }, full ? 50 : 250);
 }
+/* ---------- operation templates (exposure page) ----------
+   A template keeps the operation name, point, constraints, hourly setting and window length.
+   Loading one keeps the current start time. Templates live in this browser (and travel with a
+   workspace file); Export / Import shares them as a JSON file. */
+const TPL_KEY = "expfx:v1:templates";
+const loadTpls = () => store.get(TPL_KEY, []);
+const saveTpls = t => store.set(TPL_KEY, t);
+function renderTpls(sel){
+  if (!EXPO) return;
+  const t = loadTpls().sort((a, b) => a.name.localeCompare(b.name));
+  $("tplSel").innerHTML = `<option value="">${t.length ? "Choose a saved operation" : "No templates saved yet"}</option>` + t.map(x => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${hesc(x.name)}</option>`).join("");
+}
+function tplFromCurrent(name){
+  const e = prefs.exp, s = SITES.find(x => x.id === prefs.site);
+  return { id:"t" + Date.now().toString(36), name, op:e.op || name, site:prefs.site, custom: s && s.custom ? { ...e.custom } : null,
+    constraints: e.constraints.map(c => { const { id, ...rest } = c; return rest; }), hourly:e.hourly, hours:Math.round((e.end - e.start)/H), saved:Date.now() };
+}
+function applyTpl(t){
+  const e = prefs.exp, newId = k => "c" + Date.now().toString(36) + k;
+  e.op = t.op || t.name;
+  e.constraints = (t.constraints || []).map((c, k) => ({ id:newId(k), ...c }));
+  if (t.hourly != null) e.hourly = t.hourly;
+  if (t.hours) e.end = e.start + t.hours*H;
+  let full = false;
+  if (t.site === "custom" && t.custom){ const was = JSON.stringify(e.custom); e.custom = { ...t.custom }; full = JSON.stringify(e.custom) !== was; }
+  if (t.site) prefs.site = t.site;
+  toast(`Loaded "${t.name}"`);
+  expChanged(full); renderSites();
+}
+function bindTpls(){
+  renderTpls();
+  $("tplLoad").onclick = () => { const t = loadTpls().find(x => x.id === $("tplSel").value); if (!t){ toast("Pick a template first"); return; } applyTpl(t); };
+  $("tplSel").ondblclick = () => $("tplLoad").click();
+  $("tplSave").onclick = () => {
+    const name = ($("tplName").value || prefs.exp.op || "").trim(); if (!name){ toast("Give the template a name"); $("tplName").focus(); return; }
+    const all = loadTpls(), same = all.find(x => x.name.toLowerCase() === name.toLowerCase());
+    if (same && !confirm(`Replace the saved template "${same.name}"?`)) return;
+    const t = tplFromCurrent(name); if (same) t.id = same.id;
+    saveTpls([...all.filter(x => x !== same), t]); renderTpls(t.id); $("tplName").value = ""; toast(`Saved "${name}"`);
+  };
+  $("tplName").addEventListener("keydown", e => { if (e.key === "Enter") $("tplSave").click(); });
+  $("tplDel").onclick = () => { const all = loadTpls(), t = all.find(x => x.id === $("tplSel").value); if (!t){ toast("Pick a template to delete"); return; } if (!confirm(`Delete the template "${t.name}"?`)) return; saveTpls(all.filter(x => x !== t)); renderTpls(); toast("Template deleted"); };
+  $("tplExport").onclick = () => { const all = loadTpls(); if (!all.length){ toast("No templates to export"); return; } download(new Blob([JSON.stringify({ kind:"erwx-exposure-templates", version:1, templates:all }, null, 1)], { type:"application/json" }), `Exposure_Templates_${(prefs.initials || "team").toUpperCase()}.json`); };
+  $("tplImport").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return; e.target.value = "";
+    try {
+      const j = JSON.parse(await f.text()), inc = Array.isArray(j) ? j : j.templates;
+      if (!Array.isArray(inc)) throw new Error("bad");
+      const all = loadTpls(); let n = 0;
+      for (const t of inc){ if (!t || !t.name || !Array.isArray(t.constraints)) continue; const i = all.findIndex(x => x.name.toLowerCase() === t.name.toLowerCase()); const nt = { ...t, id: i >= 0 ? all[i].id : "t" + Date.now().toString(36) + n }; if (i >= 0) all[i] = nt; else all.push(nt); n++; }
+      saveTpls(all); renderTpls(); toast(`Imported ${n} template${n === 1 ? "" : "s"}`);
+    } catch (err) { toast("That isn't a templates file"); }
+  };
+}
 function bindExp(){
   if (!EXPO) return;
   $("expSetup").hidden = false;
@@ -393,6 +447,7 @@ function bindExp(){
   const newId = () => "c" + Date.now().toString(36);
   $("addWind").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"wind", h:60, kind:"peak", op:">=", v:25, unit:"kt" }); expChanged(false); };
   $("addTemp").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"temp", op:">", v:95, unit:"F" }); expChanged(false); };
+  bindTpls();
   $("foot1").textContent = "Rows are hourly for the period you choose, then 3-hour blocks to the end of the window. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. Constraint probabilities are the chance that the constraint is met (for example, a peak wind at or above the limit) at any time in the row, from all the guidance members, and they move with your wind and temperature edits. 3 and 6 hr precipitation and lightning cells are merged across the hours they cover and linked to the 1 hr values. Press Enter to edit a table cell, Delete to return it to guidance.";
   const f2 = $("foot1").nextElementSibling; if (f2) f2.textContent = "Winds at each constraint height are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing), and peaks scale the 10 m gust factor with height. The custom point uses the nearest MOS station within 30 km and the nearest high-res pipeline point within 15 km. Lightning comes only from guidance with explicit thunder probabilities.";
   renderExpSetup();
@@ -1046,7 +1101,7 @@ let LOGO = null;
 async function loadLogo(){
   if (LOGO !== null) return LOGO;
   try {
-    const r = await fetch("45ws-logo.png"); if (!r.ok) throw new Error("no logo");
+    const r = await fetch(LOGO_SRC); if (!r.ok) throw new Error("no logo");
     const png = new Uint8Array(await r.arrayBuffer());
     const img = await createImageBitmap(new Blob([png], { type:"image/png" }));
     const rh = 200, rw = Math.round(img.width*rh/img.height);
@@ -1585,7 +1640,7 @@ function briefHTMLBody(D, logo){
   const issued = Date.now(), z = zulu(), tz = z ? "UTC" : tzAbbr(issued), by = (prefs.initials || "").toUpperCase();
   const cell = (h, hz) => { const c = LVC[hz.lv]; const txt = h.id === "svr" ? (hz.sevTxt === "None" ? "–" : hz.sevTxt.replace(" or higher", "+")) : hz.v == null ? "–" : `${Math.round(hz.v)}%`; return `<td style="background:rgba(${c.join(",")},${hz.lv ? 0.85 : 0.16});color:${hz.lv ? "#fff" : "#2F5A3C"}">${txt}</td>`; };
   const r0 = S.rows[0], r1 = S.rows[S.rows.length - 1];
-  let h = `<div class="bq-head">${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">`}<div><h1>Leadership Quick Look</h1><p>KSC, Cape Canaveral SFS and Patrick SFB. Issued ${dayLabel(issued, z).dt} ${hhmm(issued, z)} ${tz}${by ? " by " + hesc(by) : ""}. Valid ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)} ${tz}.</p></div></div>`;
+  let h = `<div class="bq-head">${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="${LOGO_SRC}" alt="45th Weather Squadron" onerror="this.remove()">`}<div><h1>Leadership Quick Look</h1><p>KSC, Cape Canaveral SFS and Patrick SFB. Issued ${dayLabel(issued, z).dt} ${hhmm(issued, z)} ${tz}${by ? " by " + hesc(by) : ""}. Valid ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)} ${tz}.</p></div></div>`;
   h += `<div class="bq-bl"><b>Bottom line</b>${hesc(BRIEF.bottom || "")}</div>`;
   h += `<table class="bq-t"><thead><tr><th></th>${D.days.map(d => `<th>${d.label.wd}<small>${d.label.dt}</small></th>`).join("")}</tr></thead><tbody>`;
   for (const hz of D.shown) h += `<tr><th>${hz.label}</th>${D.days.map(d => cell(hz, d.haz[hz.id])).join("")}</tr>`;
