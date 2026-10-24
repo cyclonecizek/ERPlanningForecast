@@ -170,6 +170,16 @@ amber, ↺ to go back). Additional risk criteria can be switched off or added:
 
 Export as PDF, HTML, Excel or CSV.
 
+## Interactive HTML product
+The HTML that Publish writes for the planning and exposure forecasts is an interactive page, not a
+copy of the PDF: forecast points as tabs, one continuous table that scrolls with sticky headers and
+parameter names, time across or time down, local or UTC, wind units, parameter-group filters, jumps to
+each day, graphs with hover readouts, light and dark themes, and a print layout. Customer products
+(HTML, PDF, Excel, CSV) show the forecast only: nothing about guidance values or the forecaster's
+edits. Each publish also keeps a private verification copy (official values with the guidance beside
+them) in that browser, which the Verification tab picks up automatically. It's a single file with no outside links, so it can be emailed or
+put on a shared drive.
+
 ## Offline copy (one HTML file)
 `docs/ER_Weather_Tools.html` has the planning, exposure, LMEF and TAF tools in a single file with
 everything built in. Download it from the "Offline copy" link in the tab bar (or from the repo),
@@ -238,8 +248,8 @@ constraints can be checked at the pad and height they're written for.
   wind height or constraint with the nearest tower within 4 km at that height (exact, interpolated
   between two sensors in log height, or the nearest sensor within 35 %), draws the constraint's limit,
   and counts the observed hours that met it.
-* **Exports:** exposure CSVs now carry the guidance value beside the official one for every constraint
-  and wind column (`..._guidance`), so verification can show what the forecaster's edits added.
+* **Verification copy:** each publish keeps the official values with the guidance beside them in the
+  browser (not in the customer CSV), so verification can show what the forecaster's edits added.
 * **Verification tab, Exposure forecasts:** load published exposure CSVs (files or a folder). For each
   operation and constraint it shows the periods scored, how often the constraint was met, Brier scores
   for the official forecast and the guidance, POD/FAR/CSI at 50 %, the highest forecast and observed

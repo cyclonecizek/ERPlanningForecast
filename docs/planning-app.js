@@ -1413,8 +1413,8 @@ function siteSheet(s, OFs, issued, by){
     cols:[11,11,7, ...PARAMS.map(p => p.kind === "sev" ? 14 : p.kind === "prob" ? 8 : 7)],
     cf: PARAMS.map((p, j) => p.kind === "prob" ? `${colName(j + 3)}${n0}:${colName(j + 3)}${n1}` : null).filter(Boolean) };
 }
-function csvFor(list, issued, by){
-  if (EXPO) return csvGeneric(list, issued, by);
+function csvFor(list, issued, by, internal){
+  if (EXPO) return csvGeneric(list, issued, by, internal);
   const head = ["site","point","valid_start_utc","valid_end_utc","valid_start_local","period_h","sky","sky_pct","temp_f","dewpoint_f","wbgt_f","pop_1h_pct","pop_3h_pct","pop_6h_pct","ltg_1h_pct","ltg_3h_pct","ltg_6h_pct","wind54_sust_kt","wind54_peak_kt","wind200_sust_kt","wind200_peak_kt","wind_dir_deg","wind_dir","p_sust_gt18kt_pct","p_peak_gt25kt_pct","p_peak_gt35kt_pct","p_peak_gt50kt_pct","p_temp_gt_hot_pct","hot_threshold_f","p_temp_lt40f_pct","p_temp_lt32f_pct","p_vis_lt3mi_pct","severe","issued_utc","forecaster"];
   const q = v => { if (v === undefined || v === null) return ""; const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [head.join(",")];
@@ -1429,10 +1429,10 @@ function csvFor(list, issued, by){
   return lines.join("\r\n") + "\r\n";
 }
 /* exposure CSV: one column per parameter on the page */
-function csvGeneric(list, issued, by){
+function csvGeneric(list, issued, by, internal){
   const colOf = p => { const c = p.csv || (p.kind === "prob" ? `${p.k}_pct` : p.k); return isWind(p) ? c.replace(/_kt$/, "_" + wuLabel().replace("/", "p")) : c; };
   /* guidance beside the official value for the constraints and winds, so verification can show what the edits added */
-  const GD = PARAMS.filter(p => p.cons || /^[sg]\d+$/.test(p.k));
+  const GD = internal ? PARAMS.filter(p => p.cons || /^[sg]\d+$/.test(p.k)) : [];
   const head = ["point","lat","lon","valid_start_utc","valid_end_utc","valid_start_local","period_h", ...PARAMS.map(colOf), "issued_utc","forecaster", ...GD.map(p => colOf(p) + "_guidance")];
   const q = v => { if (v === undefined || v === null) return ""; const t = String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
   const lines = [`# ${productName()}. ${constraintSummary()}`, head.join(",")];
@@ -1481,8 +1481,9 @@ async function doPublish(){
   if (wantP || wantH){
     const models = reportModel(list, issued, by);
     if (wantP){ setTimeout(() => download(pdfReport(models, logo), `${FILE_BASE()}${tag}_${stamp}.pdf`), 600); nfiles++; }
-    if (wantH){ setTimeout(() => download(new Blob([htmlReport(models, issued, logo)], { type:"text/html" }), `${FILE_BASE()}${tag}_${stamp}.html`), 900); nfiles++; }
+    if (wantH){ setTimeout(() => download(new Blob([interactiveReport(list, issued, by, logo)], { type:"text/html" }), `${FILE_BASE()}${tag}_${stamp}.html`), 900); nfiles++; }
   }
+  keepForVerification(list, issued, by);
   prefs.fmt = { x:$("fmtX").checked, c:$("fmtC").checked, p:wantP, h:wantH }; savePrefs();
   ids.forEach(id => published[id] = { t: issued, by }); store.set(LS.pub, published);
   renderStatus();
@@ -1572,6 +1573,249 @@ td.mut{color:#9AA6B0}.hd{display:flex;gap:14px;align-items:center;margin-bottom:
   }
   h += `<p class="note">${hesc(document.querySelector(".foot p").textContent)}</p></body></html>`;
   return h;
+}
+
+/* every published forecast is also kept in this browser for the Verification tab, with the guidance
+   beside the official values; the customer files carry neither */
+function keepForVerification(list, issued, by){
+  try {
+    const text = csvFor(list, issued, by, true), kind = EXPO ? "exposure" : LMEF ? null : "planning"; if (!kind) return;
+    const q = indexedDB.open("erwx-verify", 1);
+    q.onupgradeneeded = () => q.result.createObjectStore("official");
+    q.onsuccess = () => {
+      const db = q.result, tx = db.transaction("official", "readwrite"), os = tx.objectStore("official"), g = os.get("published");
+      g.onsuccess = () => { const arr = (g.result || []).filter(x => Date.now() - x.t < 120*86400e3); arr.push({ kind, t:issued, name:`${FILE_BASE()}${issued}`, text }); os.put(arr, "published"); };
+    };
+  } catch (e) { /* storage unavailable; the CSV can still be loaded by hand */ }
+}
+/* ---------- interactive HTML product ----------
+   One self-contained page: the data as JSON plus a small viewer (reportViewer below, embedded as
+   source). Sites as tabs, a continuous scrollable table with sticky headers, time across or down,
+   local or UTC, wind units, parameter filters, day jumps, graphs with hover readouts, light/dark and a
+   print layout. It shows the forecast only: nothing about guidance or the forecaster's edits. */
+function tintA(p, v){
+  if (v == null) return null;
+  if (p.kind === "prob"){ const a = Math.min(0.62, v/100*0.62); return a > 0.02 ? [11,110,121,a] : null; }
+  if (p.k === "t" || p.k === "wbgt"){ if (v >= 85) return [178,58,46,Math.min(0.32, (v - 84)/40)]; if (v <= 50) return [52,102,170,Math.min(0.3, (51 - v)/40)]; return null; }
+  if (p.unit === "kt" && p.kind === "num"){ const a = Math.max(0, Math.min(0.4, (v - 12)/45)); return a > 0.02 ? [178,58,46,a] : null; }
+  if (p.kind === "sky"){ const a = Math.max(0, v)/100*0.16; return a > 0.02 ? [120,135,150,a] : null; }
+  if (p.kind === "sev" && v !== "-") return [178,58,46,0.08 + SEV.indexOf(v)*0.06];
+  return null;
+}
+/* the customer-facing explanation of the table (the editor's footnote is for forecasters) */
+function productNote(){
+  const blocks = EXPO ? `Rows are hourly for the first ${prefs.exp && prefs.exp.hourly != null ? prefs.exp.hourly : 24} hours, then 3-hour blocks to the end of the period.` : "Rows are hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7.";
+  return `${blocks} In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the period shown. 3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time.${EXPO ? " Constraint probabilities are the chance that the constraint is met at any time in the row." : ""} Winds are in the selected unit; temperatures in °F.`;
+}
+function interactiveReport(list, issued, by, logo){
+  const rows = S.rows.map(r => ({ a:r.a, b:r.b, len:r.len }));
+  const r2 = v => v == null ? null : Math.round(v*10)/10;
+  const data = {
+    product: productName(list[0] && list[0][0]), issued, by, tz:TZ, units:wuLabel(), expo:!!EXPO,
+    constraints: EXPO ? constraintSummary() : "", note: productNote(),
+    logo: logo ? `data:image/png;base64,${logo.b64}` : null, rows,
+    sites: list.map(([st, OFs]) => ({
+      id:st.id, name: EXPO ? st.point : st.name, point:st.point, lat:st.lat, lon:st.lon,
+      params: PARAMS.map(p => {
+        const spm = spanMap(p.k);
+        return { k:p.k, label: p.kind === "sev" ? "SPC category" : colLabel(p, st), sub:p.s || "", group:p.g, kind:p.kind, wind:isWind(p), unit:p.unit || "", thr:p.thr || [], cons:!!p.cons, limit: p.cons ? p.v : null,
+          cells: rows.map((r, i) => {
+            const sp = spm[i]; if (sp.cov) return 0;
+            const v = OFs.o[p.k][i];
+            if (v === undefined) return [sp.s, null, "–", null];
+            const txt = p.kind === "sev" ? (v === "-" ? "-" : v) : p.kind === "sky" ? skyCat(v) : p.kind === "dir" ? (v == null ? "" : compass(v)) : null;
+            return [sp.s, typeof v === "number" ? r2(v) : v, txt, tintA(p, v)];
+          }) };
+      }) })),
+  };
+  const json = JSON.stringify(data).replace(/</g, "\\u003c");
+  const css = `:root{--bg:#F4F6F7;--panel:#fff;--ink:#13202E;--ink2:#4B5A68;--ink3:#7D8B97;--rule:#D4DBDF;--rule2:#E7ECEE;--acc:#0E7C86;--ed:#B5862B;--fa:1;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0E141B;--panel:#151D26;--ink:#E7EDF2;--ink2:#A9B6C2;--ink3:#7F8D99;--rule:#2A3643;--rule2:#1F2933;--acc:#46B3BC;--ed:#E0B25A;--fa:.55;color-scheme:dark}}
+:root[data-theme=dark]{--bg:#0E141B;--panel:#151D26;--ink:#E7EDF2;--ink2:#A9B6C2;--ink3:#7F8D99;--rule:#2A3643;--rule2:#1F2933;--acc:#46B3BC;--ed:#E0B25A;--fa:.55;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 "Segoe UI",system-ui,-apple-system,Arial,sans-serif}
+header.top{display:flex;gap:16px;align-items:center;padding:16px 22px;background:var(--panel);border-bottom:1px solid var(--rule)}header.top img{height:64px;width:auto}
+header.top h1{margin:0;font-size:22px}header.top p{margin:3px 0 0;color:var(--ink2);font-size:13px}
+.bar{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 22px;background:var(--panel);border-bottom:1px solid var(--rule);box-shadow:0 2px 6px rgba(0,0,0,.04)}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}.seg button{border:0;background:none;color:var(--ink2);padding:6px 11px;font:600 13px inherit;cursor:pointer}.seg button[aria-pressed=true]{background:var(--ink);color:var(--panel)}
+select,.btn{border:1px solid var(--rule);border-radius:8px;background:var(--panel);color:var(--ink);padding:6px 10px;font:13px inherit;cursor:pointer}
+.chips{display:flex;flex-wrap:wrap;gap:5px}.chip{border:1px solid var(--rule);border-radius:999px;background:none;color:var(--ink2);padding:4px 10px;font:600 12px inherit;cursor:pointer}.chip[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:#fff}
+.sp{flex:1}.lab{font-size:12px;color:var(--ink3)}
+.tabs{display:flex;gap:4px;padding:12px 22px 0;flex-wrap:wrap}.tabs button{border:1px solid var(--rule);border-bottom:0;border-radius:10px 10px 0 0;background:var(--rule2);color:var(--ink2);padding:8px 14px;font:600 14px inherit;cursor:pointer}.tabs button[aria-selected=true]{background:var(--panel);color:var(--ink)}
+main{padding:0 22px 30px}.card{background:var(--panel);border:1px solid var(--rule);border-radius:0 12px 12px 12px;padding:14px}
+.meta{color:var(--ink2);font-size:13px;margin:0 0 10px}.cons{background:rgba(181,134,43,.12);border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:13px}
+.days{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.tw{overflow:auto;max-height:calc(100vh - 210px);border:1px solid var(--rule);border-radius:10px}
+table{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;font-size:12.5px}
+th,td{border-right:1px solid var(--rule2);border-bottom:1px solid var(--rule2);padding:4px 6px;text-align:center;white-space:nowrap;background:var(--panel)}
+thead th{position:sticky;top:0;z-index:3;background:var(--panel);font-weight:600;color:var(--ink2)}thead tr:nth-child(2) th{top:27px}
+th.g{position:sticky;left:0;z-index:2;text-align:left;vertical-align:top;color:var(--ink2);font-size:12px;min-width:110px;max-width:130px;white-space:normal}
+th.l{position:sticky;left:110px;z-index:2;text-align:left;min-width:120px}th.l small,thead small{display:block;font-weight:400;color:var(--ink3);font-size:10.5px}
+thead th.c0{left:0;z-index:4;position:sticky}thead th.c1{left:110px;z-index:4;position:sticky}
+td{position:relative;cursor:default}td.na{color:var(--ink3)}.dstart{border-left:2px solid var(--ink3)!important}
+tr.cons th.l{color:var(--ed)}tbody tr:hover td,tbody tr:hover th.l{box-shadow:inset 0 0 0 999px rgba(14,124,134,.06)}td.hc{box-shadow:inset 0 0 0 999px rgba(14,124,134,.08)}
+table.down th.t{position:sticky;left:0;z-index:2;text-align:left}table.down tr.day th{position:sticky;left:0;text-align:left;background:var(--rule2);color:var(--ink)}
+.tip{position:fixed;z-index:50;pointer-events:none;background:var(--ink);color:var(--panel);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.45;box-shadow:0 6px 18px rgba(0,0,0,.2);display:none;max-width:280px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:12px}.gc{border:1px solid var(--rule2);border-radius:10px;padding:10px 12px}.gc h3{margin:0 0 2px;font-size:14px}.gc h3 small{color:var(--ink3);font-weight:400}
+.gc svg{width:100%;height:auto;display:block}.gc .ax{font-size:10.5px;fill:var(--ink3)}.gc .gr{stroke:var(--rule2)}.gc .ln{fill:none;stroke:var(--acc);stroke-width:2}.gc .gd{fill:none;stroke:var(--ink3);stroke-width:1.4;stroke-dasharray:4 3}.gc .bar2{fill:var(--acc);opacity:.75}.gc .thr{stroke:#B23A2E;stroke-dasharray:3 3}.gc .ed{fill:var(--ed)}.gc .hv{stroke:var(--ink3);stroke-width:1}
+footer{color:var(--ink3);font-size:12px;padding:14px 22px 30px}
+@media print{.bar,.tabs,.days,.tip{display:none!important}.tw{max-height:none;overflow:visible;border:0}thead th,th.g,th.l{position:static}body{background:#fff}.card{border:0;padding:0}.site{display:block!important;page-break-after:always}}`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${hesc(data.product)}</title><style>${css}</style></head><body>
+<header class="top">${data.logo ? `<img src="${data.logo}" alt="45th Weather Squadron">` : ""}<div><h1>${hesc(data.product)}</h1><p id="hsub"></p></div></header>
+<div class="bar" role="toolbar" aria-label="View options">
+<span class="seg" id="vw"><button data-v="table" aria-pressed="true">Table</button><button data-v="graphs" aria-pressed="false">Graphs</button></span>
+<span class="seg" id="orient"><button data-o="across" aria-pressed="true">Time across</button><button data-o="down" aria-pressed="false">Time down</button></span>
+<span class="seg" id="tzs"><button data-z="L" aria-pressed="true">Local</button><button data-z="Z" aria-pressed="false">UTC</button></span>
+<label class="lab">Wind <select id="wu"><option>kt</option><option>mph</option><option>m/s</option><option>ft/s</option><option>km/h</option></select></label>
+<span class="sp"></span>
+<span class="seg" id="th"><button data-t="auto" aria-pressed="true">Auto</button><button data-t="light" aria-pressed="false">Light</button><button data-t="dark" aria-pressed="false">Dark</button></span>
+<button class="btn" id="pr">Print</button>
+<div class="chips" id="grps" style="flex-basis:100%"></div>
+</div>
+<div class="tabs" id="tabs" role="tablist"></div>
+<main><div class="card" id="card"></div></main>
+<footer id="foot"></footer><div class="tip" id="tip"></div>
+<script type="application/json" id="data">${json}</script>
+<script>(${reportViewer.toString()})();</script></body></html>`;
+}
+/* the viewer that runs inside the exported page (it is embedded as source, never run here) */
+function reportViewer(){
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const $ = id => document.getElementById(id), H = 3600e3;
+  const UF = { kt:1, mph:1/0.868976, "m/s":1/1.943844, "ft/s":1/0.592484, "km/h":1/0.539957 };
+  const st = { site:0, view:"table", orient:"across", z:"L", wu:D.units, groups:null };
+  try { Object.assign(st, JSON.parse(localStorage.getItem("erwx:product") || "{}")); } catch (e) { /* ignore */ }
+  if (st.site >= D.sites.length) st.site = 0;
+  const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const save = () => { try { const { site, view, orient, z, wu } = st; localStorage.setItem("erwx:product", JSON.stringify({ site, view, orient, z, wu })); } catch (e) { /* ignore */ } };
+  const fmtL = new Intl.DateTimeFormat("en-US", { timeZone:D.tz, hour:"2-digit", minute:"2-digit", hourCycle:"h23" });
+  const dayL = new Intl.DateTimeFormat("en-US", { timeZone:D.tz, weekday:"short", month:"short", day:"numeric" });
+  const dayZ = new Intl.DateTimeFormat("en-US", { timeZone:"UTC", weekday:"short", month:"short", day:"numeric" });
+  const keyL = new Intl.DateTimeFormat("en-CA", { timeZone:D.tz, year:"numeric", month:"2-digit", day:"2-digit" });
+  const hm = t => st.z === "Z" ? new Date(t).toISOString().slice(11, 16).replace(":", "") : fmtL.format(new Date(t)).replace(":", "");
+  const dk = t => st.z === "Z" ? new Date(t).toISOString().slice(0, 10) : keyL.format(new Date(t));
+  const dl = t => (st.z === "Z" ? dayZ : dayL).format(new Date(t));
+  const tzName = () => st.z === "Z" ? "UTC" : (new Intl.DateTimeFormat("en-US", { timeZone:D.tz, timeZoneName:"short" }).format(new Date(D.issued)).split(" ").pop());
+  const groupName = g => g.replace("Winds (kt)", "Winds (" + st.wu + ")");
+  const valTxt = (p, c) => { if (!c || c[1] == null) return c && c[2] != null ? c[2] : ""; if (c[2] != null) return c[2]; if (p.wind) return String(Math.round(c[1]*UF[st.wu])); return String(Math.round(c[1])); };
+  const unitOf = p => p.wind ? st.wu : p.kind === "prob" ? "%" : p.unit === "°F" || p.k === "t" || p.k === "td" || p.k === "wbgt" ? "°F" : p.unit || "";
+  const bg = c => c && c[3] ? ` style="background:rgba(${c[3][0]},${c[3][1]},${c[3][2]},calc(${c[3][3].toFixed(3)} / var(--fa)))"` : "";
+  const site = () => D.sites[st.site];
+  const groups = () => [...new Set(site().params.map(p => p.group))];
+  if (!st.groups) st.groups = Object.fromEntries(groups().map(g => [g, true]));
+  const theme = t => { if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); document.querySelectorAll("#th button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t)); try { localStorage.setItem("erwx:theme", t); } catch (e) { /* ignore */ } };
+  let th0 = "auto"; try { th0 = localStorage.getItem("erwx:theme") || "auto"; } catch (e) { /* ignore */ } theme(th0);
+  function head(){
+    const iso = new Date(D.issued);
+    $("hsub").textContent = `Issued ${dl(D.issued)} ${iso.getUTCFullYear()} at ${hm(D.issued)} ${tzName()}${D.by ? " by " + D.by : ""}. ${D.sites.length > 1 ? D.sites.length + " forecast points." : ""}`;
+    $("tabs").innerHTML = D.sites.length > 1 ? D.sites.map((s, i) => `<button role="tab" aria-selected="${i === st.site}" data-s="${i}">${esc(s.name)}</button>`).join("") : "";
+    $("grps").innerHTML = groups().map(g => `<button class="chip" data-g="${esc(g)}" aria-pressed="${st.groups[g] !== false}">${esc(groupName(g))}</button>`).join("");
+    ["vw","orient","tzs"].forEach(id => document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute("aria-pressed", (b.dataset.v || b.dataset.o || b.dataset.z) === (id === "vw" ? st.view : id === "orient" ? st.orient : st.z))));
+    $("wu").value = st.wu; $("orient").style.display = st.view === "table" ? "" : "none";
+    $("foot").textContent = D.note;
+  }
+  const visible = () => site().params.filter(p => st.groups[p.group] !== false);
+  function dayStarts(){ const out = []; let last = null; D.rows.forEach((r, i) => { const k = dk(r.a); if (k !== last){ out.push({ i, k, label: dl(r.a) }); last = k; } }); return out; }
+  function tableAcross(){
+    const days = dayStarts(), starts = new Set(days.map(d => d.i)), ps = visible();
+    let h = `<table class="across"><thead><tr><th class="c0" colspan="2"></th>`;
+    days.forEach((d, j) => { const n = (days[j + 1] ? days[j + 1].i : D.rows.length) - d.i; h += `<th colspan="${n}" class="dstart" id="day${j}" style="text-align:left">${esc(d.label)}</th>`; });
+    h += `</tr><tr><th class="c0" style="text-align:left">Group</th><th class="c1" style="text-align:left">Parameter</th>` + D.rows.map((r, i) => `<th class="${starts.has(i) ? "dstart" : ""}" data-ci="${i}">${hm(r.a).slice(0, 2)}${r.len > 1 ? "–" + hm(r.b).slice(0, 2) : ""}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</th>`).join("") + `</tr></thead><tbody>`;
+    let lastG = null;
+    ps.forEach((p, pi) => {
+      const n = ps.filter(q => q.group === p.group).length;
+      h += `<tr class="${p.cons ? "cons" : ""}">` + (p.group !== lastG ? `<th class="g" rowspan="${n}">${esc(groupName(p.group))}</th>` : "") + `<th class="l">${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</th>`;
+      lastG = p.group;
+      p.cells.forEach((c, i) => { if (!c) return; h += `<td colspan="${c[0]}" data-p="${pi}" data-i="${i}" class="${starts.has(i) ? "dstart " : ""}${c[1] == null && c[2] === "–" ? "na" : ""}"${bg(c)}>${esc(valTxt(p, c))}</td>`; });
+      h += `</tr>`;
+    });
+    return h + `</tbody></table>`;
+  }
+  function tableDown(){
+    const ps = visible(), days = dayStarts(), starts = new Map(days.map((d, j) => [d.i, j]));
+    let h = `<table class="down"><thead><tr><th class="t" rowspan="2" style="left:0;z-index:4">Time (${tzName()})</th>`;
+    const gs = []; ps.forEach(p => { const l = gs[gs.length - 1]; if (l && l.g === p.group) l.n++; else gs.push({ g:p.group, n:1 }); });
+    h += gs.map(g => `<th colspan="${g.n}">${esc(groupName(g.g))}</th>`).join("") + `</tr><tr>` + ps.map(p => `<th>${esc(p.label)}${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</th>`).join("") + `</tr></thead><tbody>`;
+    const cover = ps.map(() => 0);
+    D.rows.forEach((r, i) => {
+      if (starts.has(i)) h += `<tr class="day" id="day${starts.get(i)}"><th colspan="${ps.length + 1}">${esc(days[starts.get(i)].label)}</th></tr>`;
+      h += `<tr><th class="t">${hm(r.a)}${r.len > 1 ? "–" + hm(r.b) : ""}</th>`;
+      ps.forEach((p, pi) => { const c = p.cells[i]; if (!c) return; h += `<td rowspan="${c[0]}" data-p="${pi}" data-i="${i}" class="${c[1] == null && c[2] === "–" ? "na" : ""}"${bg(c)}>${esc(valTxt(p, c))}</td>`; });
+      h += `</tr>`;
+    });
+    return h + `</tbody></table>`;
+  }
+  function graphs(){
+    const ps = visible().filter(p => p.kind !== "sev");
+    const t0 = D.rows[0].a, t1 = D.rows[D.rows.length - 1].b, W = 520, Hh = 150, L = 36, R = 10, T = 10, B = 22;
+    const x = t => L + (t - t0)/(t1 - t0)*(W - L - R);
+    const days = dayStarts();
+    return `<div class="grid">` + ps.map((p, pi) => {
+      const pts = [];
+      p.cells.forEach((c, i) => { if (c && c[1] != null && typeof c[1] === "number") pts.push({ i, a:D.rows[i].a, b:D.rows[Math.min(D.rows.length - 1, i + c[0] - 1)].b, v:c[1] }); });
+      if (!pts.length) return "";
+      const f = p.wind ? UF[st.wu] : 1, prob = p.kind === "prob" || p.kind === "sky";
+      const vals = pts.map(q => q.v*f);
+      const vmax = Math.max(...vals), thr = p.wind ? p.thr.map(v => v*f).filter(v => v <= vmax*1.35) : [];
+      let lo = prob ? 0 : Math.min(...vals), hi = prob ? 100 : Math.max(vmax, ...thr);
+      if (!prob){ const pad = Math.max(1, (hi - lo)*0.1); lo = Math.floor(lo - pad); hi = Math.ceil(hi + pad); if (p.kind === "dir"){ lo = 0; hi = 360; } }
+      const y = v => T + (1 - (v - lo)/(hi - lo || 1))*(Hh - T - B);
+      let s = `<svg viewBox="0 0 ${W} ${Hh}" data-p="${pi}">`;
+      for (let k = 0; k <= 2; k++){ const v = lo + (hi - lo)*k/2; s += `<line class="gr" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${L - 4}" y="${y(v) + 3}" text-anchor="end">${Math.round(v)}</text>`; }
+      days.forEach(d => { const xx = x(D.rows[d.i].a); s += `<line class="gr" x1="${xx}" x2="${xx}" y1="${T}" y2="${Hh - B}"/><text class="ax" x="${xx + 3}" y="${Hh - 6}">${esc(d.label.split(",")[0])}</text>`; });
+      if (p.kind === "prob") pts.forEach(q => { s += `<rect class="bar2" x="${x(q.a) + 0.5}" y="${y(q.v)}" width="${Math.max(1, x(q.b) - x(q.a) - 1)}" height="${y(0) - y(q.v)}"/>`; });
+      else { let d = ""; pts.forEach((q, j) => { d += `${j ? "L" : "M"}${x(q.a).toFixed(1)},${y(q.v*f).toFixed(1)}L${x(q.b).toFixed(1)},${y(q.v*f).toFixed(1)}`; }); s += `<path class="ln" d="${d}"/>`; }
+      if (p.wind) p.thr.forEach(v => { if (v*f >= lo && v*f <= hi) s += `<line class="thr" x1="${L}" x2="${W - R}" y1="${y(v*f)}" y2="${y(v*f)}"/>`; });
+      s += `<line class="hv" x1="0" x2="0" y1="${T}" y2="${Hh - B}" style="display:none"/></svg>`;
+      const gname = groupName(p.group).replace(/ \(.*\)$/, "");
+      const title = /^\d+ (hr|ft)$/.test(p.label) || p.kind === "prob" ? `${gname}: ${p.label}` : p.label;
+      return `<div class="gc"><h3>${esc(title)} <small>${esc(p.sub)}${p.kind === "sky" || p.kind === "dir" ? "" : " · " + esc(unitOf(p))}</small></h3>${s}</div>`;
+    }).join("") + `</div><p class="meta">${visible().some(p => p.wind && p.thr.length) ? "Red dashed lines: wind thresholds. " : ""}Hover a graph for values.</p>`;
+  }
+  function render(){
+    head();
+    const s = site(), days = dayStarts();
+    const body = st.view === "graphs" ? graphs() : `<div class="tw" id="tw">${st.orient === "down" ? tableDown() : tableAcross()}</div>`;
+    $("card").innerHTML = `<p class="meta">${esc(s.name)}${s.point && s.point !== s.name ? " (" + esc(s.point) + ")" : ""} · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} · times ${tzName()}</p>${D.constraints ? `<p class="cons">${esc(D.constraints)}</p>` : ""}${st.view === "table" ? `<div class="days">${days.map((d, j) => `<button class="btn" data-day="${j}">${esc(d.label)}</button>`).join("")}</div>` : ""}${body}`;
+    save();
+  }
+  /* hover readout */
+  const tip = $("tip");
+  function showTip(e, html){ tip.innerHTML = html; tip.style.display = "block"; const w = tip.offsetWidth, h = tip.offsetHeight; tip.style.left = Math.min(innerWidth - w - 8, e.clientX + 14) + "px"; tip.style.top = Math.min(innerHeight - h - 8, e.clientY + 14) + "px"; }
+  document.addEventListener("mousemove", e => {
+    const td = e.target.closest && e.target.closest("td[data-p]");
+    document.querySelectorAll("td.hc").forEach(x => x.classList.remove("hc"));
+    if (td){
+      const p = visible()[+td.dataset.p], i = +td.dataset.i, c = p.cells[i], r = D.rows[i], end = D.rows[Math.min(D.rows.length - 1, i + c[0] - 1)].b;
+      if (st.orient === "across") document.querySelectorAll(`td[data-i="${i}"]`).forEach(x => x.classList.add("hc"));
+      showTip(e, `<b>${esc(p.label)}</b>${p.sub ? " " + esc(p.sub) : ""}<br>${esc(dl(r.a))} ${hm(r.a)}–${hm(end)} ${tzName()}<br>Forecast: <b>${esc(valTxt(p, c) || "–")}${valTxt(p, c) && unitOf(p) && p.kind !== "sky" && p.kind !== "dir" ? " " + esc(unitOf(p)) : ""}</b>`);
+      return;
+    }
+    const sv = e.target.closest && e.target.closest("svg[data-p]");
+    if (sv){
+      const p = visible().filter(q => q.kind !== "sev")[+sv.dataset.p]; const box = sv.getBoundingClientRect(), W = 520, L = 36, R = 10;
+      const xr = (e.clientX - box.left)/box.width*W; const t0 = D.rows[0].a, t1 = D.rows[D.rows.length - 1].b, t = t0 + (xr - L)/(W - L - R)*(t1 - t0);
+      let i = D.rows.findIndex(r => t >= r.a && t < r.b); if (i < 0){ tip.style.display = "none"; return; }
+      let oi = i; while (oi > 0 && !p.cells[oi]) oi--; const c = p.cells[oi];
+      const hv = sv.querySelector(".hv"); hv.style.display = ""; hv.setAttribute("x1", xr); hv.setAttribute("x2", xr);
+      showTip(e, `<b>${esc(p.label)}</b> ${esc(dl(D.rows[i].a))} ${hm(D.rows[i].a)} ${tzName()}<br>Forecast: <b>${esc(valTxt(p, c) || "–")}${p.kind === "sky" || p.kind === "dir" ? "" : " " + esc(unitOf(p))}</b>`);
+      return;
+    }
+    document.querySelectorAll("svg .hv").forEach(h => h.style.display = "none");
+    tip.style.display = "none";
+  });
+  document.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.s != null){ st.site = +b.dataset.s; render(); }
+    else if (b.dataset.v){ st.view = b.dataset.v; render(); }
+    else if (b.dataset.o){ st.orient = b.dataset.o; render(); }
+    else if (b.dataset.z){ st.z = b.dataset.z; render(); }
+    else if (b.dataset.t){ theme(b.dataset.t); }
+    else if (b.dataset.g != null){ st.groups[b.dataset.g] = st.groups[b.dataset.g] === false; render(); }
+    else if (b.dataset.day != null){ const el = document.getElementById("day" + b.dataset.day), tw = $("tw"); if (el && tw){ if (st.orient === "across") tw.scrollTo({ left: el.offsetLeft - 230, behavior:"smooth" }); else tw.scrollTo({ top: el.offsetTop - 60, behavior:"smooth" }); } }
+    else if (b.id === "pr"){ window.print(); }
+  });
+  $("wu").onchange = e => { st.wu = e.target.value; render(); };
+  render();
 }
 
 /* ---------- PDF (hand-built, Helvetica, US Letter landscape) ---------- */

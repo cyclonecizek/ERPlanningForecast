@@ -401,7 +401,7 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
     <div id="exBody"></div>
     <section class="vpanel" style="margin-top:16px">
       <h2>Exposure forecasts</h2>
-      <p class="sub">Load the CSVs the exposure page publishes. They're scored here against the WINDS towers and kept only on this computer, so operation names and constraint values are never uploaded.</p>
+      <p class="sub">Forecasts published from this computer are added here automatically, with the guidance beside them. To add others, load the CSVs the exposure page published. They're scored against the WINDS towers and kept only on this computer, so operation names and constraint values are never uploaded.</p>
       <div class="drop" id="exDrop"><b>Drop exposure CSV files here</b><span class="mut">or</span><span class="btn fileb">Choose files<input type="file" id="exFiles" accept=".csv" multiple></span><button class="btn" id="exFolder" type="button">Read a folder…</button><button class="btn ghost" id="exClear" type="button">Clear stored forecasts</button><span class="mut" id="exNote"></span></div>
     </section>
   </div>
@@ -417,13 +417,13 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
     <section class="vpanel"><h2>Case browser <select id="casePt" aria-label="Point"></select><select id="caseDay" aria-label="Day"></select></h2><div id="case"></div></section>
     <section class="vpanel">
       <h2>Official forecasts</h2>
-      <p class="sub">Load the CSVs the planning page publishes. They're scored here and kept only on this computer; nothing is uploaded.</p>
+      <p class="sub">Forecasts published from this computer are added here automatically. To add others, load the CSVs the planning page published. They're scored here and kept only on this computer; nothing is uploaded.</p>
       <div class="drop" id="dropZone"><b>Drop published CSV files here</b><span class="mut">or</span><span class="btn fileb">Choose files<input type="file" id="offFiles" accept=".csv" multiple></span><button class="btn" id="offFolder" type="button">Read a folder…</button><button class="btn ghost" id="offClear" type="button">Clear stored forecasts</button><span class="mut" id="offNote"></span></div>
     </section>
   </div>
 </main>
 <div class="toast" id="toast"></div>
 <script src="guidance.js?v=f6889a6e8a"></script>
-<script src="verify.js?v=12aadc1ed3"></script>
+<script src="verify.js?v=8d57f3a184"></script>
 </body>
 </html>

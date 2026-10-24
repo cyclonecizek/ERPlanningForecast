@@ -463,7 +463,7 @@ document.addEventListener("DOMContentLoaded", function(){
   <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
 
   <div class="foot">
-    <p id="foot1">Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). With linking on, the 3 and 6 hr values are built from the 1 hr (or 3-hour block) values inside them, using how the guidance itself combines hours for that period; edit a 3 or 6 hr value and the hours inside it scale together to match. In 3- and 6-hour blocks, the 1 hr cells show the highest 1-hour chance inside the block, and in 6-hour blocks the 3 hr cells show the highest 3-hour chance. Guidance probabilities are whole percents, with 1% rounded down to 0. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
+    <p id="foot1">Hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. 3 hr and 6 hr probability cells are merged across the hours they cover (hover a cell to see the exact period). With linking on, the 3 and 6 hr values are built from the 1 hr (or 3-hour block) values inside them, using how the guidance itself combines hours for that period; edit a 3 or 6 hr value and the hours inside it scale together to match. A 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less, so every cell is the chance for its own period. Guidance probabilities are whole percents, with 1% rounded down to 0. In the table, press Enter to edit a cell, Delete to return it to guidance, and paste a row or column straight from Excel.</p>
     <p>Winds at 54 ft and 200 ft are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing). Peaks scale the 10 m gust factor with height. WBGT is estimated from temperature, humidity, wind and sunshine. Lightning comes only from guidance with explicit thunder probabilities: SPC calibrated thunder from the HREF and REFS (weighted double by default), LAMP, MOS and NBM text. RRFS and the REFS members come from the high-res workflow.</p>
   </div>
 </main>
@@ -508,6 +508,6 @@ document.addEventListener("DOMContentLoaded", function(){
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "exposure";</script>
 <script src="guidance.js?v=f6889a6e8a"></script>
-<script src="planning-app.js?v=e18030306f"></script>
+<script src="planning-app.js?v=05707df3d6"></script>
 </body>
 </html>

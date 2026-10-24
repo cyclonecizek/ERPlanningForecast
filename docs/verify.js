@@ -483,4 +483,14 @@ function setMode(m){
   if (m === "exposure") prefetchExposureObs().then(renderExposure);
 }
 bindExposure();
-loadExposureStore().then(() => { let m = "planning"; try { m = localStorage.getItem("erwx:verifyMode") || (location.hash === "#exposure" ? "exposure" : "planning"); } catch (e) { /* ignore */ } if (location.hash === "#exposure") m = "exposure"; setMode(m); });
+/* forecasts published from this browser are kept automatically (with their guidance) */
+async function ingestPublished(){
+  try {
+    const db = await idb();
+    const arr = await new Promise(r => { const t = db.transaction(DB.store).objectStore(DB.store).get("published"); t.onsuccess = () => r(t.result || []); t.onerror = () => r([]); });
+    let np = 0, ne = 0;
+    for (const x of arr){ if (x.kind === "planning") np += addOfficial(parseCSV(x.text)); else if (x.kind === "exposure") ne += addExposureCSV(x.text, x.name + ".csv"); }
+    return { np, ne, n: arr.length };
+  } catch (e) { return { np:0, ne:0, n:0 }; }
+}
+loadExposureStore().then(ingestPublished).then(async r => { if (r && (r.np || r.ne)){ await Promise.all([prefetchOfficialObs(), prefetchExposureObs()]); renderAll(); } }).then(() => { let m = "planning"; try { m = localStorage.getItem("erwx:verifyMode") || (location.hash === "#exposure" ? "exposure" : "planning"); } catch (e) { /* ignore */ } if (location.hash === "#exposure") m = "exposure"; setMode(m); });
