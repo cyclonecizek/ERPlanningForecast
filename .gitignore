@@ -2,3 +2,14 @@ __pycache__/
 *.pyc
 *.tmp
 .DS_Store
+
+# Exports and workspace files can hold operation constraints; never commit them
+ER_Workspace_*.json
+Exposure_Templates_*.json
+*_Exposure_Forecast_*
+Exposure_Forecast_*
+Planning_Forecast_*
+LMEF_*
+Leadership_Quick_Look_*
+*.xlsx
+*.pdf
