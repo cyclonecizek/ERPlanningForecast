@@ -1,0 +1,44 @@
+name: Verification and model weights
+
+on:
+  schedule:
+    - cron: "20 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["pipeline/verify.py", ".github/workflows/verify.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install MRMS decoding
+        run: pip install "numpy>=2,<3" "eccodes>=2.40,<3"
+      - name: Observations, guidance archive, scoring and weights
+        env:
+          VERIFY_BUDGET_S: "1500"
+        run: python pipeline/verify.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/verif
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Verification $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3; do
+            git pull --rebase --autostash && git push && exit 0
+            sleep $((i * 10))
+          done
+          exit 1

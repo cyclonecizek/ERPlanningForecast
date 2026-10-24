@@ -9,6 +9,7 @@ on:
       - "docs/exposure.html"
       - "docs/lmef.html"
       - "docs/taf.html"
+      - "docs/verify.html"
       - "docs/45ws-logo.png"
       - "pipeline/build_standalone.py"
       - ".github/workflows/standalone.yml"
