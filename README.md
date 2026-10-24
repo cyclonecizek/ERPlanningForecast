@@ -20,6 +20,8 @@ docs/exposure.html                    exposure forecasts for one operation (pads
 docs/planning-app.js                  the editor shared by the planning and exposure pages
 docs/taf.html                         TAF generator: KCOF, KTTS, KXMR or any ICAO
 docs/lmef.html, docs/lmef-config.js, docs/lmef.js   Launch Mission Execution Forecast (LMEF)
+docs/verify.html, docs/verify.js       Verification dashboard
+pipeline/verify.py                     observations, guidance archive, scoring and automatic weights
 docs/guidance.js                      guidance engine shared by both pages (fetching, blending, MOS, pipeline)
 docs/data/mos/                        MOS, LAMP, NBM text and SPC outlook mirror (written by the workflow)
 docs/data/hires.json                  RRFS, REFS members and calibrated thunder (written by the high-res workflow)
@@ -184,3 +186,36 @@ save it anywhere, and double-click it to open in Edge or Chrome. Nothing to inst
   Opening a file replaces your current work in the tools you tick, after showing who saved it and when.
 * The file is rebuilt automatically by the "Build standalone file" workflow whenever the pages change;
   download it again to get updates. To build it by hand: `python pipeline/build_standalone.py`.
+
+## Verification and automatic model weights
+`pipeline/verify.py` runs hourly (".github/workflows/verify.yml") and keeps everything under
+`docs/data/verif/`:
+* **Observations** (`obs/YYYYMMDD.json`), hourly at each forecast point:
+  * WINDS towers (codiapi WINDS range API): 54 ft and 200 ft sustained (hour mean and highest
+    one-minute mean) and peak winds, direction, temperature and dew point. 200 ft at LC-39B is
+    interpolated in log height between the 132 and 257 ft sensors; sides use the prevailing side.
+    Tower mapping is at the top of the script (SLF 0412/0313/0512, LC-39B 0211/LC39B, KXMR
+    0303/0002, SLC-37 0108/LC37); Patrick has no nearby tower and uses the KCOF METAR.
+  * MERLIN cloud-to-ground and cloud-to-cloud counts within 5 and 10 nmi (codiapi lightning range APIs).
+  * MRMS MultiSensor QPE 01H Pass2 (gauge-corrected hourly rainfall) from NOAA's AWS archive, at the
+    point and the wettest pixel within about 2 km.
+  * KTTS, KXMR and KCOF METARs (IEM): temperature, dew point, visibility, thunder.
+* **Guidance archive** (`pending/*.json.gz`): at 05Z and 17Z every source's forecast for the next
+  7 days at each point (Open-Meteo models and ensembles, the MOS mirror, RRFS/REFS and calibrated
+  thunder from `hires.json`), plus an equal-weight and an auto-weighted blend. Each file is scored
+  as its hours become final (6 h after valid time) and removed once complete.
+* **Scores** (`stats/YYYYMMDD.json`, `summary.json`): error sums by point, parameter, lead band
+  (0-6 h, 6-24 h, day 2, days 3-5, days 6-7) and source, and 7/30/90-day scorecards.
+* **Weights** (`weights.json`): for each point, parameter group (temperature/dew point, sustained
+  wind, peak wind, direction, precipitation, lightning, wind thresholds) and lead band, each source's
+  weight is the median error over its own error (mean squared error, or Brier score for
+  probabilities), from the last 45 days with a 15-day half-life, shrunk toward 1 until it has about
+  150 pairs and kept between 0.25 and 3. A group is switched off if the auto-weighted blend stops
+  beating the equal blend over the last 30 days.
+
+The forecast pages read `weights.json` and multiply each source's weight by its factor for the
+point (or the nearest verified point), parameter and lead time; "Weight models by how well they
+verify here" in Guidance sources turns it off. The **Verification** tab shows the scorecard, skill
+by lead time, reliability diagrams, the weights and a day-by-day case browser. Official forecasts
+are scored there from the published CSVs you load (files or a whole folder); they stay on that
+computer and are never uploaded.

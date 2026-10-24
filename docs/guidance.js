@@ -492,9 +492,31 @@ class SiteGuidance {
 }
 
 /* aggregate everything for the current source selection; returns {val:{k:[]}, srcv:{k:{id:[]}}, band:{k:[[lo,hi]]}} */
+/* ---------- automatic weights from verification (docs/data/verif/weights.json) ----------
+   Per forecast point, parameter group and lead band; other points use the nearest verified point. */
+let AUTO_W = null;
+const AUTO_GROUP = k => /^(t|td|wbgt|tmax|tmin)$/.test(k) ? "t" : /^s\d+$|^smax$/.test(k) ? "s" : /^g\d+$|^gmax$/.test(k) ? "g" : k === "dir" ? "d" : k === "pop" ? "pp" : k === "tst" ? "lt" : null;
+function autoPoint(site){
+  if (!AUTO_W || !AUTO_W.points) return null;
+  if (AUTO_W.points[site.id]) return site.id;
+  let best = null, bd = 25;
+  for (const [id, ll] of Object.entries(AUTO_W.points)){ const d = kmBetween(site.lat, site.lon, ll[0], ll[1]); if (d < bd){ bd = d; best = id; } }
+  return best;
+}
+function autoBand(leadH){ const bands = (AUTO_W && AUTO_W.bands) || []; for (const [a, b, n] of bands) if (leadH >= a && leadH < b) return n; return bands.length ? bands[bands.length - 1][2] : null; }
+function autoFactor(G, prefs, sid, key, startMs){
+  if (!AUTO_W || prefs.autoW === false) return 1;
+  if (G._autoFor !== AUTO_W){ G._autoFor = AUTO_W; G._autoPt = autoPoint(G.site); }
+  const pt = G._autoPt; if (!pt) return 1;
+  const grp = AUTO_GROUP(key); if (!grp) return 1;
+  const band = autoBand(Math.max(0, (startMs - Date.now())/H)); if (!band) return 1;
+  const w = (((AUTO_W.weights || {})[pt] || {})[grp] || {})[band];
+  return w && w[sid] != null ? w[sid] : 1;
+}
 function aggregate(G, prefs){
   const rows = G.rows, on = G.src.filter(s => prefs.enabled[s.def.id] !== false && (prefs.weight[s.def.id] ?? s.def.w ?? 1) > 0);
-  const W = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
+  const W0 = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
+  const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now());
   const val = {}, srcv = {}, band = {}, mem = {};
   const scal = ["t","td","wbgt","sky", ...hkeys()];
   for (const k of [...scal, "dir"]){ val[k] = []; srcv[k] = {}; band[k] = []; }
@@ -507,8 +529,9 @@ function aggregate(G, prefs){
         if (!bs.length) continue;
         const mean = bs.reduce((a, b) => a + b[k], 0)/bs.length;
         (srcv[k][s.def.id] = srcv[k][s.def.id] || [])[ri] = mean;
-        pairs.push([mean, W(s)]);
-        bs.forEach(b => { vals.push(b[k]); wts.push(W(s)/bs.length); });
+        const w = WK(s, k, ri);
+        pairs.push([mean, w]);
+        bs.forEach(b => { vals.push(b[k]); wts.push(w/bs.length); });
       }
       val[k][ri] = wmean(pairs);
       band[k][ri] = vals.length >= 6 ? wquant(vals, wts, [0.1, 0.9]) : null;
@@ -518,19 +541,19 @@ function aggregate(G, prefs){
       const bs = s.blocks.map(b => b[ri]).filter(b => b && b.du != null); if (!bs.length) continue;
       const u = bs.reduce((a, b) => a + b.du, 0)/bs.length, v = bs.reduce((a, b) => a + b.dv, 0)/bs.length;
       (srcv.dir[s.def.id] = srcv.dir[s.def.id] || [])[ri] = (Math.atan2(-u, -v)*180/Math.PI + 360) % 360;
-      U += u*W(s); V += v*W(s); ww += W(s);
+      const w = WK(s, "dir", ri); U += u*w; V += v*w; ww += w;
     }
     val.dir[ri] = ww ? (Math.atan2(-U, -V)*180/Math.PI + 360) % 360 : null;
     for (const k of Object.keys(mem)){
       const list = [];
-      for (const s of on){ const bs = s.blocks.map(b => b[ri]).filter(b => b && b[k] != null); bs.forEach(b => list.push([b[k], W(s)/bs.length, s.def.id])); }
+      for (const s of on){ const bs = s.blocks.map(b => b[ri]).filter(b => b && b[k] != null); const w = WK(s, k, ri); bs.forEach(b => list.push([b[k], w/bs.length, s.def.id])); }
       mem[k][ri] = list;
     }
   });
   /* window probabilities */
   const winP = (ev, A, B, per) => {
     const pairs = [];
-    for (const s of on){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W(s)]); if (per) per[s.def.id] = p; }
+    for (const s of on){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W0(s)*autoFactor(G, prefs, s.def.id, ev, A)]); if (per) per[s.def.id] = p; }
     return wmean(pairs);
   };
   for (const pk of ["pp1","pp3","pp6","lt1","lt3","lt6"].filter(k => P[k])){

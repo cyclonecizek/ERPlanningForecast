@@ -480,6 +480,10 @@ function renderParams(){
   const e = edits[prefs.site] || {};
   $("params").innerHTML = chartGroups().map(([gl, ks]) => `<div class="pgroup"><span class="gl">${gl}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${keysOf(k).some(q => e[q] && Object.keys(e[q]).length) ? "edited" : ""}" data-p="${k}" aria-pressed="${k === prefs.param}">${chipName(k)}</button>`).join("")}</div></div>`).join("");
 }
+/* the automatic factor for the parameter on the graph, day 1, at the selected point */
+function autoKey(){ const ks = keysOf(prefs.param); const k = ks[0] || "t"; return /^pp/.test(k) ? "pop" : /^lt/.test(k) ? "tst" : P[k] && P[k].ex ? P[k].ex : k; }
+function autoLabel(){ const g = AUTO_GROUP(autoKey()); return { t:"temperature and dew point", s:"sustained wind", g:"peak wind", d:"wind direction", pp:"precipitation", lt:"lightning" }[g] || "this parameter"; }
+function autoNow(sid){ const G = S.G[prefs.site]; if (!G || !AUTO_W || prefs.autoW === false) return null; return autoFactor(G, prefs, sid, autoKey(), Date.now() + 12*H); }
 function renderSources(){
   const fams = Object.keys(FAMILIES);
   let ok = 0, tot = 0;
@@ -489,11 +493,15 @@ function renderSources(){
       const st = S.status[s.id] || {}; tot++; if (st.ok) ok++;
       const on = prefs.enabled[s.id] !== false, w = prefs.weight[s.id] ?? s.w ?? 1;
       const txt = st.loading ? "loading" : st.ok ? st.note : (st.err || "not available");
-      return `<div class="srow ${st.ok ? "" : "na"}"><input type="checkbox" data-src="${s.id}" ${on ? "checked" : ""} aria-label="Use ${s.name}"><span>${s.name} <span class="st">${txt}</span></span><select data-w="${s.id}" aria-label="${s.name} weight">${[0.5,1,2,3].map(x => `<option value="${x}" ${x == w ? "selected" : ""}>×${x}</option>`).join("")}</select></div>`;
+      const af = autoNow(s.id);
+      return `<div class="srow ${st.ok ? "" : "na"}"><input type="checkbox" data-src="${s.id}" ${on ? "checked" : ""} aria-label="Use ${s.name}"><span>${s.name} <span class="st">${txt}</span>${af != null && Math.abs(af - 1) >= 0.05 ? ` <span class="auto ${af > 1 ? "up" : "dn"}" title="Automatic weight from verification for ${autoLabel()} at this point, day 1">auto ×${af.toFixed(2)}</span>` : ""}</span><select data-w="${s.id}" aria-label="${s.name} weight">${[0.5,1,2,3].map(x => `<option value="${x}" ${x == w ? "selected" : ""}>×${x}</option>`).join("")}</select></div>`;
     }).join("") + `</div>`;
   }).join("");
   const used = ALL_SOURCES.filter(s => (S.status[s.id] || {}).ok && prefs.enabled[s.id] !== false).length;
-  $("srcSum").textContent = S.loading && !ok ? "loading" : `${used} in the blend, ${ok} of ${tot} available`;
+  $("srcSum").textContent = S.loading && !ok ? "loading" : `${used} in the blend, ${ok} of ${tot} available${AUTO_W && prefs.autoW !== false ? ", auto-weighted" : ""}`;
+  const aw = $("autoW"), an = $("autoNote");
+  if (aw){ aw.checked = prefs.autoW !== false; aw.disabled = !AUTO_W; }
+  if (an) an.textContent = AUTO_W ? `Weights from verification, updated ${new Date(AUTO_W.updated).toISOString().slice(0, 16).replace("T", " ")}Z (last ${AUTO_W.window_days} days, ${autoLabel()} shown)` : "No verification weights yet; the verification workflow builds them as history accumulates.";
 }
 function renderStatus(){
   const live = $("live");
@@ -1782,8 +1790,15 @@ function rebuildGuidance(){
   if (!P[prefs.param] && !VIEWS[prefs.param]) prefs.param = "t";
   clearSel(); recomputeAgg(); renderAll(); renderSources();
 }
+/* automatic model weights from the verification workflow (data/verif/weights.json) */
+async function loadAutoWeights(){
+  if (DEMO) return;
+  try { const j = await getJSON(`${DATA_BASE}data/verif/weights.json?ts=${Date.now()}`, 8000); AUTO_W = j && j.weights ? j : null; }
+  catch (e) { AUTO_W = null; }
+}
 async function loadAll(){
   S.raw = {};
+  loadAutoWeights().then(() => { if (AUTO_W){ recomputeAgg(); scheduleRender(); } });
   S.loading = true; S.rows = rowsNow(); S.spanCache = {}; S.TL = makeTimeline(Date.now()); S.G = {}; S.agg = {}; S.status = {}; S.fetchedAt = Date.now();
   pruneEdits(); saveEdits();
   for (const s of SITES) S.G[s.id] = new SiteGuidance(s, S.TL, S.rows);
@@ -1947,6 +1962,8 @@ function bind(){
   $("linkWin").checked = prefs.linkWin !== false; $("linkWin").onchange = e => { prefs.linkWin = e.target.checked; savePrefs(); renderAll(); };
   $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
   $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
+  const awEl = document.getElementById("autoW");
+  if (awEl) awEl.addEventListener("change", e => { prefs.autoW = e.target.checked; savePrefs(); recomputeAgg(); renderAll(); renderSources(); });
   $("srcgrid").addEventListener("change", ev => {
     const t = ev.target;
     if (t.dataset.src){ prefs.enabled[t.dataset.src] = t.checked; }

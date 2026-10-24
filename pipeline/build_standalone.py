@@ -19,8 +19,8 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")
 PAGES = [("planning", "index.html", "Planning forecast"), ("exposure", "exposure.html", "Exposure forecasts"),
-         ("lmef", "lmef.html", "Launch forecast (LMEF)"), ("taf", "taf.html", "TAF generator")]
-HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "lmef.html": "lmef", "taf.html": "taf", "./#brief": "planning#brief"}
+         ("lmef", "lmef.html", "Launch forecast (LMEF)"), ("taf", "taf.html", "TAF generator"), ("verify", "verify.html", "Verification")]
+HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "lmef.html": "lmef", "taf.html": "taf", "verify.html": "verify", "./#brief": "planning#brief"}
 
 
 def page_html(fname, base, logo_uri):

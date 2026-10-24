@@ -209,6 +209,8 @@ details.sources > summary .sum{ font-weight:400; color:var(--ink-2); font-size:1
 .srcgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px 26px; padding:4px 16px 16px; }
 .srcfam h3{ margin:0 0 6px; font:600 13px var(--cond); color:var(--ink-3); letter-spacing:.3px; display:flex; align-items:center; gap:7px; }
 .srcfam h3 i{ width:10px; height:3px; border-radius:2px; display:inline-block; }
+.srow .auto{ font:600 11px var(--font); padding:1px 5px; border-radius:4px; margin-left:4px; }
+.srow .auto.up{ background:rgba(47,122,74,.15); color:var(--ok); } .srow .auto.dn{ background:rgba(178,58,46,.12); color:var(--warn); }
 .srow{ display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; padding:3px 0; font-size:13.5px; }
 .srow .st{ font-size:12px; color:var(--ink-3); }
 .srow.na{ color:var(--ink-3); }
@@ -400,7 +402,7 @@ document.addEventListener("DOMContentLoaded", function(){
 .cother{ border:1px dashed var(--rule); border-radius:7px; padding:5px 8px; background:var(--panel); color:var(--ink); font:13px var(--font); }
 </style></head>
 <body>
-<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><a href="verify.html" data-page="verify">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
   <div class="brand">
     <img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">
@@ -494,6 +496,7 @@ document.addEventListener("DOMContentLoaded", function(){
     <summary><span class="chev">&#9656;</span>Guidance sources <span class="sum" id="srcSum"></span></summary>
     <div class="srcgrid" id="srcgrid"></div>
     <div class="srcfoot">
+      <label><input type="checkbox" id="autoW" checked> Weight models by how well they verify here <span class="mut" id="autoNote"></span></label>
       <label><input type="checkbox" id="linkProbs" checked> Shift exceedance probabilities with my wind and temperature edits</label>
       <label><input type="checkbox" id="linkWin" checked> Link 1, 3 and 6 hr precipitation and lightning probabilities</label>
       <label><input type="checkbox" id="clampProbs" checked> Cap guidance probabilities at 99% (1% rounds down to 0)</label>
@@ -549,9 +552,9 @@ document.addEventListener("DOMContentLoaded", function(){
 <div class="toast" id="toast"></div>
 
 <script>window.PAGE = "lmef";</script>
-<script src="guidance.js?v=d0e2e51159"></script>
+<script src="guidance.js?v=131ab998bd"></script>
 <script src="lmef-config.js?v=9180137dcb"></script>
-<script src="planning-app.js?v=027d5429cd"></script>
+<script src="planning-app.js?v=a9640fc0e5"></script>
 <script src="lmef.js?v=3f78c7c73a"></script>
 </body>
 </html>
