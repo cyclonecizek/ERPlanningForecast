@@ -632,6 +632,103 @@ function markHover(i){
 const visStep = (down, right) => across() ? [right, down] : [down, right];
 function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); if (HOOKS.rendered) HOOKS.rendered(); }
 
+/* ---------- recent verification: the last 24 h of observations against the guidance ----------
+   Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
+   (data/verif/obs). Model values for past hours come from Open-Meteo's recent runs (past_days). */
+const VERIF_PTS = { "ksc-inland":[28.6150,-80.6945], "ksc-pads":[28.6272,-80.6208], "cape-inland":[28.4686,-80.5667], "cape-pad37":[28.5314,-80.5650], "patrick":[28.2349,-80.6101] };
+const RECENT = { obs:{}, loading:{}, sel:null, part:0 };
+function obsPointFor(s){
+  if (VERIF_PTS[s.id]) return [s.id, 0];
+  let best = null, bd = 9; for (const [id, ll] of Object.entries(VERIF_PTS)){ const d = kmBetween(s.lat, s.lon, ll[0], ll[1]); if (d < bd){ bd = d; best = id; } }
+  return best ? [best, bd] : [null, null];
+}
+async function recentObsDay(key){
+  if (RECENT.obs[key] !== undefined || RECENT.loading[key]) return;
+  RECENT.loading[key] = true;
+  try { RECENT.obs[key] = DEMO ? demoObsDay(key) : await getJSON(`${DATA_BASE}data/verif/obs/${key}.json?ts=${Date.now()}`, 8000); } catch (e) { RECENT.obs[key] = null; }
+  RECENT.loading[key] = false; renderRecent();
+}
+const dayKeyZ = t => new Date(t).toISOString().slice(0, 10).replace(/-/g, "");
+function obsAt(pid, key, t){ const od = RECENT.obs[dayKeyZ(t)]; if (!od) return undefined; const p = (od.points || {})[pid]; if (!p) return null; const f = key === "dir" ? "d54" : key; const a = p[f]; return a ? a[new Date(t).getUTCHours()] : null; }
+/* demo: observations near the guidance, so the panel can be tried without the workflow */
+function demoObsDay(key){
+  const G = S.G[prefs.site]; if (!G) return null;
+  const t0 = Date.UTC(+key.slice(0, 4), +key.slice(4, 6) - 1, +key.slice(6, 8)), pts = {};
+  for (const pid of Object.keys(VERIF_PTS)){
+    const Gp = S.G[pid] || G, p = {}; ["t","td","s54","g54","s200","g200","d54","pr","cg10"].forEach(f => p[f] = new Array(24).fill(null));
+    for (let h = 0; h < 24; h++){
+      const t = t0 + h*H; if (t > Date.now() - H) continue;
+      const i = S.TL.idx(t); if (i < 0) continue;
+      const mean = k => { const v = Gp.src.flatMap(s2 => s2.members.map(m => m[k] && m[k][i])).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0)/v.length : null; };
+      const jit = (v, sd) => v == null ? null : Math.round((v + (Math.sin(t/3.7e6 + sd)*sd)) * 10)/10;
+      p.t[h] = jit(mean("t"), 1.5); p.td[h] = jit(mean("td"), 1); p.s54[h] = jit(mean("s54"), 2); p.g54[h] = jit(mean("g54"), 3); p.s200[h] = jit(mean("s200"), 2); p.g200[h] = jit(mean("g200"), 3); p.d54[h] = mean("d10"); p.pr[h] = 0; p.cg10[h] = 0;
+    }
+    pts[pid] = p;
+  }
+  return { points: pts };
+}
+function pastMean(src, key, i){
+  const v = src.members.map(m => m[key] ? m[key][i] : null).filter(x => x != null); if (!v.length) return null;
+  if (key === "d10"){ let u = 0, w = 0; v.forEach(d => { u += Math.sin(d*Math.PI/180); w += Math.cos(d*Math.PI/180); }); return (Math.atan2(u, w)*180/Math.PI + 360) % 360; }
+  return v.reduce((a, b) => a + b, 0)/v.length;
+}
+function renderRecent(){
+  const box = $("recentBody"); if (!box) return;
+  const s = site(), G = S.G[s.id]; if (!G || !S.TL){ box.innerHTML = `<p class="mut">Waiting for guidance.</p>`; return; }
+  const keysAll = keysOf(prefs.param), checkable = ["t","td","s54","g54","s200","g200","dir"];
+  let keys = keysAll.filter(k => checkable.includes(k));
+  const [pid, dist] = obsPointFor(s);
+  const now = Math.floor(Date.now()/H)*H, hours = []; for (let t = now - 24*H; t < now; t += H) hours.push(t);
+  if (DEMO) [...new Set(hours.map(dayKeyZ))].forEach(k => { RECENT.obs[k] = demoObsDay(k); });
+  else [...new Set(hours.map(dayKeyZ))].forEach(recentObsDay);
+  if (!pid){ box.innerHTML = `<p class="mut">No tower or METAR observations within 9 km of ${s.name}.</p>`; $("recentSum").textContent = ""; return; }
+  if (!keys.length){
+    const alt = /^[sg]\d+$/.test(keysAll[0] || "") ? "Observations are at 54 and 200 ft; pick those heights to compare winds." : "Pick temperature, dew point, 54 or 200 ft winds, or direction on the graph to compare with observations.";
+    box.innerHTML = `<p class="mut">${alt}</p>`; $("recentSum").textContent = ""; return;
+  }
+  if (RECENT.part >= keys.length) RECENT.part = 0;
+  const key = keys[RECENT.part], mkey = key === "dir" ? "d10" : key, p = P[key] || { l:key, unit:"" };
+  const obs = hours.map(t => obsAt(pid, key, t));
+  if (obs.every(v => v === undefined)){ box.innerHTML = `<p class="mut">Loading observations…</p>`; return; }
+  const on = G.src.filter(x => prefs.enabled[x.def.id] !== false && x.members.length);
+  const series = on.map(x => ({ id:x.def.id, name:x.def.name, fam:x.def.fam, ys: hours.map(t => { const i = S.TL.idx(t); return i >= 0 && i < S.TL.n ? pastMean(x, mkey, i) : null; }) })).filter(x => x.ys.some(v => v != null));
+  const err = (a, b) => key === "dir" ? ((a - b + 540) % 360) - 180 : a - b;
+  const stat = ys => { let n = 0, ae = 0, e = 0; ys.forEach((v, i) => { const o = obs[i]; if (v == null || o == null || (key === "dir" && (obsAt(pid, "s54", hours[i]) || 0) < 5)) return; const d = err(v, o); n++; ae += Math.abs(d); e += d; }); return n ? { n, mae: ae/n, bias: e/n } : null; };
+  series.forEach(x => { x.st = stat(x.ys); x.af = autoFactor(G, prefs, x.id, key === "dir" ? "dir" : key, Date.now() + 3*H); });
+  const W0 = x => prefs.weight[x.id] ?? (ALL_SOURCES.find(d => d.id === x.id) || {}).w ?? 1;
+  const blend = hours.map((t, i) => { let a = 0, w = 0; series.forEach(x => { const v = x.ys[i]; if (v == null) return; const ww = W0(x)*(x.af || 1); a += v*ww; w += ww; }); return w ? a/w : null; });
+  const bst = stat(blend);
+  const ranked = series.filter(x => x.st).sort((a, b) => a.st.mae - b.st.mae);
+  const sel = RECENT.sel && series.find(x => x.id === RECENT.sel) ? RECENT.sel : null;
+  const top = ranked.slice(0, 3).map(x => x.id);
+  /* chart */
+  const Wd = 760, Hd = 230, L = 44, Rr = 12, T = 14, B = 26, sc = isWind(p) ? wfac() : 1;
+  const all = [...obs, ...blend, ...series.flatMap(x => x.ys)].filter(v => v != null && isFinite(v)).map(v => v*sc);
+  let lo = Math.min(...all), hi = Math.max(...all); if (key === "dir"){ lo = 0; hi = 360; } else { const pad = Math.max(1, (hi - lo)*0.08); lo = Math.floor(lo - pad); hi = Math.ceil(hi + pad); }
+  const x = i => L + (i + 0.5)*(Wd - L - Rr)/hours.length, y = v => T + (1 - (v*sc - lo)/(hi - lo || 1))*(Hd - T - B);
+  const path = ys => { const pts = ys.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`); let d = "", pen = false; pts.forEach(q => { if (!q){ pen = false; return; } d += (pen ? "L" : "M") + q; pen = true; }); return d; };
+  const COL = ["#0E7C86","#B5862B","#5A6ACF"];
+  let g = `<svg viewBox="0 0 ${Wd} ${Hd}" class="rchart" role="img" aria-label="Last 24 hours of ${p.l} observed against the guidance">`;
+  for (let k = 0; k <= 4; k++){ const v = lo + (hi - lo)*k/4; const yy = T + (1 - k/4)*(Hd - T - B); g += `<line x1="${L}" x2="${Wd - Rr}" y1="${yy}" y2="${yy}" class="gr"/><text x="${L - 6}" y="${yy + 4}" class="ax" text-anchor="end">${Math.round(v)}</text>`; }
+  hours.forEach((t, i) => { if (i % 3 === 0) g += `<text x="${x(i)}" y="${Hd - 8}" class="ax" text-anchor="middle">${hhmm(t, zulu()).slice(0, 2)}${zulu() ? "Z" : ""}</text>`; });
+  series.forEach(xs => { if (!top.includes(xs.id) && xs.id !== sel) g += `<path d="${path(xs.ys)}" class="rsrc"/>`; });
+  top.forEach((id, k) => { const xs = series.find(q => q.id === id); if (xs && id !== sel) g += `<path d="${path(xs.ys)}" fill="none" stroke="${COL[k]}" stroke-width="1.8"/>`; });
+  if (sel){ const xs = series.find(q => q.id === sel); g += `<path d="${path(xs.ys)}" fill="none" stroke="#C0462F" stroke-width="2.6"/>`; }
+  g += `<path d="${path(blend)}" fill="none" stroke="var(--ink)" stroke-width="2.4" stroke-dasharray="6 4"/>`;
+  obs.forEach((v, i) => { if (v != null) g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.6" class="robs"><title>${hhmm(hours[i], zulu())} observed ${Math.round(v*sc)}${isWind(p) ? " " + wuLabel() : p.unit === "°F" ? "°F" : ""}</title></circle>`; });
+  g += `</svg>`;
+  const legend = `<div class="rleg"><span><i class="o"></i>Observed${dist ? ` (${PNAMES[pid] || pid}, ${dist.toFixed(1)} km away)` : ""}</span><span><i style="border-top:2px dashed var(--ink)"></i>Blend</span>${top.map((id, k) => `<span><i style="background:${COL[k]}"></i>${series.find(q => q.id === id).name}</span>`).join("")}${sel ? `<span><i style="background:#C0462F"></i>${series.find(q => q.id === sel).name}</span>` : ""}<span><i style="background:var(--rule)"></i>Other sources</span></div>`;
+  const fmtE = v => (isWind(p) ? v*wfac() : v).toFixed(1);
+  const tbl = `<table class="rtab"><thead><tr><th>Source</th><th>MAE</th><th>Bias</th><th>Hours</th><th>Auto</th></tr></thead><tbody>
+    ${bst ? `<tr class="bl"><th>Blend</th><td>${fmtE(bst.mae)}</td><td>${bst.bias >= 0 ? "+" : ""}${fmtE(bst.bias)}</td><td>${bst.n}</td><td></td></tr>` : ""}
+    ${ranked.map(xs => `<tr data-rs="${xs.id}" class="${xs.id === sel ? "on" : ""}"><th>${xs.name}</th><td>${fmtE(xs.st.mae)}</td><td>${xs.st.bias >= 0 ? "+" : ""}${fmtE(xs.st.bias)}</td><td>${xs.st.n}</td><td>${Math.abs((xs.af || 1) - 1) >= 0.05 ? "×" + xs.af.toFixed(2) : ""}</td></tr>`).join("")}</tbody></table>`;
+  const unitTxt = key === "dir" ? "degrees" : isWind(p) ? wuLabel() : p.unit || "";
+  box.innerHTML = `${keys.length > 1 ? `<div class="seg rpart" role="group">${keys.map((k, i) => `<button type="button" data-rp="${i}" aria-pressed="${i === RECENT.part}">${(P[k] || {}).s || k}</button>`).join("")}</div>` : ""}
+    <div class="rgrid"><div>${g}${legend}</div><div class="rtw">${tbl}<p class="mut">Last 24 hours at ${s.name}, ${p.l}${p.s ? " " + p.s : ""}, ${unitTxt}. Model values for past hours come from their recent runs. Click a source to highlight it.</p></div></div>`;
+  $("recentSum").textContent = ranked.length ? `best last 24 h: ${ranked[0].name} (${fmtE(ranked[0].st.mae)} ${unitTxt})${bst ? `, blend ${fmtE(bst.mae)}` : ""}` : obs.some(v => v != null) ? "" : "no observations yet";
+}
+const PNAMES = { "ksc-inland":"SLF towers", "ksc-pads":"LC-39B towers", "cape-inland":"KXMR towers", "cape-pad37":"SLC-37 towers", "patrick":"KCOF" };
+
 /* ---------- editing ---------- */
 function parseInput(p, txt){
   txt = String(txt).trim(); if (txt === "") return null;
@@ -780,6 +877,7 @@ function pickKey(i, py){
    While dragging, the y-axis stays fixed so the background stays valid. */
 function renderChartFg(){ renderChart(true); }
 function renderChart(fgOnly){
+  if (!fgOnly) setTimeout(renderRecent, 0);
   const svg = $("chart"), view = prefs.param, ks = keysOf(view), combo = ks.length > 1, p = P[ks[0]] || P.t, s = site();
   $("ptitle").textContent = combo ? VIEWS[view].title : p.k === "xhot" ? `Temperature above ${hotOf(s)}°F` : p.title;
   $("punit").textContent = p.kind === "prob" ? "percent chance" : p.kind === "sky" ? "percent cloud cover (categories at right)" : p.kind === "dir" ? "degrees true, toward the points" : isWind(p) ? wuLabel() : p.unit || "";
@@ -1962,6 +2060,11 @@ function bind(){
   $("linkWin").checked = prefs.linkWin !== false; $("linkWin").onchange = e => { prefs.linkWin = e.target.checked; savePrefs(); renderAll(); };
   $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
   $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
+  const rb = document.getElementById("recentBody");
+  if (rb) rb.addEventListener("click", ev => {
+    const r = ev.target.closest("[data-rs]"); if (r){ RECENT.sel = RECENT.sel === r.dataset.rs ? null : r.dataset.rs; renderRecent(); return; }
+    const b = ev.target.closest("[data-rp]"); if (b){ RECENT.part = +b.dataset.rp; renderRecent(); }
+  });
   const awEl = document.getElementById("autoW");
   if (awEl) awEl.addEventListener("change", e => { prefs.autoW = e.target.checked; savePrefs(); recomputeAgg(); renderAll(); renderSources(); });
   $("srcgrid").addEventListener("change", ev => {

@@ -187,6 +187,16 @@ save it anywhere, and double-click it to open in Edge or Chrome. Nothing to inst
 * The file is rebuilt automatically by the "Build standalone file" workflow whenever the pages change;
   download it again to get updates. To build it by hand: `python pipeline/build_standalone.py`.
 
+## How the guidance is verifying (forecast editor)
+Below the graph on the planning, exposure and LMEF pages, a panel plots the last 24 hours of
+observations against every guidance source and the blend for the parameter on the graph
+(temperature, dew point, 54/200 ft sustained or peak wind, direction), with each source's error
+and bias over those hours and its automatic weight. Observations are the verification workflow's
+hourly record (towers, or the KCOF METAR at Patrick); a pad without its own record uses the
+nearest point within 9 km and says so. Past model values come from their recent runs
+(Open-Meteo past_days), so the panel shows how the guidance has been doing today, not a formal
+score. Click a source to highlight its line.
+
 ## Verification and automatic model weights
 `pipeline/verify.py` runs hourly (".github/workflows/verify.yml") and keeps everything under
 `docs/data/verif/`:

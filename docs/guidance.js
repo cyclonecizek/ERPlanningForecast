@@ -192,7 +192,8 @@ function wquant(vals, wts, qs){
 }
 
 /* ---------- timeline + series ---------- */
-function makeTimeline(nowMs){ const t0 = Math.floor(nowMs/H)*H - 6*H; const n = 8*24 + 12; return { t0, n, idx: ms => Math.round((ms - t0)/H) }; }
+/* the timeline starts 30 h back so recent model values can be checked against observations */
+function makeTimeline(nowMs){ const t0 = Math.floor(nowMs/H)*H - 30*H; const n = 8*24 + 36; return { t0, n, idx: ms => Math.round((ms - t0)/H) }; }
 function fillGaps(arr, maxGap){
   let last = -1;
   for (let i = 0; i < arr.length; i++){
@@ -244,7 +245,7 @@ async function getJSON(url, ms){
 }
 function omURL(base, model, vars){
   const lat = SITES.map(s => s.lat).join(","), lon = SITES.map(s => s.lon).join(",");
-  return `${base}?latitude=${lat}&longitude=${lon}&hourly=${vars}&models=${model}&temperature_unit=fahrenheit&wind_speed_unit=kn&precipitation_unit=inch&timezone=GMT&timeformat=unixtime&forecast_days=8`;
+  return `${base}?latitude=${lat}&longitude=${lon}&hourly=${vars}&models=${model}&temperature_unit=fahrenheit&wind_speed_unit=kn&precipitation_unit=inch&timezone=GMT&timeformat=unixtime&forecast_days=8&past_days=2`;
 }
 /* returns per-site list of member objects, or throws */
 async function fetchOM(src, ens, TL){
