@@ -587,10 +587,11 @@ function aggregate(G, prefs){
 /* which window a precip/lightning cell represents:
    "win" = the probability for [A,B); "max" = highest 1 h (or 3 h) period inside a longer block;
    null = covered by an earlier cell's window, or before the first aligned window */
+/* which window a probability cell covers: the row itself, or a longer window starting with it.
+   A window shorter than the row has no cell (a 1 hr chance isn't shown on a 3 or 6 hr row). */
 function probCell(r, win){
-  if (win === 1) return r.len === 1 ? { mode:"win", A:r.a, B:r.b } : { mode:"max" };
   if (r.len === win) return { mode:"win", A:r.a, B:r.b };
-  if (r.len > win) return { mode:"max" };
+  if (r.len > win) return null;
   return r.lh % win === 0 ? { mode:"win", A:r.a, B:r.a + win*H } : null;
 }
 /* exceedance probability for one row given a delta shift */
