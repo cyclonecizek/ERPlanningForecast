@@ -13,7 +13,7 @@ const SITES = [
   { id:"ksc-inland", name:"KSC Inland",      point:"SLF",    stn:"KTTS", lat:28.6150, lon:-80.6945, hot:86 },
   { id:"ksc-pads",   name:"KSC Launch Pads", point:"LC-39B", stn:"KTTS", lat:28.6272, lon:-80.6208, hot:86 },
   { id:"cape-inland",name:"Cape Inland",     point:"KXMR",   stn:"KXMR", lat:28.4686, lon:-80.5667, hot:86 },
-  { id:"cape-pad37", name:"Cape Launch Pad", point:"SLC-37", stn:"KXMR", lat:28.5314, lon:-80.5650, hot:86 },
+  { id:"cape-pad37", name:"Cape Launch Pads", point:"SLC-37", stn:"KXMR", lat:28.5314, lon:-80.5650, hot:86 },
   { id:"patrick",    name:"Patrick SFB",     point:"KCOF",   stn:"KCOF", lat:28.2349, lon:-80.6101, hot:90 },
 ];
 const STATIONS = [...new Set(SITES.map(s => s.stn))];

@@ -8,7 +8,7 @@ published as Excel or CSV. Static page on GitHub Pages; everything runs in the b
 | KSC Inland | SLF (28.6150, -80.6945) | KTTS |
 | KSC Launch Pads | LC-39B (28.6272, -80.6208) | KTTS |
 | Cape Inland | KXMR (28.4686, -80.5667) | KXMR |
-| Cape Launch Pad | SLC-37 (28.5314, -80.5650) | KXMR |
+| Cape Launch Pads | SLC-37 (28.5314, -80.5650) | KXMR |
 | Patrick SFB | KCOF (28.2349, -80.6101) | KCOF |
 
 Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days 6 and 7.

@@ -51,7 +51,7 @@ POINTS = {
                     "w200i": {"towers": ["LC39BNE", "LC39BNW", "LC39BSW"], "lo": 132, "hi": 257}},
     "cape-inland": {"name": "Cape Inland (KXMR)", "lat": 28.4686, "lon": -80.5667, "metar": "KXMR",
                     "temp": [("0303", 6)], "w54": [("0303", 54)], "w200": [("0002NW", 204), ("0002SE", 204)]},
-    "cape-pad37":  {"name": "Cape Launch Pad (SLC-37)", "lat": 28.5314, "lon": -80.5650, "metar": "KXMR",
+    "cape-pad37":  {"name": "Cape Launch Pads (SLC-37)", "lat": 28.5314, "lon": -80.5650, "metar": "KXMR",
                     "temp": [("0108", 6)], "w54": [("0108", 54)], "w200": [("LC37E", 196), ("LC37W", 196)]},
     "patrick":     {"name": "Patrick SFB (KCOF)", "lat": 28.2349, "lon": -80.6101, "metar": "KCOF", "temp_from_metar": True},
 }

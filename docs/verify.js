@@ -7,7 +7,7 @@
 const $ = id => document.getElementById(id);
 const VB = (typeof DATA_BASE !== "undefined" ? DATA_BASE : "") + "data/verif/";
 const POINT_OF = { SLF:"ksc-inland", "LC-39B":"ksc-pads", KXMR:"cape-inland", "SLC-37":"cape-pad37", KCOF:"patrick" };
-const PNAME = { "ksc-inland":"KSC Inland (SLF)", "ksc-pads":"KSC Launch Pads (LC-39B)", "cape-inland":"Cape Inland (KXMR)", "cape-pad37":"Cape Launch Pad (SLC-37)", "patrick":"Patrick SFB (KCOF)" };
+const PNAME = { "ksc-inland":"KSC Inland (SLF)", "ksc-pads":"KSC Launch Pads (LC-39B)", "cape-inland":"Cape Inland (KXMR)", "cape-pad37":"Cape Launch Pads (SLC-37)", "patrick":"Patrick SFB (KCOF)" };
 const VARS = [
   { k:"t",    label:"Temp",            unit:"°F", kind:"cont", grp:"t" },
   { k:"td",   label:"Dew point",       unit:"°F", kind:"cont", grp:"t" },
