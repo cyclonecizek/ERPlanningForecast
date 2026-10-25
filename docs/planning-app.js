@@ -1977,21 +1977,37 @@ function pdfReport(models, logo){
   const rgb = c => c.map(x => f(x/255)).join(" ");
   const rect = (x, y, w, h, fill) => cs.push(`${rgb(fill)} rg ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re f`);
   const line = (x1, y1, x2, y2, gray, wd) => cs.push(`${f(gray)} G ${f(wd)} w ${f(x1)} ${f(Hp - y1)} m ${f(x2)} ${f(Hp - y2)} l S`);
+  /* measure the text exactly as the PDF prints it (≥ and ≤ print as two characters) */
+  const plain = s => String(s).replace(/≥/g, ">=").replace(/≤/g, "<=");
+  const tw = (s, size, bold) => textW(plain(s), size, bold);
   const text = (s, x, y, size, opt = {}) => {
+    s = plain(s);
     const w = textW(s, size, opt.bold); let tx = x;
     if (opt.align === "c") tx = x - w/2; else if (opt.align === "r") tx = x - w;
     cs.push(`BT ${opt.color ? rgb(opt.color) + " rg " : "0.075 0.125 0.18 rg "}/${opt.bold ? "F2" : "F1"} ${f(size)} Tf ${f(tx)} ${f(Hp - y)} Td ${pdfStr(s)} Tj ET`);
   };
-  const fitText = (s, maxW, size, bold) => { let z = size; while (z > 4.5 && textW(s, z, bold) > maxW) z -= 0.25; return z; };
+  const fitText = (s, maxW, size, bold) => { let z = size; while (z > 4.5 && tw(s, z, bold) > maxW) z -= 0.25; return z; };
+  /* row-header widths sized to this product's own labels, so nothing is cut off */
+  const headerWidths = m => {
+    let lw = 62, gw = 66;
+    for (const pg of m.pages) for (const g of pg.groups){
+      for (const r of g.rows) lw = Math.max(lw, tw(r.label, 6.8, true) + (r.sub ? 2 + tw(r.sub, 5.6, false) : 0) + 8);
+      const longest = Math.max(...g.g.split(" ").map(w => tw(w, 6.8, true))); gw = Math.max(gw, longest + 12);
+      /* wide enough that the wrapped name fits the group's rows */
+      const fits = w => { let ln = "", n = 1; for (const x of g.g.split(" ")){ const t2 = ln ? ln + " " + x : x; if (tw(t2, 6.8, true) > w - 10 && ln){ n++; ln = x; } else ln = t2; } return 9 + (n - 1)*8 + 3 <= g.rows.length*13.2; };
+      while (gw < 130 && !fits(gw)) gw += 4;
+    }
+    return { gw: Math.min(130, Math.ceil(gw)), lw: Math.min(170, Math.ceil(lw)) };
+  };
   for (const m of models){
     m.pages.forEach((pg, pi) => {
       cs = [];
       if (logo) cs.push(`q ${f(LW)} 0 0 ${f(LH)} ${f(M)} ${f(Hp - M + 4 - LH)} cm /Im1 Do Q`);
       const ty = logo ? M + 14 : M + 12;
-      text(m.title, TX, ty, 13, { bold:true });
-      text(m.sub, TX, ty + 13, 7.5, { color:[75,90,104] });
+      text(m.title, TX, ty, fitText(m.title, W - M - TX - 60, 13, true), { bold:true });
+      text(m.sub, TX, ty + 13, fitText(m.sub, W - M - TX, 7.5, false), { color:[75,90,104] });
       if (m.pages.length > 1) text(`Page ${pi + 1} of ${m.pages.length}`, W - M, M + 12, 7.5, { align:"r", color:[125,139,151] });
-      const gw = 66, lw = 62, x0 = M + gw + lw, ncol = pg.times.length;
+      const { gw, lw } = m._hw || (m._hw = headerWidths(m)), x0 = M + gw + lw, ncol = pg.times.length;
       const cw = Math.min(24, (W - M - x0)/ncol), top = M + Math.max(38, LH + 4), dh = 12, th = 18, rh = 13.2;
       const xcol = ci => x0 + ci*cw;
       /* day header */
@@ -2007,13 +2023,14 @@ function pdfReport(models, logo){
         rect(M, gy, gw, rh*g.rows.length, [244,247,247]);
         /* group label, wrapped */
         const words = g.g.split(" "); let ln = "", ly = gy + 9;
-        for (const w of words){ const t2 = ln ? ln + " " + w : w; if (textW(t2, 6.8, true) > gw - 6 && ln){ text(ln, M + 3, ly, 6.8, { bold:true }); ly += 8; ln = w; } else ln = t2; }
+        for (const w of words){ const t2 = ln ? ln + " " + w : w; if (tw(t2, 6.8, true) > gw - 10 && ln){ text(ln, M + 3, ly, 6.8, { bold:true }); ly += 8; ln = w; } else ln = t2; }
         if (ln) text(ln, M + 3, ly, 6.8, { bold:true });
         for (const r of g.rows){
           let k = 0;
           for (const c of r.cells){ const x = xcol(k), w = c.span*cw; if (c.fill) rect(x, y, w, rh, c.fill); text(c.text, x + w/2, y + 9.2, fitText(c.text, w - 2, 7, false), { align:"c", color: c.muted ? [154,166,176] : undefined }); k += c.span; }
-          text(r.label, M + gw + 3, y + 9.2, fitText(r.label + (r.sub ? " " + r.sub : ""), lw - 5, 6.8, true), { bold:true, color:[75,90,104] });
-          if (r.sub){ const lwid = textW(r.label, fitText(r.label + " " + r.sub, lw - 5, 6.8, true), true); text(r.sub, M + gw + 3 + lwid + 2, y + 9.2, 5.6, { color:[125,139,151] }); }
+          { const sz = r.sub ? Math.min(6.8, fitText(r.label, lw - 8 - 2 - tw(r.sub, 5.6, false), 6.8, true)) : fitText(r.label, lw - 6, 6.8, true);
+            text(r.label, M + gw + 3, y + 9.2, sz, { bold:true, color:[75,90,104] });
+            if (r.sub) text(r.sub, M + gw + 3 + tw(r.label, sz, true) + 2, y + 9.2, 5.6, { color:[125,139,151] }); }
           /* cell borders for this row */
           let kk = 0; for (const c of r.cells){ line(xcol(kk), y, xcol(kk), y + rh, 0.84, 0.4); kk += c.span; }
           y += rh;
@@ -2025,7 +2042,7 @@ function pdfReport(models, logo){
       line(M, top, xcol(ncol), top, 0.6, 0.6); line(M, top, M, y, 0.6, 0.6); line(xcol(ncol), top, xcol(ncol), y, 0.6, 0.6);
       line(M + gw, top + dh + th, M + gw, y, 0.6, 0.6); line(x0, top, x0, y, 0.45, 1);
       ci = 0; pg.dayHdr.forEach((d, j) => { if (j) line(xcol(ci), top, xcol(ci), y, 0.45, 1.2); ci += d.n; });
-      text("3 hr and 6 hr probabilities are merged across the hours they cover; in longer blocks the 1 hr and 3 hr cells show the highest period inside the block.", M, Math.min(Hp - M, y + 14), 6.5, { color:[125,139,151] });
+      text("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less.", M, Math.min(Hp - M, y + 14), 6.5, { color:[125,139,151] });
       pages.push(cs.join("\n"));
     });
   }
