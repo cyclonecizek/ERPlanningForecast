@@ -103,7 +103,7 @@ delete edits["cape-pad"];   /* old SLC-40 point */
 let published = store.get(LS.pub, {});
 const S = { rows:null, TL:null, G:{}, agg:{}, status:{}, loading:true, cur:null, hoverRow:null, undo:[], redo:[], fetchedAt:null, errors:0 };
 const savePrefs = () => store.set(LS.prefs, prefs);
-const saveEdits = () => store.set(LS.edits, edits);
+const saveEdits = () => { store.set(LS.edits, edits); if (typeof LINKED !== "undefined") store.set(LINKED_KEY, LINKED); };
 const site = () => SITES.find(s => s.id === prefs.site) || SITES[0];
 const hotOf = s => prefs.hot[s.id] ?? s.hot;
 const zulu = () => prefs.tz === "Z";
@@ -578,7 +578,7 @@ function renderTable(){
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i];
       const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
-      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
+      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
       h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : fmt(p, v)}</td>`;
     }
     h += `</tr>`;
@@ -609,7 +609,7 @@ function renderTableAcross(){
       const sp = spm[i]; if (sp.cov) return;
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i], cur = S.cur && S.cur.i === i && S.cur.k === p.k;
-      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
+      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
       h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
     });
     h += `</tr>`;
@@ -630,7 +630,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
@@ -795,11 +795,151 @@ function parseInput(p, txt){
   if (p.lo != null) n = Math.max(p.lo, n); if (p.hi != null) n = Math.min(p.hi, n);
   return Math.round(n);
 }
-function setEdit(sid, k, key, val, group){
+function setEdit(sid, k, key, val, group, isLinked){
   const e = edits[sid] = edits[sid] || {}; const m = e[k] = e[k] || {};
-  const old = m[key];
+  const old = m[key], lo = linkedFlag(sid, k, key), ln = val === undefined || val === null ? false : !!isLinked;
   if (val === undefined || val === null) delete m[key]; else m[key] = val;
-  if (old !== m[key]) group.push({ sid, k, key, old, nw: m[key] });
+  if (old !== m[key] || lo !== ln){ setLinkedFlag(sid, k, key, ln); group.push({ sid, k, key, old, nw: m[key], lo, ln }); }
+}
+/* ---------- horizontal consistency: edits carry to the other forecast points ----------
+   The forecaster's adjustment (official minus guidance) is applied at each other point on top of
+   that point's own guidance, so the differences the guidance expects between points are kept:
+   degrees for temperatures, a percentage for winds, points for probabilities and cloud cover.
+   Distance sets the strength: full within 15 km, tapering to 40 % at 45 km or more. Cells edited
+   by hand at another point are never overwritten. Hold Alt (Option) while editing, or untick a point
+   in "Edits apply to", to change one point only (Alt arms the next edit). */
+const LINKED_KEY = LS.edits + ":linked";
+let LINKED = store.get(LINKED_KEY, {});
+const linkedFlag = (sid, k, key) => !!(((LINKED[sid] || {})[k] || {})[key]);
+function setLinkedFlag(sid, k, key, on){ const m = ((LINKED[sid] = LINKED[sid] || {})[k] = LINKED[sid][k] || {}); if (on) m[key] = 1; else delete m[key]; }
+/* Alt (Option), pressed or held while clicking, makes the NEXT edit apply to this point only */
+const MOD = { alt:false, once:false };
+const armOnce = on => { MOD.once = on; const h = document.querySelector("#linkBar .lhint"); if (h && prefs.link !== false) h.textContent = on ? "Next edit: this point only (Esc to cancel)" : "Press Alt (Option) before an edit to change this point only"; const bar = document.getElementById("linkBar"); if (bar) bar.classList.toggle("once", on); };
+addEventListener("keydown", e => { if (e.key === "Alt" && !e.repeat && linkOn()) armOnce(!MOD.once); if (e.key === "Escape" && MOD.once) armOnce(false); }, true);
+document.addEventListener("pointerdown", e => { if (e.altKey && linkOn() && !MOD.once) armOnce(true); }, true);
+const linkOn = () => !EXPO && !LMEF && prefs.link !== false && SITES.length > 1;
+function linkWeight(a, b){ const d = kmBetween(a.lat, a.lon, b.lat, b.lon); return Math.max(0.4, Math.min(1, 1 - (d - 15)/50)); }
+function linkTargets(){ const on = prefs.linkTo || {}; return SITES.filter(x => x.id !== prefs.site && on[x.id] !== false); }
+function adjust(k, p, vA, gA, gB, w){
+  if (vA == null || gA == null || gB == null || typeof vA !== "number") return undefined;
+  if (p.kind === "sev") return vA;
+  if (isWind(p) && p.kind !== "dir"){ const r = gA > 1 ? vA/gA : null; return r != null ? Math.max(0, Math.round(gB*(1 + w*(r - 1)))) : Math.max(0, Math.round(gB + w*(vA - gA))); }
+  if (p.kind === "dir") return Math.round(((gB + w*(((vA - gA + 540) % 360) - 180)) % 360 + 360) % 360/10)*10 % 360;
+  const v = gB + w*(vA - gA);
+  if (p.kind === "prob" || p.kind === "sky") return Math.max(0, Math.min(100, Math.round(v)));
+  return Math.round(v);
+}
+/* ---------- consistency between points ----------
+   Flags neighbouring points whose official difference strays from the difference the guidance
+   expects, where at least one of them was edited. */
+const CONS_TOL = { t:3, td:3, s54:[5, 0.3], s200:[5, 0.3], g54:[6, 0.3], g200:[6, 0.3], pp1:25, pp3:25, pp6:25, lt1:25, lt3:25, lt6:25 };
+const CONS_NAME = { t:"temperature", td:"dew point", s54:"54 ft sustained wind", s200:"200 ft sustained wind", g54:"54 ft peak wind", g200:"200 ft peak wind", pp1:"1 hr precip chance", pp3:"3 hr precip chance", pp6:"6 hr precip chance", lt1:"1 hr lightning chance", lt3:"3 hr lightning chance", lt6:"6 hr lightning chance" };
+function consistencyIssues(ids){
+  if (EXPO || LMEF) return [];
+  const sites = (ids || SITES.map(x => x.id)).map(id => SITES.find(x => x.id === id)).filter(Boolean);
+  const OFs = Object.fromEntries(sites.map(x => [x.id, officialFor(x.id)]));
+  const out = [];
+  for (let a = 0; a < sites.length; a++) for (let b = a + 1; b < sites.length; b++){
+    const A = sites[a], B = sites[b]; if (kmBetween(A.lat, A.lon, B.lat, B.lon) > 25) continue;
+    const eA = edits[A.id] || {}, eB = edits[B.id] || {};
+    for (const k of Object.keys(CONS_TOL)){
+      if (!P[k] || !OFs[A.id].o[k]) continue;
+      const tol = CONS_TOL[k]; let worst = null, n = 0;
+      S.rows.forEach((r, i) => {
+        if (!((eA[k] || {})[r.key] !== undefined || (eB[k] || {})[r.key] !== undefined)) return;
+        const oa = OFs[A.id].o[k][i], ob = OFs[B.id].o[k][i], ga = (OFs[A.id].g[k] || [])[i], gb = (OFs[B.id].g[k] || [])[i];
+        if ([oa, ob, ga, gb].some(v => v == null || typeof v !== "number")) return;
+        const off = oa - ob, gd = ga - gb, dev = Math.abs(off - gd);
+        const lim = Array.isArray(tol) ? Math.max(tol[0], tol[1]*Math.max(ga, gb)) : tol;
+        if (dev > lim){ n++; if (!worst || dev > worst.dev) worst = { i, off, gd, dev }; }
+      });
+      if (worst) out.push({ kind:"pair", a:A.id, b:B.id, k, n, ...worst });
+    }
+  }
+  return out.sort((p, q) => q.dev - p.dev);
+}
+function consText(it){
+  const nm = id => SITES.find(x => x.id === id).name, r = S.rows[it.i], when = `${dayLabel(r.a, zulu()).wd.slice(0, 3)} ${rowTime(r)}`;
+  if (it.kind === "ltpp") return `${nm(it.a)}, ${when}: ${it.w} hr lightning chance ${Math.round(it.lt)}% is above the precipitation chance ${Math.round(it.pp)}%${it.n > 1 ? ` (${it.n} periods)` : ""}`;
+  const p = P[it.k], u = isWind(p) ? " " + wuLabel() : p.kind === "prob" ? " points" : "°F", f = v => Math.abs(Math.round(isWind(p) ? v*wfac() : v));
+  const dir = it.off >= 0 ? "warmer/higher" : "cooler/lower";
+  return `${nm(it.a)} vs ${nm(it.b)}, ${CONS_NAME[it.k]}, ${when}: ${f(it.off)}${u} apart${it.off === 0 ? "" : it.off > 0 ? ` (${nm(it.a)} ${p.kind === "prob" ? "higher" : isWind(p) ? "stronger" : "warmer"})` : ` (${nm(it.b)} ${p.kind === "prob" ? "higher" : isWind(p) ? "stronger" : "warmer"})`}; the guidance has ${f(it.gd)}${u}${it.n > 1 ? ` (${it.n} periods)` : ""}`;
+}
+/* make point "to" carry the same adjustment as point "from" on one parameter, for the flagged periods' whole run */
+function alignPoints(from, to, k){
+  const A = SITES.find(x => x.id === from), B = SITES.find(x => x.id === to), oA = officialFor(from), oB = officialFor(to), g = [];
+  const w = linkWeight(A, B), p = P[k];
+  S.rows.forEach((r, i) => {
+    const eA = ((edits[from] || {})[k] || {})[r.key];
+    const vA = oA.o[k][i], gA = (oA.g[k] || [])[i], gB = (oB.g[k] || [])[i];
+    if (eA === undefined && ((edits[to] || {})[k] || {})[r.key] === undefined) return;
+    const nv = eA === undefined ? undefined : adjust(k, p, vA, gA, gB, w);
+    setEdit(to, k, r.key, nv, g, false);
+  });
+  const keep = MOD.alt; MOD.alt = true; commit(g); MOD.alt = keep;
+  toast(`${B.name} ${P[k] ? CONS_NAME[k] || P[k].l : k} now carries ${A.name}'s adjustment`);
+}
+/* carry every edit at one point to the others (hand edits elsewhere are kept), as one undo step */
+function carryAll(from){
+  const keep = prefs.site; prefs.site = from;
+  const fake = []; const e = edits[from] || {};
+  for (const k in e) for (const key in e[k]) if (!linkedFlag(from, k, key)) fake.push({ sid:from, k, key, old:e[k][key], nw:e[k][key], ln:false });
+  const save = MOD.once; MOD.once = false;
+  let real = [];
+  if (fake.length){ const grp = fake.slice(); propagate(grp); real = grp.slice(fake.length); }
+  MOD.once = save; prefs.site = keep;
+  if (!real.length){ toast("Nothing to carry: the other points already match or have their own edits"); return; }
+  S.undo.push(real); if (S.undo.length > 200) S.undo.shift(); S.redo = [];
+  saveEdits(); renderAll(); toast(S.linkNote || "Carried to the other points");
+}
+function renderLinkBar(){
+  const bar = $("linkBar"); if (!bar) return;
+  if (EXPO || LMEF || SITES.length < 2){ bar.hidden = true; return; }
+  bar.hidden = false;
+  const src = site(), on = prefs.linkTo || {}, linking = prefs.link !== false;
+  const issues = S.consCache || [];
+  clearTimeout(S.consT); S.consT = setTimeout(() => { const n = consistencyIssues(); const changed = n.length !== (S.consCache || []).length; S.consCache = n; if (changed) renderLinkBar(); }, 350);
+  bar.innerHTML = `<label class="lsw"><input type="checkbox" id="linkSw" ${linking ? "checked" : ""}> <b>Edits also apply to</b></label>
+    ${SITES.filter(x => x.id !== src.id).map(x => `<label class="lch ${linking ? "" : "off"}"><input type="checkbox" data-lt="${x.id}" ${on[x.id] !== false ? "checked" : ""} ${linking ? "" : "disabled"}> ${x.name} <span>${Math.round(linkWeight(src, x)*100)}%</span></label>`).join("")}
+    <span class="lhint">${linking ? (MOD.once ? "Next edit: this point only (Esc to cancel)" : "Press Alt (Option) before an edit to change this point only") : "Edits change this point only"}</span>
+    <span class="sp"></span>
+    <button type="button" class="btn ${issues.length ? "warn" : ""}" id="consBtn">${issues.length ? `${issues.length} consistency flag${issues.length === 1 ? "" : "s"}` : "Points consistent"}</button>`;
+}
+function openConsistency(){
+  const dlg = $("conDlg"), list = consistencyIssues();
+  $("conList").innerHTML = list.length ? list.map((it, n) => `<li><span>${hesc(consText(it))}</span>${it.kind === "pair" ? `<span class="acts"><button type="button" class="btn" data-go="${n}">Show</button><button type="button" class="btn" data-al="${n}" data-from="${it.a}" data-to="${it.b}">Match ${hesc(SITES.find(x => x.id === it.a).name)}</button><button type="button" class="btn" data-al="${n}" data-from="${it.b}" data-to="${it.a}">Match ${hesc(SITES.find(x => x.id === it.b).name)}</button></span>` : `<span class="acts"><button type="button" class="btn" data-go="${n}">Show</button></span>`}</li>`).join("") : `<li class="ok">No inconsistencies: every edited period keeps the differences between points that the guidance expects (within ${CONS_TOL.t}°F, 5 kt or 30%, and 25 points for probabilities).</li>`;
+  dlg._list = list;
+  const cur = site(); $("conCarry").textContent = `Carry ${cur.name}'s edits to the other points`; $("conCarry").hidden = !editCount(cur.id);
+  if (!dlg.open) dlg.showModal();
+}
+function propagate(group){
+  if (!linkOn() || MOD.alt) return 0;
+  if (MOD.once){ armOnce(false); return 0; }
+  const src = SITES.find(x => x.id === prefs.site); if (!src) return 0;
+  const own = group.filter(c => c.sid === prefs.site && !c.ln); if (!own.length) return 0;
+  const targets = linkTargets(); if (!targets.length) return 0;
+  const gSrc = officialFor(src.id).g || {}, idx = new Map(S.rows.map((r, i) => [r.key, i]));
+  const touched = new Map();
+  for (const t of targets){
+    const OFt = officialFor(t.id), gT = OFt.g || {}, w = linkWeight(src, t);
+    for (const c of own){
+      const p = P[c.k]; if (!p || p.kind === "text") continue;
+      const i = idx.get(c.key); if (i == null) continue;
+      const cur = ((edits[t.id] || {})[c.k] || {})[c.key];
+      if (cur !== undefined && !linkedFlag(t.id, c.k, c.key)) continue;      /* a hand edit there wins */
+      let nv;
+      if (c.nw === undefined) nv = undefined;                                  /* back to guidance here: back to guidance there */
+      else { const gA = gSrc[c.k] ? gSrc[c.k][i] : null, gB = gT[c.k] ? gT[c.k][i] : null; nv = adjust(c.k, p, c.nw, gA, gB, w); if (nv === undefined) continue; if (nv === gB && !/^(pp|lt)\d$|^g\d+$|^x/.test(c.k)) nv = undefined; }
+      const before = group.length;
+      setEdit(t.id, c.k, c.key, nv, group, nv !== undefined);
+      if (group.length > before) touched.set(t.id, w);
+    }
+  }
+  if (touched.size){
+    const part = [...touched].filter(([, w]) => w < 0.99).map(([id, w]) => `${SITES.find(x => x.id === id).name} at ${Math.round(w*100)}%`);
+    S.linkNote = `Also applied to ${touched.size} other point${touched.size === 1 ? "" : "s"}${part.length ? ` (${part.join(", ")})` : ""}. Undo reverses it everywhere; press Alt (Option) first to change one point only.`;
+  }
+  return touched.size;
 }
 /* store an edit, dropping it if it equals guidance */
 function writeCell(k, i, val, group){
@@ -814,13 +954,17 @@ function writeCell(k, i, val, group){
 }
 function commit(group){
   if (!group.length) return;
+  S.linkNote = null;
+  const n = propagate(group);
   S.undo.push(group); if (S.undo.length > 200) S.undo.shift(); S.redo = [];
   saveEdits(); renderAll();
+  if (n && S.linkNote) toast(S.linkNote);
 }
 function applyGroup(group, dir){
   for (const c of (dir < 0 ? [...group].reverse() : group)){
     const e = edits[c.sid] = edits[c.sid] || {}; const m = e[c.k] = e[c.k] || {};
     const v = dir < 0 ? c.old : c.nw; if (v === undefined) delete m[c.key]; else m[c.key] = v;
+    if (c.lo !== undefined) setLinkedFlag(c.sid, c.k, c.key, dir < 0 ? c.lo : c.ln);
   }
   saveEdits();
   if (group[0] && group[0].sid !== prefs.site){ prefs.site = group[0].sid; savePrefs(); }
@@ -1096,6 +1240,7 @@ function updateCells(ks){
       if (td.textContent !== txt && !td.querySelector("input,select")) td.textContent = txt;
       td.style.cssText = tint(p, v);
       td.classList.toggle("ed", e[k] && e[k][S.rows[i].key] !== undefined);
+      td.classList.toggle("lk", !!(e[k] && e[k][S.rows[i].key] !== undefined && linkedFlag(prefs.site, k, S.rows[i].key)));
     });
   }
 }
@@ -1457,6 +1602,7 @@ function openPublish(){
   const qcRefresh = () => {
     const ids = [...$("pubSites").querySelectorAll("input:checked")].map(x => x.value);
     const msgs = [];
+    consistencyIssues(ids).forEach(it => msgs.push(`Consistency: ${consText(it)}`));
     ids.forEach(id => { const q = qcIssues(id, officialFor(id)); q.list.forEach(it => msgs.push(`${SITES.find(s => s.id === id).name}, ${dayLabel(S.rows[it.i].a, zulu()).wd.slice(0,3)} ${rowTime(S.rows[it.i])}: ${it.msg}`)); });
     const el = $("qc");
     if (msgs.length){ el.className = "qc show"; el.innerHTML = `<b>${msgs.length} check${msgs.length > 1 ? "s" : ""} to look at.</b> You can still publish.<ul>${msgs.slice(0, 10).map(m => `<li>${m}</li>`).join("")}${msgs.length > 10 ? `<li>and ${msgs.length - 10} more</li>` : ""}</ul>`; }
@@ -2362,6 +2508,23 @@ function bind(){
   $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
   $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
   if (EXPO) document.querySelectorAll('.pagenav a[data-page="verify"]').forEach(a => { a.href = "verify.html#exposure"; a.addEventListener("click", () => { try { localStorage.setItem("erwx:verifyMode", "exposure"); } catch (e) { /* ignore */ } }); });
+  const lb = document.getElementById("linkBar");
+  if (lb){
+    lb.addEventListener("change", ev => {
+      if (ev.target.id === "linkSw"){ prefs.link = ev.target.checked; savePrefs(); renderLinkBar(); toast(prefs.link ? "Edits apply to the other points" : "Edits change this point only"); }
+      else if (ev.target.dataset.lt){ prefs.linkTo = prefs.linkTo || {}; prefs.linkTo[ev.target.dataset.lt] = ev.target.checked; savePrefs(); }
+    });
+    lb.addEventListener("click", ev => { if (ev.target.closest("#consBtn")) openConsistency(); });
+  }
+  const cd = document.getElementById("conDlg");
+  if (cd) cd.addEventListener("click", ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    const it = cd._list && cd._list[+(b.dataset.go ?? b.dataset.al)];
+    if (b.dataset.go != null && it){ prefs.site = it.a; savePrefs(); if (it.k){ prefs.param = it.k.replace(/^(pp|lt)\d$/, m => m.slice(0, 2)); } cd.close(); renderAll(); selectCell(it.i, it.k || "lt" + it.w, true); }
+    else if (b.dataset.al != null && it){ alignPoints(b.dataset.from, b.dataset.to, it.k); openConsistency(); }
+    else if (b.id === "conClose") cd.close();
+    else if (b.id === "conCarry"){ carryAll(prefs.site); openConsistency(); }
+  });
   const rb = document.getElementById("recentBody");
   if (rb) rb.addEventListener("click", ev => {
     const r = ev.target.closest("[data-rs]"); if (r){ RECENT.sel = RECENT.sel === r.dataset.rs ? null : r.dataset.rs; renderRecent(); return; }

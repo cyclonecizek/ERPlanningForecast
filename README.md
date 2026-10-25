@@ -170,6 +170,21 @@ amber, ↺ to go back). Additional risk criteria can be switched off or added:
 
 Export as PDF, HTML, Excel or CSV.
 
+## Consistent forecasts across points (planning page)
+An edit at one point carries to the others: each other point gets the same adjustment (official
+minus guidance) on top of its own guidance, so the differences the guidance expects between points
+are kept. Temperatures move by degrees, winds by percentage, probabilities and cloud cover by points.
+Distance sets the strength (full within 15 km, tapering to 40 % at 45 km and beyond, so Patrick gets
+about 45 % of a KSC change). Cells edited by hand at another point are never overwritten; carried
+cells are marked with a teal corner instead of gold. One undo reverses the edit everywhere.
+* **Edits also apply to** (above the table): turn linking off, or untick points.
+* **Alt (Option):** press it before an edit (or hold it while clicking) to change only this point;
+  Esc cancels.
+* **Consistency flags:** neighbouring points (within 25 km) whose difference in an edited period strays
+  from what the guidance expects (more than 3°F, 5 kt or 30 % of the wind, or 25 points for a
+  probability). The list offers Show, Match (give one point the other's adjustment) and "Carry this
+  point's edits to the other points"; the flags also appear in the publish check.
+
 ## Interactive HTML product
 The HTML that Publish writes for the planning and exposure forecasts is an interactive page, not a
 copy of the PDF: forecast points as tabs, one continuous table that scrolls with sticky headers and
