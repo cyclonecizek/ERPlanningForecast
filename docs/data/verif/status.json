@@ -1,1 +1,1 @@
-{"obs":{"winds":{"filled":8,"failed":0,"pending":0},"ltg":{"filled":8,"failed":0,"pending":0},"mrms":{"filled":8,"failed":0,"pending":1},"metar":{"ok":true}},"guidance":{"skipped":"between issue times"},"pairs":24599,"updated":"2026-10-26T15:18:38.178186+00:00"}
+{"obs":{"winds":{"filled":5,"failed":0,"pending":0},"ltg":{"filled":5,"failed":0,"pending":0},"mrms":{"filled":5,"failed":0,"pending":1},"metar":{"ok":true}},"guidance":{"issue":"2026-10-26T20:00:00+00:00","sources":21},"pairs":17937,"updated":"2026-10-26T20:39:25.780140+00:00"}
