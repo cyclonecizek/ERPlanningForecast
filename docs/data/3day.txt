@@ -1,21 +1,21 @@
 :Product: 3-Day Forecast
-:Issued: 2026 Oct 26 0030 UTC
+:Issued: 2026 Oct 26 1230 UTC
 # Prepared by the U.S. Dept. of Commerce, NOAA, Space Weather Prediction Center
 #
 A. NOAA Geomagnetic Activity Observation and Forecast
 
 The greatest observed 3 hr Kp over the past 24 hours was 2 (below NOAA
 Scale levels).
-The greatest expected 3 hr Kp for Oct 26-Oct 28 2026 is 3.00 (below NOAA
+The greatest expected 3 hr Kp for Oct 26-Oct 28 2026 is 2.00 (below NOAA
 Scale levels).
 
 NOAA Kp index breakdown Oct 26-Oct 28 2026
 
              Oct 26       Oct 27       Oct 28
-00-03UT       1.67         1.67         1.33         
-03-06UT       1.33         1.33         1.33         
-06-09UT       1.33         1.33         1.67         
-09-12UT       1.33         1.33         1.33         
+00-03UT       0.33         1.67         1.33         
+03-06UT       1.00         1.33         1.33         
+06-09UT       1.00         1.33         1.67         
+09-12UT       2.00         1.33         1.33         
 12-15UT       1.33         1.33         1.33         
 15-18UT       1.33         1.33         1.33         
 18-21UT       1.67         1.67         1.67         
@@ -45,9 +45,8 @@ No radio blackouts were observed over the past 24 hours.
 Radio Blackout Forecast for Oct 26-Oct 28 2026
 
               Oct 26        Oct 27        Oct 28
-R1-R2           10%            1%            1%
+R1-R2           15%           10%            5%
 R3 or greater    1%            1%            1%
 
-Rationale: There is a slight chance for an isolated R1-R2
-(Minor-Moderate) radio blackout on 26 Oct. No R1 (Minor) or greater
-radio blackouts are expected on 27-28 Oct.
+Rationale: There is a slight chance for R1-R2 (Minor-Moderate) radio
+blackouts on 26-27 Oct.
