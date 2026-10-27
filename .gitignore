@@ -13,3 +13,7 @@ LMEF_*
 Leadership_Quick_Look_*
 *.xlsx
 *.pdf
+# Official schedules (mission dates may not be public)
+Official_Schedule*.csv
+*schedule*.csv
+*Schedule*.csv
