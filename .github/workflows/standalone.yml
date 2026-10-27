@@ -7,10 +7,12 @@ on:
       - "docs/*.js"
       - "docs/index.html"
       - "docs/exposure.html"
+      - "docs/burn.html"
       - "docs/lmef.html"
       - "docs/taf.html"
       - "docs/verify.html"
       - "docs/45ws-logo.png"
+      - "docs/ussf-seal.png"
       - "pipeline/build_standalone.py"
       - ".github/workflows/standalone.yml"
   workflow_dispatch:
