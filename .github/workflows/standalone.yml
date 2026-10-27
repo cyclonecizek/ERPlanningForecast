@@ -10,6 +10,7 @@ on:
       - "docs/burn.html"
       - "docs/lmef.html"
       - "docs/taf.html"
+      - "docs/mwp.html"
       - "docs/verify.html"
       - "docs/45ws-logo.png"
       - "docs/ussf-seal.png"
