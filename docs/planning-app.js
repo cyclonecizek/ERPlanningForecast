@@ -358,6 +358,118 @@ function expChanged(full){
   savePrefs(); applyExposureConfig(prefs.exp); rebuildViews();
   clearTimeout(expT); expT = setTimeout(() => { if (full) loadAll(); else rebuildGuidance(); renderExpSetup(); }, full ? 50 : 250);
 }
+/* ---------- official schedule (uploaded CSV, kept on this computer) ----------
+   One file serves both pages: "ground" rows appear on the exposure page, "launch" rows in the LMEF
+   mission list. Mission dates may not be public, so the schedule never leaves this browser except in
+   a workspace file. */
+const SCHED_KEY = "schedfx:v1:items";
+const loadSched = () => store.get(SCHED_KEY, []);
+const saveSched = x => store.set(SCHED_KEY, x);
+const SCHED_TEMPLATE = [
+  "type,name,vehicle,location,start,end,time_zone,backup_start,backup_end,template,liftoff_limit_kt,lat,lon,notes",
+  "launch,Starlink 10-12,Falcon 9,SLC-40,2026-10-30 01:15,2026-10-30 05:15,L,2026-10-31 00:50,2026-10-31 04:50,,30,,,Example row: replace with your mission",
+  "ground,Crane lift,,LC-39A,2026-10-28 07:00,2026-10-28 15:00,L,,,Crane lift (39A),,,,Example row: template is the name of a saved exposure template",
+].join("\r\n") + "\r\n";
+/* local wall time at the Cape to UTC milliseconds */
+function capeToUTC(y, mo, d, h, mi){
+  let t = Date.UTC(y, mo - 1, d, h, mi);
+  for (let k = 0; k < 3; k++){
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:TZ, year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }).formatToParts(new Date(t)).map(x => [x.type, x.value]));
+    const shown = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+    t += Date.UTC(y, mo - 1, d, h, mi) - shown;
+  }
+  return t;
+}
+const MON3 = { JAN:1, FEB:2, MAR:3, APR:4, MAY:5, JUN:6, JUL:7, AUG:8, SEP:9, OCT:10, NOV:11, DEC:12 };
+function parseWhen(v, zone){
+  v = String(v || "").trim(); if (!v) return null;
+  /* range schedule exports: "01-Nov-26 1345" (date and HHMM, usually Zulu) */
+  const dm = v.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})[ T]?(\d{2}):?(\d{2})$/);
+  if (dm && MON3[dm[2].toUpperCase()]){
+    let y = +dm[3]; if (y < 100) y += 2000;
+    const mo = MON3[dm[2].toUpperCase()], d = +dm[1], h = +dm[4], mi = +dm[5];
+    return /^(z|utc|gmt|zulu)$/i.test(String(zone || "").trim()) ? Date.UTC(y, mo - 1, d, h, mi) : capeToUTC(y, mo, d, h, mi);
+  }
+  if (/[zZ]$|[+-]\d\d:?\d\d$/.test(v) && !isNaN(Date.parse(v.replace(" ", "T")))) return Date.parse(v.replace(" ", "T"));
+  let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):?(\d{2})/) || null, y, mo, d, h, mi;
+  if (m){ [y, mo, d, h, mi] = m.slice(1).map(Number); }
+  else if ((m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})[ T](\d{1,2}):?(\d{2})/))){ [mo, d, y, h, mi] = m.slice(1).map(Number); if (y < 100) y += 2000; }
+  else return null;
+  const utc = /^(z|utc|gmt|zulu)$/i.test(String(zone || "").trim());
+  return utc ? Date.UTC(y, mo - 1, d, h, mi) : capeToUTC(y, mo, d, h, mi);
+}
+/* pad or point named anywhere in a row's text (the range exports give the range, e.g. "ER", as location) */
+const PAD_WORDS = [[/\b39\s*-?\s*A\b|LC-?39A/i, "LC-39A"], [/\b39\s*-?\s*B\b|LC-?39B/i, "LC-39B"], [/SLC-?\s*40\b/i, "SLC-40"], [/SLC-?\s*41\b/i, "SLC-41"], [/SLC-?\s*37\b/i, "SLC-37"], [/LC-?\s*36\b/i, "LC-36"], [/SLC-?\s*46\b/i, "SLC-46"], [/\bSLF\b|SHUTTLE LANDING/i, "SLF"], [/\bXMR\b|SKID STRIP/i, "XMR"]];
+const padFromText = t => { for (const [re, p] of PAD_WORDS) if (re.test(t || "")) return p; return ""; };
+/* vehicle named in the operation name (the range exports have no vehicle column) */
+const VEHICLE_WORDS = [[/FALCON\s*HEAVY/i, "Falcon Heavy"], [/FALCON\s*9|\bF9\b/i, "Falcon 9"], [/VULCAN/i, "Vulcan"], [/ATLAS\s*V/i, "Atlas V"], [/NEW\s*GLENN/i, "New Glenn"], [/\bSLS\b/i, "SLS"], [/STARSHIP/i, "Starship"], [/NEUTRON/i, "Neutron"]];
+const vehicleFromText = t => { for (const [re, v] of VEHICLE_WORDS) if (re.test(t || "")) return v; return ""; };
+function parseSchedCSV(text, defaultType){
+  const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim() && !l.startsWith("#"));
+  const split = l => { const out = []; let cur = "", q = false; for (let i = 0; i < l.length; i++){ const ch = l[i]; if (q){ if (ch === '"' && l[i + 1] === '"'){ cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; } else if (ch === '"') q = true; else if (ch === ","){ out.push(cur); cur = ""; } else cur += ch; } out.push(cur); return out.map(x => x.trim()); };
+  const head = split(lines[0] || "").map(h => h.toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+  const col = (r, ...names) => { for (const n of names){ const i = head.indexOf(n); if (i >= 0 && r[i] != null && r[i] !== "") return r[i]; } return ""; };
+  const items = [], errors = [];
+  lines.slice(1).forEach((l, n) => {
+    const r = split(l);
+    /* range export: separate Zulu date and time columns */
+    const rangeFmt = head.includes("opstartdate_z");
+    const zone = rangeFmt ? "Z" : col(r, "time_zone", "tz", "zone");
+    const tcol = col(r, "type", "kind");
+    const type = tcol ? (/^(launch|lmef|mission)$/i.test(tcol) ? "launch" : "ground") : (defaultType || "ground");
+    const name = col(r, "name", "op_name", "mission", "mission_name", "operation", "op");
+    const a = rangeFmt ? parseWhen(`${col(r, "opstartdate_z")} ${col(r, "opstarttime_z").padStart(4, "0")}`, "Z") : parseWhen(col(r, "start", "window_open", "open", "start_time"), zone);
+    const b = rangeFmt ? parseWhen(`${col(r, "openddate_z") || col(r, "opstartdate_z")} ${col(r, "opendtime_z").padStart(4, "0")}`, "Z") : parseWhen(col(r, "end", "window_close", "close", "end_time"), zone);
+    if (!name || a == null){ errors.push(`row ${n + 2}: needs a name and a start time`); return; }
+    const ba = parseWhen(col(r, "backup_start", "backup_open"), zone), bb = parseWhen(col(r, "backup_end", "backup_close"), zone);
+    const opid = col(r, "operation_id", "op_id", "id"), comments = col(r, "op_comments", "comments", "notes");
+    let location = col(r, "location", "pad", "point", "site");
+    if (!EXP_POINTS_NAMES().has(normLoc(location))) location = padFromText(`${name} ${comments}`) || (location && !/^(ER|WR|CCSFS|KSC)$/i.test(location) ? location : "");
+    items.push({ id: opid ? `sched:op:${opid}` : `sched:${type}:${name}:${a}`, type, name, provider: col(r, "lsp_name", "provider", "customer"), jon: col(r, "jon"), opnum: col(r, "opnumber", "op_number"),
+      modified: Date.parse(col(r, "lastmodified", "last_modified")) || null,
+      vehicle: col(r, "vehicle", "rocket") || vehicleFromText(name), location,
+      a, b: b != null && b > a ? b : a + (type === "launch" ? 0 : 4*H), backup: ba != null ? { a:ba, b: bb != null && bb > ba ? bb : ba + ((b || a) - a) } : null,
+      template: col(r, "template"), limit: +col(r, "liftoff_limit_kt", "liftoff_limit") || null,
+      lat: +col(r, "lat", "latitude") || null, lon: +col(r, "lon", "longitude") || null, notes: comments });
+  });
+  return { items, errors };
+}
+const normLoc = v => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^(LC|SLC|PAD)/, "");
+const EXP_POINTS_NAMES = () => new Set(["39A","39B","40","41","37","36","46","SLF","XMR","KXMR","KTTS","KCOF","PATRICK"].concat(typeof EXP_POINTS !== "undefined" ? EXP_POINTS.flatMap(p => [normLoc(p.point), normLoc(p.name), normLoc(p.tag)]) : []));
+function schedUpload(file, after, defaultType){
+  file.text().then(t => {
+    /* a file named for launch or non-launch ops sets the kind of every row that doesn't say */
+    const nm = file.name || "", dt = /non[-_ ]?launch/i.test(nm) ? "ground" : /launch/i.test(nm) ? "launch" : defaultType;
+    const { items, errors } = parseSchedCSV(t, dt);
+    if (!items.length){ toast(errors[0] ? `Schedule not loaded: ${errors[0]}` : "No schedule rows found"); return; }
+    /* a newer copy of the same operation replaces the old one */
+    const keep = loadSched().filter(x => !items.some(y => y.id === x.id && (!x.modified || !y.modified || y.modified >= x.modified)) && x.b > Date.now() - 2*86400e3);
+    saveSched([...keep, ...items].sort((p, q) => p.a - q.a));
+    toast(`Schedule loaded: ${items.filter(x => x.type === "launch").length} launch${items.filter(x => x.type === "launch").length === 1 ? "" : "es"}, ${items.filter(x => x.type === "ground").length} ground operation${items.filter(x => x.type === "ground").length === 1 ? "" : "s"}${errors.length ? `; ${errors.length} row${errors.length === 1 ? "" : "s"} skipped` : ""}`);
+    if (after) after();
+  });
+}
+/* exposure page: the scheduled ground operations */
+function renderSchedExpo(){
+  if (!EXPO || !$("schSel")) return;
+  const list = loadSched().filter(x => x.type === "ground" && x.b > Date.now() - 6*H);
+  $("schSel").innerHTML = `<option value="">${list.length ? "Choose a scheduled operation" : "No scheduled operations loaded"}</option>` + list.map(x => `<option value="${hesc(x.id)}">${hesc(new Date(x.a).toLocaleString("en-US", { timeZone:TZ, month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }))}L · ${x.provider ? hesc(x.provider) + " · " : ""}${hesc(x.name)}${x.location ? " · " + hesc(x.location) : ""}</option>`).join("");
+  $("schClear").hidden = !loadSched().length;
+}
+function useSchedExpo(id){
+  const x = loadSched().find(y => y.id === id); if (!x){ toast("Pick a scheduled operation first"); return; }
+  const e = prefs.exp;
+  const t = x.template ? loadTpls().find(q => q.name.toLowerCase() === x.template.toLowerCase()) : null;
+  if (t) applyTpl(t); else if (x.template) toast(`No saved template called "${x.template}"; times and point set, constraints unchanged`);
+  e.op = x.name; e.start = Math.floor(x.a/H)*H; e.end = Math.max(e.start + H, Math.ceil(x.b/H)*H);
+  let full = false;
+  if (x.lat && x.lon){ e.custom = { name: x.location || x.name, lat:x.lat, lon:x.lon }; prefs.site = "custom"; full = true; }
+  else if (x.location){ const nl = normLoc(x.location); const s2 = EXP_POINTS.find(p => normLoc(p.point) === nl || normLoc(p.name) === nl || normLoc(p.id) === nl || normLoc(p.tag) === nl); if (s2) prefs.site = s2.id; else toast(`Location "${x.location}" not recognised; choose the point`); }
+  else setTimeout(() => toast(`${x.name}: the schedule gives no pad, so choose the point`), 1600);
+  $("expOp").value = e.op;
+  expChanged(true); renderSites();
+  toast(`Loaded ${x.name} from the official schedule`);
+}
 /* ---------- operation templates (exposure page) ----------
    A template keeps the operation name, point, constraints, hourly setting and window length.
    Loading one keeps the current start time. Templates live in this browser (and travel with a
@@ -448,6 +560,12 @@ function bindExp(){
   $("addWind").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"wind", h:60, kind:"peak", op:">=", v:25, unit:"kt" }); expChanged(false); };
   $("addTemp").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"temp", op:">", v:95, unit:"F" }); expChanged(false); };
   bindTpls();
+  renderSchedExpo();
+  $("schUse").onclick = () => useSchedExpo($("schSel").value);
+  $("schSel").onchange = () => { const x = loadSched().find(y => y.id === $("schSel").value), n = $("schInfo"); if (!n) return; n.textContent = x ? [x.opnum && `Op ${x.opnum}`, x.jon && `JON ${x.jon}`, `${new Date(x.a).toISOString().slice(5, 16).replace("T", " ")}Z – ${new Date(x.b).toISOString().slice(5, 16).replace("T", " ")}Z`, x.location ? "" : "no pad given: choose the point after Use", x.notes].filter(Boolean).join(" · ") : ""; };
+  $("schFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) schedUpload(f, renderSchedExpo, "ground"); };
+  $("schTpl").onclick = () => download(new Blob([SCHED_TEMPLATE], { type:"text/csv" }), "Official_Schedule_template.csv");
+  $("schClear").onclick = () => { if (!confirm("Remove the official schedule stored on this computer?")) return; saveSched([]); renderSchedExpo(); };
   $("foot1").textContent = "Rows are hourly for the period you choose, then 3-hour blocks to the end of the window. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. Constraint probabilities are the chance that the constraint is met (for example, a peak wind at or above the limit) at any time in the row, from all the guidance members, and they move with your wind and temperature edits. 3 and 6 hr precipitation and lightning cells are merged across the hours they cover and linked to the 1 hr values. Press Enter to edit a table cell, Delete to return it to guidance.";
   const f2 = $("foot1").nextElementSibling; if (f2) f2.textContent = "Winds at each constraint height are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing), and peaks scale the 10 m gust factor with height. The custom point uses the nearest MOS station within 30 km and the nearest high-res pipeline point within 15 km. Lightning comes only from guidance with explicit thunder probabilities.";
   renderExpSetup();
@@ -1403,6 +1521,16 @@ const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n+
 function crc32(b){ let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
 /* ---------- 45 WS logo for published products ---------- */
 let LOGO = null;
+/* decode an image into what the PDF writer needs: RGB plus a separate alpha mask */
+async function decodeImage(bytes, type){
+  const img = await createImageBitmap(new Blob([bytes], { type: type || "image/png" }));
+  const rh = 200, rw = Math.round(img.width*rh/img.height);
+  const c = document.createElement("canvas"); c.width = rw; c.height = rh;
+  const x = c.getContext("2d"); x.drawImage(img, 0, 0, rw, rh);
+  const d = x.getImageData(0, 0, rw, rh).data, rgb = new Uint8Array(rw*rh*3), alpha = new Uint8Array(rw*rh);
+  for (let i = 0, j = 0, k = 0; i < d.length; i += 4, k++){ rgb[j++] = d[i]; rgb[j++] = d[i + 1]; rgb[j++] = d[i + 2]; alpha[k] = d[i + 3]; }
+  return { w: img.width, h: img.height, rgb, alpha, rw, rh };
+}
 async function loadLogo(){
   if (LOGO !== null) return LOGO;
   try {
@@ -1967,7 +2095,7 @@ function reportViewer(){
 /* ---------- PDF (hand-built, Helvetica, US Letter landscape) ---------- */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 const textW = (s, size, bold) => { let w = 0; for (const ch of String(s)){ const c = ch.charCodeAt(0); w += c >= 32 && c <= 126 ? HW[c - 32] : ch === "–" ? 556 : ch === "°" ? 400 : 556; } return w*size/1000*(bold ? 1.06 : 1); };
-const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "•") return "\\225"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
+const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "•") return "\\225"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; if (ch === "’") return "\\222"; if (ch === "‘") return "\\221"; if (ch === "“") return "\\223"; if (ch === "”") return "\\224"; if (ch === "¹") return "\\271"; if (ch === "²") return "\\262"; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
 function pdfReport(models, logo){
   const W = 792, Hp = 612, M = 28, ops = [];
   const LH = logo ? 46 : 0, LW = logo ? LH*logo.rw/logo.rh : 0, TX = logo ? M + LW + 10 : M;
@@ -2048,20 +2176,27 @@ function pdfReport(models, logo){
   }
   return pdfAssemble(pages, logo, W, Hp);
 }
-function pdfAssemble(pages, logo, W, Hp){
+function pdfAssemble(pages, logo, W, Hp, opts){
+  opts = opts || {};
   /* assemble objects */
   const objs = [];
   const add = s => { objs.push(s); return objs.length; };
   const fontR = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   const fontB = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  const fontI = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>");
+  const fontBI = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-BoldOblique /Encoding /WinAnsiEncoding >>");
+  const im2 = opts.image2 ? (() => { const g = opts.image2; const sm = g.alpha ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${g.rw} /Height ${g.rh} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${g.alpha.length} >>\nstream\n`, bin:g.alpha, tail:"\nendstream" }) : null; return add({ head:`<< /Type /XObject /Subtype /Image /Width ${g.rw} /Height ${g.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8${sm ? ` /SMask ${sm} 0 R` : ""} /Length ${g.rgb.length} >>\nstream\n`, bin:g.rgb, tail:"\nendstream" }); })() : null;
+  const annots = (opts.links || []).map(l => ({ page:l.page || 0, id: add(`<< /Type /Annot /Subtype /Link /Rect [${l.x.toFixed(1)} ${(Hp - l.y - l.h).toFixed(1)} ${(l.x + l.w).toFixed(1)} ${(Hp - l.y).toFixed(1)}] /Border [0 0 0] /A << /S /URI /URI (${l.url}) >> >>`) }));
   const smask = logo && logo.alpha ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${logo.alpha.length} >>\nstream\n`, bin:logo.alpha, tail:"\nendstream" }) : null;
   const img = logo ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8${smask ? ` /SMask ${smask} 0 R` : ""} /Length ${logo.rgb.length} >>\nstream\n`, bin:logo.rgb, tail:"\nendstream" }) : null;
   const pagesId = objs.length + 1 + pages.length*2;   /* reserved after page objects */
   const kids = [];
-  for (const c of pages){
+  pages.forEach((c, pi) => {
     const sid = add(`<< /Length ${c.length} >>\nstream\n${c}\nendstream`);
-    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${Hp}] /Resources << /Font << /F1 ${fontR} 0 R /F2 ${fontB} 0 R >>${img ? ` /XObject << /Im1 ${img} 0 R >>` : ""} >> /Contents ${sid} 0 R >>`));
-  }
+    const an = annots.filter(a => a.page === pi).map(a => a.id + " 0 R");
+    const xo = [img ? `/Im1 ${img} 0 R` : "", im2 ? `/Im2 ${im2} 0 R` : ""].filter(Boolean).join(" ");
+    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${Hp}] /Resources << /Font << /F1 ${fontR} 0 R /F2 ${fontB} 0 R /F3 ${fontI} 0 R /F4 ${fontBI} 0 R >>${xo ? ` /XObject << ${xo} >>` : ""} >>${an.length ? ` /Annots [${an.join(" ")}]` : ""} /Contents ${sid} 0 R >>`));
+  });
   add(`<< /Type /Pages /Kids [${kids.map(k => k + " 0 R").join(" ")}] /Count ${kids.length} >>`);
   const cat = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
   const parts = []; let pos = 0;

@@ -146,7 +146,7 @@ window.addEventListener("message", function(e){ if (e.data && e.data.erwxTab) sh
 /* ---------- shared workspace file ----------
    Each tool keeps its work in this browser's storage under its own prefix; the workspace file
    carries those entries between computers. Personal settings (initials, theme) stay local. */
-var TOOLS = { planning:["planfx:"], exposure:["expfx:"], lmef:["lmfx:","lmef:"], taf:["taffx:"] };
+var TOOLS = { planning:["planfx:"], exposure:["expfx:","schedfx:"], lmef:["lmfx:","lmef:","schedfx:"], taf:["taffx:"] };
 var PERSONAL = ["initials","tz","wu","theme"];
 var wsHandle = null;
 function chosen(){ return [].slice.call(document.querySelectorAll("#ws [data-tool]")).filter(function(c){ return c.checked; }).map(function(c){ return c.dataset.tool; }); }

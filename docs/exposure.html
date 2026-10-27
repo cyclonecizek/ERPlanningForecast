@@ -109,6 +109,7 @@ main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .esrow[hidden]{ display:none; }
 .tplrow{ padding-bottom:12px; border-bottom:1px solid var(--rule-2); }
 .tplrow .sp{ flex:1; }
+.schinfo{ flex-basis:100%; font-size:12px; }
 .tplrow select,.tplrow input{ border:1px solid var(--rule); border-radius:7px; padding:6px 8px; background:var(--panel); }
 .tplrow select{ min-width:240px; }
 .tplsave{ display:inline-flex; gap:6px; align-items:center; }
@@ -406,6 +407,16 @@ document.addEventListener("DOMContentLoaded", function(){
       <button class="btn ghost" type="button" id="tplExport" title="Download your templates to share with other forecasters">Export</button>
       <span class="btn ghost fileb">Import<input type="file" id="tplImport" accept=".json,application/json" aria-label="Import templates"></span>
     </div>
+    <div class="esrow tplrow schrow">
+      <strong>Official schedule</strong>
+      <label class="tplsel"><select id="schSel" aria-label="Scheduled ground operations"><option value="">No scheduled operations loaded</option></select></label>
+      <button class="btn" type="button" id="schUse">Use</button>
+      <span class="btn ghost fileb">Upload schedule CSV<input type="file" id="schFile" accept=".csv,text/csv" aria-label="Upload the official schedule"></span>
+      <button class="btn ghost" type="button" id="schTpl" title="A blank CSV with the columns the schedule needs">CSV template</button>
+      <button class="btn ghost" type="button" id="schClear" hidden>Clear</button>
+      <span class="sp"></span><span class="mut">Kept on this computer only</span>
+      <span class="mut schinfo" id="schInfo"></span>
+    </div>
     <div class="esrow">
       <label class="grow">Operation <input id="expOp" placeholder="e.g. Crane lift, vehicle rollout, propellant load" autocomplete="off"></label>
       <label>Start <input type="datetime-local" id="expStart"></label>
@@ -526,6 +537,6 @@ document.addEventListener("DOMContentLoaded", function(){
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "exposure";</script>
 <script src="guidance.js?v=e1f10fcf42"></script>
-<script src="planning-app.js?v=b422d025e6"></script>
+<script src="planning-app.js?v=3187625171"></script>
 </body>
 </html>

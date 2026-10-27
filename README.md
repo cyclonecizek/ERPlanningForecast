@@ -170,6 +170,43 @@ amber, ↺ to go back). Additional risk criteria can be switched off or added:
 
 Export as PDF, HTML, Excel or CSV.
 
+## Official schedule (exposure and LMEF)
+Upload a CSV of official mission dates and times, which may not be public yet. One file serves both
+pages: `ground` rows appear under **Official schedule** on the exposure page (Use sets the
+operation name, point, start and end, and applies the saved template named in the `template`
+column), and `launch` rows appear first in the LMEF mission list (with their backup window and
+liftoff limit if given). **CSV template** downloads the columns:
+`type, name, vehicle, location, start, end, time_zone, backup_start, backup_end, template,
+liftoff_limit_kt, lat, lon, notes`. Times are `YYYY-MM-DD HH:MM` or `MM/DD/YYYY HH:MM`, local to the
+Cape unless `time_zone` is `Z`. The range schedule export is also read as-is (`Operation_ID, LSP_Name, Op_Name, JON,
+OpStartDate_Z, OpStartTime_Z, OpEndDate_Z, OpEndTime_Z, Location, OpNumber, InfoCreated, LastModified,
+Op_Comments`): times are Zulu, a newer `LastModified` for the same `Operation_ID` replaces the old row,
+and when `Location` is only the range (`ER`) the pad is taken from the operation name or comments if
+named there. Files named for launch or non-launch ops set the kind; otherwise the page you upload on
+decides (exposure: ground, LMEF: launch). The schedule is kept only in that browser (and in workspace files),
+and `.gitignore` blocks schedule CSVs from the repository.
+
+## LMEF PDF format
+**PDF format** next to Download PDF chooses the **Legacy** layout (the one-page portrait 45 WS LMEF,
+the default) or the **New** layout. The legacy header can carry a seal on the left: choose an image
+once and it is kept on that computer.
+
+## LMEF CSV export (for databases)
+**CSV** on the LMEF page downloads two tables that join on `forecast_id`
+(`<mission slug>_<issued, YYYYMMDDTHHMMSSZ>`). Both use a fixed set of snake_case columns, so every
+file loads into the same table; times are ISO 8601 UTC (`2026-10-27T21:00:00Z`); numbers carry no
+units (units are in the column names); unknown values are empty; booleans are `true`/`false`; UTF-8,
+comma-separated, CRLF line ends, text quoted only when needed. `format_version` is `lmef-csv-1`.
+* `<file>_windows.csv`: one row per window. Mission, vehicle, pad, issue time, forecaster, window
+  index and key (`launch_day`, `24_hour_delay`, ...), open and close, `pov_pct`, up to three primary
+  concerns, weather, `visibility_mi`, `temperature_f`, `relative_humidity_pct`, liftoff wind direction
+  and min/max in mph and kt, three cloud layers (type, coverage, base and tops in ft), the three standard
+  risk criteria (empty when turned off) plus `risk_custom` ("name: level; ..."), the liftoff
+  constraint, the flight-through-precipitation flag, next forecast and the discussion.
+* `<file>_hourly.csv`: one row per hour of each window: `pov_pct`, every rule's probability
+  (`lightning_rule_pct`, ..., `flight_through_precipitation_pct`, `liftoff_winds_pct`; empty when a
+  rule doesn't apply), temperature, dew point, precipitation and lightning chances, and 200 ft wind.
+
 ## Consistent forecasts across points (planning page)
 An edit at one point carries to the others: each other point gets the same adjustment (official
 minus guidance) on top of its own guidance, so the differences the guidance expects between points

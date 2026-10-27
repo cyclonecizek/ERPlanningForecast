@@ -271,7 +271,8 @@ function productHTML(logo){
     </footer>
   </div>`;
 }
-const LM_CSS = `.lm{font-family:"Barlow","Segoe UI",Arial,sans-serif;color:#13202E;background:#fff;max-width:900px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 1px 0 #D4DBDF}
+const LM_CSS = `.schline{margin:-4px 0 4px;font-size:12px}.schline .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.schline .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}.pdffmt{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2)}.pdffmt select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}.sealrow{margin:6px 0 0;text-align:right}.sealrow .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.sealrow .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.lm{font-family:"Barlow","Segoe UI",Arial,sans-serif;color:#13202E;background:#fff;max-width:900px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 1px 0 #D4DBDF}
 .lm-head{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;padding:20px 24px;background:linear-gradient(120deg,#0B1D33 0%,#123457 60%,#1C4A73 100%);color:#fff}
 .lm-head img{height:92px;width:auto;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
 .lm-kicker{margin:0;font:600 12px/1 "Barlow Condensed","Arial Narrow",sans-serif;letter-spacing:1.6px;text-transform:uppercase;color:#FBB940}
@@ -313,10 +314,75 @@ function fieldRows(){
   out.push(["Next forecast will be issued", L.next]);
   return out;
 }
-function csvLMEF(){
-  const q = v => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-  return ["field,value", ...fieldRows().map(r => r.map(q).join(","))].join("\r\n") + "\r\n";
+/* ---------- database-ready CSV ----------
+   Two tidy tables sharing forecast_id: one row per window, and one row per hour of each window.
+   Fixed snake_case columns, ISO 8601 UTC times, plain numbers without units, empty for unknown. */
+const LMEF_CSV_VERSION = "lmef-csv-1";
+const csvq = v => { if (v == null || (typeof v === "number" && !isFinite(v))) return ""; const t = String(v); return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+const isoZ = ms => ms == null || !isFinite(ms) ? "" : new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+const slug = t => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+const numIn = t => { const m = String(t ?? "").replace(/,/g, "").match(/-?\d+(\.\d+)?/); return m ? +m[0] : null; };
+function forecastId(){ return `${slug(L.mission || "mission")}_${isoZ(L.issued || Date.now()).replace(/[-:]/g, "")}`; }
+function windowKey(i){ return i === 0 ? "launch_day" : slug(winLabel(i)); }
+function parseWind(t){
+  /* "120° 10 - 25 mph" (or an override in kt) into direction and speeds in mph and kt */
+  const s2 = String(t || ""), m = s2.match(/(\d{1,3})\s*°?\s+(\d+)\s*(?:-|–|to)\s*(\d+)\s*(mph|kt|kts|knots)?/i);
+  if (!m) return { dir:null, lo:null, hi:null };
+  const toMph = /kt|knot/i.test(m[4] || "") ? 1/0.868976 : 1;
+  return { dir:+m[1], lo:Math.round(+m[2]*toMph), hi:Math.round(+m[3]*toMph) };
 }
+function csvLMEFWindows(){
+  /* the schema is fixed so every file loads into the same table: the standard risk criteria always
+     have a column (empty when off), and custom criteria share one "name: level" column */
+  const pad = PADS.find(p => p.id === L.pad) || PADS[2], rk = risksOn(), lim = L.liftoff || {};
+  const STD = [["shear","risk_upper_level_wind_shear"], ["recovery","risk_booster_recovery_weather"], ["proton","risk_proton_flux"]];
+  const head = ["forecast_id","format_version","mission","vehicle","pad_id","pad_name","issued_utc","forecaster","window_index","window_key","window_open_utc","window_close_utc",
+    "pov_pct","primary_concern_1","primary_concern_2","primary_concern_3","weather","visibility_mi","temperature_f","relative_humidity_pct",
+    "liftoff_wind_height_ft","liftoff_wind_dir_deg","liftoff_wind_min_mph","liftoff_wind_max_mph","liftoff_wind_min_kt","liftoff_wind_max_kt",
+    ...[1, 2, 3].flatMap(n => [`cloud${n}_type`, `cloud${n}_coverage`, `cloud${n}_base_ft`, `cloud${n}_tops_ft`]),
+    ...STD.map(x => x[1]), "risk_custom",
+    "liftoff_constraint_height_ft","liftoff_constraint_kind","liftoff_constraint_operator","liftoff_constraint_value","liftoff_constraint_unit","flight_through_precip_constraint",
+    "next_forecast","discussion"];
+  const rows = (L.windows || []).map((w, i) => {
+    const D = dayData(i), con = String(D.concerns || "").split(/\s*,\s*/).filter(c => c && c !== "None");
+    const wd = parseWind(D.wind), clouds = (D.clouds || []).filter(c => c.type && c.type !== "None");
+    const vals = {
+      forecast_id: forecastId(), format_version: LMEF_CSV_VERSION, mission: L.mission, vehicle: L.vehicle, pad_id: pad.name, pad_name: pad.full,
+      issued_utc: isoZ(L.issued || Date.now()), forecaster: (prefs.initials || "").toUpperCase(), window_index: i, window_key: windowKey(i),
+      window_open_utc: isoZ(w.a), window_close_utc: isoZ(w.b),
+      pov_pct: D.pov == null || D.past ? null : numIn(D.pov), primary_concern_1: con[0], primary_concern_2: con[1], primary_concern_3: con[2],
+      weather: D.wx, visibility_mi: numIn(D.vis), temperature_f: numIn(D.temp), relative_humidity_pct: numIn(D.rh),
+      liftoff_wind_height_ft: lim.h || 200, liftoff_wind_dir_deg: wd.dir, liftoff_wind_min_mph: wd.lo, liftoff_wind_max_mph: wd.hi,
+      liftoff_wind_min_kt: wd.lo == null ? null : Math.round(wd.lo*0.868976), liftoff_wind_max_kt: wd.hi == null ? null : Math.round(wd.hi*0.868976),
+      liftoff_constraint_height_ft: lim.h, liftoff_constraint_kind: lim.kind, liftoff_constraint_operator: lim.op, liftoff_constraint_value: lim.v, liftoff_constraint_unit: lim.unit,
+      flight_through_precip_constraint: L.ftp ? "true" : "false", next_forecast: L.next || "As Required", discussion: L.discussion,
+    };
+    [1, 2, 3].forEach(n => { const c = clouds[n - 1] || {}; vals[`cloud${n}_type`] = c.type; vals[`cloud${n}_coverage`] = c.cov; vals[`cloud${n}_base_ft`] = c.base; vals[`cloud${n}_tops_ft`] = c.tops; });
+    STD.forEach(([id, c]) => { vals[c] = rk.some(r => r.id === id) ? ((D.risk || {})[id] || "Low") : null; });
+    vals.risk_custom = rk.filter(r => !STD.some(x => x[0] === r.id)).map(r => `${r.name}: ${(D.risk || {})[r.id] || "Low"}`).join("; ") || null;
+    return head.map(h => csvq(vals[h])).join(",");
+  });
+  return [head.join(","), ...rows].join("\r\n") + "\r\n";
+}
+function csvLMEFHourly(){
+  /* every rule always has a column (empty when it doesn't apply, e.g. flight through precipitation) */
+  const sid = SITES[0].id, OFs = officialFor(sid), o = OFs.o, rules = [...RULES.map(r => r.k), "rftp", "xlw"];
+  const head = ["forecast_id","window_index","window_key","valid_start_utc","valid_end_utc","pov_pct", ...rules.map(k => `${slug(CONCERN_NAMES[k])}_pct`),
+    "temperature_f","dewpoint_f","precip_prob_pct","lightning_prob_pct","wind_dir_deg","wind_200ft_sust_kt","wind_200ft_peak_kt"];
+  const out = [head.join(",")], id = forecastId(), r0 = v => v == null ? null : Math.round(v);
+  (L.windows || []).forEach((w, i) => {
+    S.rows.forEach((r, ri) => {
+      if (!(r.b > w.a && r.a < w.b)) return;
+      const vals = { forecast_id:id, window_index:i, window_key:windowKey(i), valid_start_utc:isoZ(Math.max(r.a, w.a)), valid_end_utc:isoZ(Math.min(r.b, w.b)),
+        pov_pct: r0(o.rpov && o.rpov[ri]), temperature_f: r0(o.t && o.t[ri]), dewpoint_f: r0(o.td && o.td[ri]), precip_prob_pct: r0(o.pp1 && o.pp1[ri]), lightning_prob_pct: r0(o.lt1 && o.lt1[ri]),
+        wind_dir_deg: r0(o.dir && o.dir[ri]), wind_200ft_sust_kt: r0(o.s200 && o.s200[ri]), wind_200ft_peak_kt: r0(o.g200 && o.g200[ri]) };
+      rules.forEach(k => vals[`${slug(CONCERN_NAMES[k])}_pct`] = P[k] ? r0(o[k] && o[k][ri]) : null);
+      out.push(head.map(h => csvq(vals[h])).join(","));
+    });
+  });
+  return out.join("\r\n") + "\r\n";
+}
+function csvLMEF(){ return csvLMEFWindows(); }
 function xlsxLMEF(logo){
   const rows = [], merges = [], heights = {};
   rows.push([{ v:"Launch Mission Execution Forecast", s:1 }]); heights[0] = 24; merges.push("A1:C1");
@@ -404,6 +470,99 @@ function pdfLMEF(logo){
   pages.push(cs);
   return pdfAssemble(pages.map(p => p.join("\n")), logo, W, Hp);
 }
+/* ---------- legacy-format PDF: the one-page portrait 45 WS LMEF layout ---------- */
+const FAQ_URL = "https://45thweathersquadron.nebula.spaceforce.mil/pages/launchForecastSupport.html";
+function legacyTimes(a, b){
+  const p = lp(a), z = t => new Date(t).toISOString().slice(11, 16).replace(":", "");
+  if (b == null) return `${p.d} ${MON[p.mo - 1]} ${p.y} / ${lHM(a)}L (${z(a)}Z)`;
+  return `${p.d} ${MON[p.mo - 1]} ${p.y} / ${lHM(a)} – ${lHM(b)}L (${z(a)} – ${z(b)}Z)`;
+}
+function pdfLMEFLegacy(logo, seal){
+  const W = 612, Hp = 792, X0 = 16, X1 = 596, pages = []; let cs = [];
+  const f = n => (+n).toFixed(2), rgbf = c => c.map(x => f(x/255)).join(" ");
+  const BLACK = [0,0,0], DARK = [171,183,198], LIGHT = [213,219,227];
+  const rect = (x, y, w, h, fill) => cs.push(`${rgbf(fill)} rg ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re f`);
+  const box = (x, y, w, h, lw) => cs.push(`0 0 0 RG ${f(lw || .8)} w ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re S`);
+  const line = (x1, y1, x2, y2, lw, dash) => cs.push(`0 0 0 RG ${f(lw || .8)} w ${dash ? "[1.5 1.5] 0 d " : ""}${f(x1)} ${f(Hp - y1)} m ${f(x2)} ${f(Hp - y2)} l S${dash ? " [] 0 d" : ""}`);
+  const FONT = { r:"F1", b:"F2", i:"F3", bi:"F4" };
+  const tw = (s2, size, st) => textW(s2, size, st === "b" || st === "bi");
+  const text = (s2, x, y, size, st, align) => { const w = tw(s2, size, st); const tx = align === "c" ? x - w/2 : align === "r" ? x - w : x; cs.push(`BT 0 0 0 rg /${FONT[st || "r"]} ${f(size)} Tf ${f(tx)} ${f(Hp - y)} Td ${pdfStr(s2)} Tj ET`); return w; };
+  const vtext = (s2, cx, cy, size) => { const w = tw(s2, size, "b"); cs.push(`BT 0 0 0 rg /F2 ${f(size)} Tf 0 1 -1 0 ${f(cx + size*0.35)} ${f(Hp - cy - w/2)} Tm ${pdfStr(s2)} Tj ET`); };
+  const wrap = (s2, first, rest, size, st) => { const out = []; let ln = "", lim = first; for (const w of String(s2 || "").split(/\s+/).filter(Boolean)){ const t = ln ? ln + " " + w : w; if (tw(t, size, st) > lim && ln){ out.push(ln); ln = w; lim = rest; } else ln = t; } if (ln) out.push(ln); return out; };
+  const pad = PADS.find(p => p.id === L.pad) || PADS[2], W0 = (L.windows || [])[0] || {};
+  const rk = risksOn(), links = [];
+  /* header */
+  const header = cont => {
+    const hh = cont ? 44 : 100; box(X0, 16, X1 - X0, hh);
+    const ih = cont ? 34 : 86;
+    if (seal) { const sw = ih*seal.rw/seal.rh; cs.push(`q ${f(sw)} 0 0 ${f(ih)} ${f(X0 + 8)} ${f(Hp - 16 - (hh - ih)/2 - ih)} cm /Im2 Do Q`); }
+    if (logo) { const lw2 = ih*logo.rw/logo.rh; cs.push(`q ${f(lw2)} 0 0 ${f(ih)} ${f(X1 - 8 - lw2)} ${f(Hp - 16 - (hh - ih)/2 - ih)} cm /Im1 Do Q`); }
+    const tx = seal ? X0 + 132 : X0 + 14;
+    if (cont){ text(`Launch Mission Execution Forecast: ${L.mission || ""} (continued)`, tx, 43, 13, "b"); return 16 + hh; }
+    text("Launch Mission Execution Forecast", tx, 42, 17, "b");
+    [["Mission", L.mission || ""], ["Issued", legacyTimes(L.issued || Date.now())], ["Valid", W0.a ? legacyTimes(W0.a, W0.b) : ""]].forEach(([k, v], n) => { text(`${k}:`, tx, 60 + n*15, 11, "b"); text(v, tx + 62, 60 + n*15, 11); });
+    return 16 + hh;
+  };
+  let y = header(false);
+  /* forecast discussion */
+  { const lab = "Forecast Discussion: ", lw0 = tw(lab, 10.5, "b"), lines = wrap(L.discussion || "", X1 - X0 - 12 - lw0, X1 - X0 - 12, 10.5);
+    const h = Math.max(22, 10 + lines.length*13); box(X0, y, X1 - X0, h);
+    text(lab, X0 + 6, y + 14, 10.5, "b"); lines.forEach((ln, k) => text(ln, X0 + 6 + (k ? 0 : lw0 + 3), y + 14 + k*13, 10.5)); y += h; }
+  /* one section per window */
+  const LW = 30, XL = X0 + LW, XR = rk.length ? X1 - 170 : X1, XCL = XL + 186;
+  const fit = (s2, maxW, size, st) => { let z = size; while (z > 6 && tw(s2, z, st) > maxW) z -= 0.25; return z; };
+  const title = s2 => s2.replace(/\b([a-z])/g, c => c.toUpperCase());
+  (L.windows || []).forEach((w, i) => {
+    const D = dayData(i), secH = 20 + 34 + 20 + 74, fill = i === 0 ? DARK : LIGHT;
+    if (y + secH > Hp - 16 - 72){ pages.push(cs); cs = []; y = header(true); }
+    rect(X0, y, LW, secH, fill); box(X0, y, LW, secH); vtext(i === 0 ? "Launch Day" : title(winLabel(i)), X0 + LW/2, y + secH/2, 15);
+    /* PoV header */
+    rect(XL, y, X1 - XL, 20, fill); box(XL, y, X1 - XL, 20);
+    const t1 = "Probability of Violating Weather Constraints", w1 = tw(t1, 11.5, "b"); text(t1, (XL + X1)/2, y + 14.5, 11.5, "b", "c"); if (i === 0) text("1", (XL + X1)/2 + w1/2 + 3, y + 9.5, 7, "b");
+    y += 20;
+    box(XL, y, 62, 34); box(XL + 62, y, X1 - XL - 62, 34);
+    text(D.past ? "-" : `${D.pov ?? "-"}%`, XL + 31, y + 23, 18, "b", "c");
+    const pcw = text("Primary Concerns:", XL + 70, y + 21, 10.5, "b");
+    const ctext = String(D.concerns || "None").split(/\s*,\s*/).join(", ");
+    text(ctext, XL + 70 + pcw + 6, y + 21, fit(ctext, X1 - XL - 84 - pcw, 10.5, "r")); y += 34;
+    /* sub-headers */
+    rect(XL, y, X1 - XL, 20, fill); box(XL, y, XR - XL, 20); text("Weather Conditions", (XL + XR)/2, y + 14.5, 11.5, "b", "c");
+    if (rk.length){ box(XR, y, X1 - XR, 20); const t2 = "Additional Risk Criteria", w2 = tw(t2, 11.5, "b"); text(t2, (XR + X1)/2, y + 14.5, 11.5, "b", "c"); if (i === 0) text("2", (XR + X1)/2 + w2/2 + 3, y + 9.5, 7, "b"); }
+    y += 20;
+    const bh = 74; box(XL, y, XR - XL, bh); if (rk.length) box(XR, y, X1 - XR, bh);
+    line(XCL, y + 3, XCL, y + bh - 3, .6, true);
+    const lift = `Liftoff Winds (${(L.liftoff && L.liftoff.h) || 200}’)`;
+    [["Weather/Visibility", `${D.wx || "-"} / ${D.vis || "-"}`], ["Temp/Humidity", `${D.temp || "-"} / ${D.rh || "-"}`], [lift, D.wind || "-"]].forEach(([k, v], n) => {
+      const yy = y + 16 + n*24; text(k + ":", XL + 6, yy, 9.5, "b"); text(v, XL + 102, yy, fit(v, XCL - XL - 108, 9.5, "r"));
+    });
+    /* clouds */
+    text("Clouds", (XCL + XR)/2, y + 11, 9.5, "b", "c");
+    const cx = [XCL + 6, XCL + 66, XCL + 118, XCL + 158];
+    ["Type", "Coverage", "Base (ft)", "Tops (ft)"].forEach((h, k) => text(h, cx[k], y + 22, 7.5));
+    (D.clouds || []).slice(0, 3).forEach((c, r) => { const yy = y + 37 + r*13; [c.type || "", c.cov || "", c.base ? Number(c.base).toLocaleString("en-US") : "", c.tops ? Number(c.tops).toLocaleString("en-US") : ""].forEach((v, k) => text(String(v), cx[k], yy, fit(String(v), (cx[k + 1] || XR - 2) - cx[k] - 4, 9.5, "r"))); });
+    /* additional risk criteria */
+    const rvx = Math.min(X1 - 44, XR + 10 + Math.max(0, ...rk.slice(0, 3).map(r => tw(r.name + ":", 9.5, "b"))));
+    rk.slice(0, 3).forEach((r, n) => { const yy = y + 16 + n*24, nm = r.name + ":"; text(nm, XR + 6, yy, fit(nm, rvx - XR - 12, 9.5, "b"), "b"); text((D.risk || {})[r.id] || "Low", rvx, yy, 9.5); });
+    y += bh;
+  });
+  /* notes and next forecast */
+  if (y + 72 > Hp - 16){ pages.push(cs); cs = []; y = header(true); }
+  const nh = 48; box(X0, y, LW, nh); box(XL, y, X1 - XL, nh); vtext("Notes", X0 + LW/2, y + nh/2, 13);
+  text("1.", XL + 10, y + 12, 7.5, "i"); text("The Probability of Violation (PoV) is the chance of a local safety or customer constraint violation occurring any random time during the launch window.", XL + 22, y + 12, 7.5, "i");
+  if (rk.length){ text("2.", XL + 10, y + 22, 7.5, "i"); text("Additional Risk Criteria, which are not included in the PoV, are mission-specific constraints that may not include all phenomena within each risk factor.", XL + 22, y + 22, 7.5, "i"); }
+  { const a = "See Launch FAQ ", b = " for more information", wa = tw(a, 7.5, "bi"), wu = tw(FAQ_URL, 7.5, "r"), wb = tw(b, 7.5, "bi"), x0 = (XL + X1)/2 - (wa + wu + wb)/2, yy = y + 33;
+    text(a, x0, yy, 7.5, "bi"); cs.push(`BT 0.02 0.27 0.8 rg /F1 7.5 Tf ${f(x0 + wa)} ${f(Hp - yy)} Td ${pdfStr(FAQ_URL)} Tj ET`); line(x0 + wa, yy + 1, x0 + wa + wu, yy + 1, .4); text(b, x0 + wa + wu, yy, 7.5, "bi");
+    links.push({ page: pages.length, x: x0 + wa, y: yy - 7, w: wu, h: 9, url: FAQ_URL }); }
+  y += nh;
+  box(X0, y, 178, 22); box(X0 + 178, y, X1 - X0 - 178, 22);
+  text("Next Forecast Will Be Issued", X0 + 6, y + 15, 10.5, "b"); text(L.next || "As Required", X0 + 184, y + 15, 10.5);
+  pages.push(cs);
+  return pdfAssemble(pages.map(p => p.join("\n")), logo, W, Hp, { image2: seal || null, links });
+}
+/* optional seal for the left of the legacy header, kept on this computer */
+async function loadSeal(){
+  try { const d = localStorage.getItem("lmef:seal"); if (!d) return null; const bin = atob(d.split(",")[1]); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return await decodeImage(u, d.slice(5, d.indexOf(";"))); } catch (e) { return null; }
+}
 function htmlLMEF(logo){
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LMEF ${hesc(L.mission || "")}</title><link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet"><style>body{margin:0;padding:24px;background:#EEF2F4}${LM_CSS}@media print{body{background:#fff;padding:0}.lm{box-shadow:none}}</style></head><body>${productHTML(logo)}</body></html>`;
 }
@@ -417,6 +576,7 @@ const SETUP_HTML = `
       <h3>Mission</h3>
       <div class="edgrid">
         <label class="wide">Upcoming Space Coast launch <select id="lmMission"><option>Loading</option></select></label>
+        <p class="wide mut schline">Official schedule: <span class="btn ghost fileb sm">Upload CSV<input type="file" id="lmSchFile" accept=".csv,text/csv"></span> <button type="button" class="lnk" id="lmSchTpl">CSV template</button> <button type="button" class="lnk" id="lmSchClear" hidden>clear</button> <span id="lmSchNote">launches you upload appear first in the list, kept on this computer only</span></p>
         <label class="wide">Mission name <input id="lmName" autocomplete="off"></label>
         <label>Vehicle <input id="lmVeh" list="lmVehList" autocomplete="off"></label>
         <label>Pad <select id="lmPad"></select></label>
@@ -443,7 +603,8 @@ const SETUP_HTML = `
 const PRODUCT_HTML = `
 <section class="panel lmprod" id="lmProduct" aria-label="LMEF product">
   <div class="lmprodhead"><h2>LMEF product</h2><span class="mut">Built from the forecast above. Type in a field to override it for the product; ↺ goes back to the forecast.</span>
-    <div class="actions"><button class="btn" id="lmCsv">CSV</button><button class="btn" id="lmXlsx">Excel</button><button class="btn" id="lmHtml">HTML</button><button class="btn primary" id="lmPdf">Download PDF</button></div></div>
+    <div class="actions"><button class="btn" id="lmCsv">CSV</button><button class="btn" id="lmXlsx">Excel</button><button class="btn" id="lmHtml">HTML</button><label class="pdffmt">PDF format <select id="lmPdfFmt"><option value="legacy">Legacy</option><option value="modern">New</option></select></label><button class="btn primary" id="lmPdf">Download PDF</button></div>
+    <p class="mut sealrow" id="lmSealRow">Legacy header seal: <span id="lmSealState">none</span> <span class="btn ghost fileb sm">Choose image<input type="file" id="lmSeal" accept="image/png,image/jpeg"></span> <button type="button" class="lnk" id="lmSealClear" hidden>remove</button></p></div>
   <div class="lmprodgrid">
     <div class="lmed">
       <h3>Forecast discussion <button type="button" class="lnk" id="lmDiscReset">redraft from the forecast</button></h3>
@@ -469,7 +630,23 @@ function mountPanels(){
   document.querySelectorAll('.pagenav a[data-page="lmef"]').forEach(a => a.setAttribute("aria-current", "page"));
 }
 function lmRenderStatus(){ /* the editor's status line covers guidance loading */ }
+/* launches from the uploaded official schedule, ahead of the public list */
+function schedLaunches(){
+  return loadSched().filter(x => x.type === "launch" && x.b > Date.now() - 6*H).map(x => {
+    const pad = PADS.find(p => normLoc(p.name) === normLoc(x.location) || p.match.test(x.location || ""));
+    return { id:x.id, name:x.name, vehicle:x.vehicle || x.provider || "", pad: pad ? pad.id : null, padName:x.location || "", net:x.a, w0:x.a, w1:x.b, backup:x.backup, limit:x.limit, official:true, status:"Official" };
+  });
+}
+function allMissions(){ return [...(SX.official || []), ...(SX.launches || [])]; }
 function renderMissions(){
+  SX.official = schedLaunches();
+  const off = SX.official;
+  if ($("lmSchClear")) $("lmSchClear").hidden = !loadSched().some(x => x.type === "launch");
+  const optOf = x => `<option value="${hesc(x.id)}" ${x.id === L.missionId ? "selected" : ""}>${hesc(lDate(x.net))} ${lHM(x.net)}L · ${x.vehicle ? hesc(x.vehicle) + " · " : ""}${hesc(x.name)}${x.pad ? "" : " (pad not listed)"}</option>`;
+  if (off.length){
+    $("lmMission").innerHTML = `<option value="">Custom mission (type the details)</option><optgroup label="Official schedule (uploaded)">${off.map(optOf).join("")}</optgroup>` + (SX.launches.length ? `<optgroup label="Public launch list">${SX.launches.map(optOf).join("")}</optgroup>` : "");
+    return;
+  }
   if (!SX.launches.length){ $("lmMission").innerHTML = `<option value="">No launch list yet. Run the planning MOS workflow, or type the mission below</option>`; return; }
   $("lmMission").innerHTML = `<option value="">Custom mission (type the details)</option>` + SX.launches.map(x => `<option value="${hesc(x.id)}" ${x.id === L.missionId ? "selected" : ""}>${hesc(lDate(x.net))} ${lHM(x.net)}L · ${hesc(x.vehicle)} · ${hesc(x.name)}${x.pad ? "" : " (pad not listed)"}</option>`).join("");
 }
@@ -533,11 +710,13 @@ function reconfigure(full){
   refreshProduct();
 }
 function pickMission(id){
-  const x = SX.launches.find(l => l.id === id); L.missionId = id || "";
+  const x = allMissions().find(l => l.id === id); L.missionId = id || "";
   if (x){
     L.mission = x.name; L.vehicle = x.vehicle; if (x.pad) L.pad = x.pad;
     const b = Math.max(x.w1, x.w0);
-    L.windows = [{ a:x.w0, b }, { a:x.w0 + 24*H, b:b + 24*H }];
+    L.windows = [{ a:x.w0, b }, x.backup ? { a:x.backup.a, b:Math.max(x.backup.a, x.backup.b) } : { a:x.w0 + 24*H, b:b + 24*H }];
+    if (x.limit){ L.liftoff = Object.assign(L.liftoff || {}, { v:x.limit, unit:"kt" }); }
+    if (x.official && !x.pad) setTimeout(() => toast(`${x.name}: the schedule gives no pad, so check the pad below`), 1500);
     /* the liftoff wind constraint stays as the forecaster set it */
     L.days = []; L.discussionEdited = false;
   }
@@ -607,10 +786,29 @@ function bindLM(){
   });
   const stamp = () => { const p = lp(Date.now()); return `${p.y}${lpad(p.mo)}${lpad(p.d)}_${lpad(p.h)}${lpad(p.mi)}`; };
   const base = () => `LMEF_${(L.mission || "Mission").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}_${stamp()}`;
-  $("lmPdf").onclick = async () => download(pdfLMEF(await loadLogo()), base() + ".pdf");
+  $("lmSchFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) schedUpload(f, () => { renderMissions(); const n = SX.official.find(x => x.w1 > Date.now()); if (n && !String(L.missionId || "").startsWith("sched:")){ $("lmMission").value = n.id; pickMission(n.id); } }, "launch"); };
+  $("lmSchTpl").onclick = () => download(new Blob([SCHED_TEMPLATE], { type:"text/csv" }), "Official_Schedule_template.csv");
+  $("lmSchClear").onclick = () => { if (!confirm("Remove the official launches stored on this computer?")) return; saveSched(loadSched().filter(x => x.type !== "launch")); renderMissions(); };
+  $("lmPdfFmt").value = L.pdfFmt || "legacy";
+  $("lmPdfFmt").onchange = e => { L.pdfFmt = e.target.value; saveL(); showSealRow(); };
+  $("lmPdf").onclick = async () => { const logo = await loadLogo(); download((L.pdfFmt || "legacy") === "legacy" ? pdfLMEFLegacy(logo, await loadSeal()) : pdfLMEF(logo), base() + ".pdf"); };
+  const showSealRow = () => { $("lmSealRow").hidden = (L.pdfFmt || "legacy") !== "legacy"; const has = !!localStorage.getItem("lmef:seal"); $("lmSealState").textContent = has ? "set (on the left of the header)" : "none"; $("lmSealClear").hidden = !has; };
+  $("lmSeal").onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+    if (f.size > 1.5e6){ toast("Use an image under 1.5 MB"); return; }
+    const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
+    try { localStorage.setItem("lmef:seal", url); toast("Seal saved on this computer for the legacy PDF"); } catch (err) { toast("Couldn't save the image (browser storage is full)"); }
+    showSealRow();
+  };
+  $("lmSealClear").onclick = () => { localStorage.removeItem("lmef:seal"); showSealRow(); };
+  showSealRow();
   $("lmHtml").onclick = async () => download(new Blob([htmlLMEF(await loadLogo())], { type:"text/html" }), base() + ".html");
   $("lmXlsx").onclick = async () => download(xlsxLMEF(await loadLogo()), base() + ".xlsx");
-  $("lmCsv").onclick = () => download(new Blob([csvLMEF()], { type:"text/csv" }), base() + ".csv");
+  $("lmCsv").onclick = () => {
+    download(new Blob([csvLMEFWindows()], { type:"text/csv;charset=utf-8" }), base() + "_windows.csv");
+    setTimeout(() => download(new Blob([csvLMEFHourly()], { type:"text/csv;charset=utf-8" }), base() + "_hourly.csv"), 400);
+    toast("Downloaded two CSV tables: windows and hourly, joined by forecast_id");
+  };
   $("lmPad").innerHTML = PADS.map(p => `<option value="${p.id}">${p.name} (${p.full})</option>`).join("");
   $("lmConcernList").innerHTML = [...Object.values(CONCERN_NAMES), "None"].map(c => `<option value="${c}">`).join("");
 }
@@ -628,7 +826,7 @@ async function initLM(){
   /* first visit, or the saved launch has already gone: start from the next launch */
   const stale = !(L.windows || []).some(w => w.b > Date.now());
   if ((!L.missionId && !L.mission) || stale){
-    const next = SX.launches.find(x => x.w1 > Date.now());
+    const next = allMissions().find(x => x.w1 > Date.now());
     if (next){ if (stale && L.mission) toast(`The saved windows had passed, so this opened on the next launch: ${next.name}`); $("lmMission").value = next.id; pickMission(next.id); }
     else if (stale){ const t = Math.ceil(Date.now()/H)*H + 26*H; L.windows = [{ a:t, b:t + 4*H }, { a:t + 24*H, b:t + 28*H }]; L.days = []; L.missionId = ""; toast("The saved windows had passed; set the mission and windows for the next launch"); reconfigure(false); }
   }
