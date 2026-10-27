@@ -170,6 +170,24 @@ amber, ↺ to go back). Additional risk criteria can be switched off or added:
 
 Export as PDF, HTML, Excel or CSV.
 
+## Burn forecasts
+`docs/burn.html` is an exposure-style page for prescribed burns. Points are a named burn unit
+(latitude and longitude) first, then the pads and airfields. Rows are hourly through the chosen
+window, winds default to mph, and the page fetches extra model fields: boundary-layer height,
+950/850 hPa temperature and humidity, and winds and heights at 975-800 hPa.
+* **Rows:** sky, temperature, dew point, relative humidity, precipitation and lightning chances,
+  20 ft sustained and peak wind and direction, mixing height (ft AGL), transport wind (vector mean
+  through the mixed layer) and direction, ventilation (m²/s), a dispersion index estimate
+  (ventilation / 200, scaled to the usual 1-100 categories), an LVORI estimate (from humidity, wind
+  and dispersion), and Haines (low elevation, 950-850 hPa). The estimates are labelled as such; check
+  them against the NWS fire weather forecast.
+* **Prescription:** criteria on humidity, temperature, 20 ft wind, wind direction sector, transport
+  wind, mixing height, dispersion, LVORI or Haines, each at least / at most a value. Each gets a
+  probability row, plus **All criteria** (the share of guidance members meeting every criterion in
+  the hour). The products state the prescription and the hours the official forecast is fully in
+  prescription. Prescriptions save as templates (kept separately from exposure templates) and
+  ground operations from the official schedule can be used here too.
+
 ## Official schedule (exposure and LMEF)
 Upload a CSV of official mission dates and times, which may not be public yet. One file serves both
 pages: `ground` rows appear under **Official schedule** on the exposure page (Use sets the

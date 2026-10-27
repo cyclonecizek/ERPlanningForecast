@@ -2,6 +2,7 @@
 /* where the mirrored data lives: this site, or the GitHub Pages copy when the tools run from a file */
 const DATA_BASE = (typeof window !== "undefined" && window.DATA_BASE) || "";
 const LOGO_SRC = (typeof window !== "undefined" && window.LOGO_SRC) || "45ws-logo.png";
+const SEAL_SRC = (typeof window !== "undefined" && window.SEAL_SRC) || "ussf-seal.png";
 /* ============================================================
    Daily Planning Forecast — KSC / CCSFS / Patrick SFB
    Guidance: Open-Meteo deterministic + ensemble models, IEM MOS
@@ -218,6 +219,7 @@ function deriveMember(m, n){
   m.wbgt = z();
   for (let i = 0; i < n; i++) m.wbgt[i] = wbgtF(m.t[i], m.td[i], m.sw[i], m.s10[i]);
   deriveHeights(m, n, true);
+  if (FIRE) deriveFire(m, n);
   return m;
 }
 /* sustained and peak wind at every height in HEIGHTS (ft) */
@@ -237,6 +239,51 @@ const OM_VARS_ENS = "temperature_2m,dew_point_2m,cloud_cover,precipitation,wind_
 const OM_MIN = "temperature_2m,dew_point_2m,cloud_cover,precipitation,wind_speed_10m,wind_direction_10m,wind_gusts_10m,shortwave_radiation";
 const VMAP = { cloud_cover_low:"cl", cloud_cover_mid:"cm", cloud_cover_high:"ch", pressure_msl:"slp", temperature_2m:"t", dew_point_2m:"td", cloud_cover:"sky", precipitation:"pr", precipitation_probability:"pp", wind_speed_10m:"s10", wind_direction_10m:"d10", wind_gusts_10m:"g10", wind_speed_80m:"s80", wind_direction_80m:"d80", visibility:"vis", shortwave_radiation:"sw" };
 
+/* ---------- fire weather (burn page) ----------
+   Mixing height from the models' boundary layer height; transport wind as the mean wind through the
+   mixed layer from the pressure levels; Haines (low elevation, 950-850 hPa); ventilation, a
+   dispersion index and LVORI as estimates from those. */
+const FIRE = typeof window !== "undefined" && window.PAGE === "burn";
+const PLEV = [975, 950, 925, 900, 850, 800];
+const FIRE_VARS = ["boundary_layer_height", "temperature_950hPa", "temperature_850hPa", "relative_humidity_950hPa", "relative_humidity_850hPa",
+  ...PLEV.flatMap(p => [`wind_speed_${p}hPa`, `wind_direction_${p}hPa`, `geopotential_height_${p}hPa`])].join(",");
+Object.assign(VMAP, { boundary_layer_height:"blh", temperature_950hPa:"t950", temperature_850hPa:"t850", relative_humidity_950hPa:"rh950", relative_humidity_850hPa:"rh850" },
+  ...PLEV.map(p => ({ [`wind_speed_${p}hPa`]: "ws" + p, [`wind_direction_${p}hPa`]: "wd" + p, [`geopotential_height_${p}hPa`]: "z" + p })));
+const FIRE_KEYS = ["rh","mixh","tw","vr","di","haines","lvori"];
+const fToC = f => (f - 32)*5/9;
+function deriveFire(m, n){
+  const z = () => new Array(n).fill(null);
+  FIRE_KEYS.forEach(k => m[k] = z()); m.twd = z();
+  for (let i = 0; i < n; i++){
+    const T = m.t[i], Td = m.td[i];
+    if (T != null && Td != null) m.rh[i] = rhFrom(T, Td);
+    const blh = m.blh ? m.blh[i] : null;
+    if (blh != null) m.mixh[i] = Math.max(0, blh*3.28084);
+    /* transport wind: vector mean of the levels inside the mixed layer (80 m when it is shallower) */
+    let u = 0, v = 0, nn = 0;
+    if (blh != null){
+      for (const p of PLEV){ const zz = m["z" + p] ? m["z" + p][i] : null, ws = m["ws" + p] ? m["ws" + p][i] : null, wd = m["wd" + p] ? m["wd" + p][i] : null; if (zz == null || ws == null || wd == null || zz > Math.max(blh, 150)) continue; u += -ws*Math.sin(wd*Math.PI/180); v += -ws*Math.cos(wd*Math.PI/180); nn++; }
+      if (!nn && m.s80[i] != null){ const wd = m.d80 && m.d80[i] != null ? m.d80[i] : m.d10[i]; if (wd != null){ u = -m.s80[i]*Math.sin(wd*Math.PI/180); v = -m.s80[i]*Math.cos(wd*Math.PI/180); nn = 1; } }
+    }
+    if (nn){ m.tw[i] = Math.hypot(u/nn, v/nn); m.twd[i] = (Math.atan2(-u/nn, -v/nn)*180/Math.PI + 360) % 360; }
+    /* ventilation (m2/s) and a dispersion index estimate scaled to the usual categories */
+    if (blh != null && m.tw[i] != null){ m.vr[i] = blh*m.tw[i]*0.514444; m.di[i] = Math.max(1, Math.round(m.vr[i]/200)); }
+    /* Haines, low elevation: stability 950-850 hPa, moisture at 850 hPa */
+    const t95 = m.t950 ? m.t950[i] : null, t85 = m.t850 ? m.t850[i] : null, rh85 = m.rh850 ? m.rh850[i] : null;
+    if (t95 != null && t85 != null && rh85 != null){
+      const A = fToC(t95) - fToC(t85), tc = fToC(t85), g = Math.log(Math.max(1, rh85)/100) + 17.625*tc/(243.04 + tc), td85 = 243.04*g/(17.625 - g), B = tc - td85;
+      m.haines[i] = (A < 4 ? 1 : A < 8 ? 2 : 3) + (B < 6 ? 1 : B < 10 ? 2 : 3);
+    }
+    /* LVORI estimate (1-10): rises with humidity, light wind and poor dispersion */
+    const rh = m.rh[i], ws = m.s10[i] != null ? m.s10[i]*1.150779*0.93 : null;
+    if (rh != null && ws != null){
+      let L = rh < 70 ? 1 : rh < 80 ? 2 : rh < 90 ? 3 : rh < 95 ? 5 : 7;
+      if (rh >= 70){ if (ws < 4) L += 2; else if (ws < 7) L += 1; if (m.di[i] != null && m.di[i] < 7) L += 1; }
+      m.lvori[i] = Math.min(10, L);
+    }
+  }
+  return m;
+}
 const VKEYS = Object.keys(VMAP).sort((a, b) => b.length - a.length);
 async function getJSON(url, ms){
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms || 30000);
@@ -251,8 +298,13 @@ function omURL(base, model, vars){
 async function fetchOM(src, ens, TL){
   const base = ens ? "https://ensemble-api.open-meteo.com/v1/ensemble" : "https://api.open-meteo.com/v1/forecast";
   let js;
-  try { js = await getJSON(omURL(base, src.model, ens ? OM_VARS_ENS : OM_VARS), 45000); }
-  catch (e){ if (e.status === 400) js = await getJSON(omURL(base, src.model, OM_MIN), 45000); else throw e; }
+  const vars = ens ? OM_VARS_ENS : OM_VARS;
+  try { js = await getJSON(omURL(base, src.model, FIRE ? vars + "," + FIRE_VARS : vars), 45000); }
+  catch (e){
+    if (e.status !== 400) throw e;
+    /* a model without some fire-weather fields: try without them, then the minimum set */
+    try { js = await getJSON(omURL(base, src.model, vars), 45000); } catch (e2){ if (e2.status === 400) js = await getJSON(omURL(base, src.model, OM_MIN), 45000); else throw e2; }
+  }
   const arr = Array.isArray(js) ? js : [js];
   return SITES.map((site, si) => {
     const hr = (arr[si] || {}).hourly || {}; const times = hr.time || [];
@@ -428,6 +480,15 @@ function blockOf(m, row, TL){
   o.du = nn ? u/nn : null; o.dv = nn ? v/nn : null;
   const mx = ks => { const v = ks.map(k => o[k]).filter(x => x != null); return v.length ? Math.max(...v) : null; };
   o.smax = mx(HEIGHTS.map(f => "s" + f)); o.gmax = mx(HEIGHTS.map(f => "g" + f));
+  if (FIRE){
+    const how = { rh:"min", mixh:"max", tw:"mean", vr:"max", di:"max", haines:"max", lvori:"max" };
+    for (const k of FIRE_KEYS){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 ? a[rng[0]] : agg(a, how[k]); o[k + "Lo"] = agg(a, "min"); o[k + "Hi"] = agg(a, "max"); }
+    for (const k of [...hk, "t"]){ if (!m[k]) continue; o[k + "Lo"] = agg(m[k], "min"); o[k + "Hi"] = agg(m[k], "max"); }
+    let tu = 0, tv = 0, tn = 0; for (const i of (row.len === 1 ? [rng[0]] : rng)){ const d = m.twd[i], s = m.tw[i]; if (d == null || s == null) continue; tu += -Math.sin(d*Math.PI/180)*s; tv += -Math.cos(d*Math.PI/180)*s; tn++; }
+    o.tu = tn ? tu/tn : null; o.tv = tn ? tv/tn : null;
+    o.dirm = o.du != null ? (Math.atan2(-o.du, -o.dv)*180/Math.PI + 360) % 360 : null;
+    o.rx = typeof window !== "undefined" && window.FIRE_RX ? window.FIRE_RX(o) : null;
+  }
   return o;
 }
 /* fraction of a source's members with precip >= 0.01 in [A,B) (precip stamps are end-of-hour) */
@@ -519,8 +580,8 @@ function aggregate(G, prefs){
   const W0 = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
   const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now());
   const val = {}, srcv = {}, band = {}, mem = {};
-  const scal = ["t","td","wbgt","sky", ...hkeys()];
-  for (const k of [...scal, "dir"]){ val[k] = []; srcv[k] = {}; band[k] = []; }
+  const scal = ["t","td","wbgt","sky", ...hkeys(), ...(FIRE ? FIRE_KEYS : [])];
+  for (const k of [...scal, "dir", ...(FIRE ? ["tdir"] : [])]){ val[k] = []; srcv[k] = {}; band[k] = []; }
   for (const k of new Set(["tmax","tmin","smax","gmax","vmin", ...PARAMS.filter(p => p.ex).map(p => p.ex)])) mem[k] = [];
   rows.forEach((r, ri) => {
     for (const k of scal){
@@ -545,6 +606,11 @@ function aggregate(G, prefs){
       const w = WK(s, "dir", ri); U += u*w; V += v*w; ww += w;
     }
     val.dir[ri] = ww ? (Math.atan2(-U, -V)*180/Math.PI + 360) % 360 : null;
+    if (FIRE){
+      let tU = 0, tV = 0, tw2 = 0;
+      for (const s of on){ const bs = s.blocks.map(b => b[ri]).filter(b => b && b.tu != null); if (!bs.length) continue; const u = bs.reduce((a, b) => a + b.tu, 0)/bs.length, v = bs.reduce((a, b) => a + b.tv, 0)/bs.length; (srcv.tdir[s.def.id] = srcv.tdir[s.def.id] || [])[ri] = (Math.atan2(-u, -v)*180/Math.PI + 360) % 360; const w = WK(s, "dir", ri); tU += u*w; tV += v*w; tw2 += w; }
+      val.tdir[ri] = tw2 ? (Math.atan2(-tU, -tV)*180/Math.PI + 360) % 360 : null;
+    }
     for (const k of Object.keys(mem)){
       const list = [];
       for (const s of on){ const bs = s.blocks.map(b => b[ri]).filter(b => b && b[k] != null); const w = WK(s, k, ri); bs.forEach(b => list.push([b[k], w/bs.length, s.def.id])); }
@@ -594,12 +660,13 @@ function probCell(r, win){
   if (r.len > win) return null;
   return r.lh % win === 0 ? { mode:"win", A:r.a, B:r.a + win*H } : null;
 }
+const inSector = (d, a, b) => { if (d == null) return false; d = ((d % 360) + 360) % 360; a = ((a % 360) + 360) % 360; b = ((b % 360) + 360) % 360; return a <= b ? d >= a && d <= b : d >= a || d <= b; };
 /* exceedance probability for one row given a delta shift */
 function exceed(G, pk, ri, delta, hot){
   const p = P[pk]; const list = G.mem[p.ex][ri]; if (!list || !list.length) return { v:null, per:{} };
   const thr = p.v === "hot" ? hot : p.v;
   const bySrc = {};
-  for (const [x, w, id] of list){ const y = x + (p.ex === "vmin" ? 0 : delta); const hit = p.op === ">" ? y > thr : p.op === ">=" ? y >= thr : p.op === "<=" ? y <= thr : y < thr; const o = bySrc[id] = bySrc[id] || { h:0, n:0, w:0 }; o.h += hit ? w : 0; o.w += w; }
+  for (const [x, w, id] of list){ const y = x + (p.ex === "vmin" || p.noShift ? 0 : delta); const hit = p.op === "in" ? inSector(x, p.v[0], p.v[1]) : p.op === ">" ? y > thr : p.op === ">=" ? y >= thr : p.op === "<=" ? y <= thr : y < thr; const o = bySrc[id] = bySrc[id] || { h:0, n:0, w:0 }; o.h += hit ? w : 0; o.w += w; }
   let s = 0, w = 0; const per = {};
   for (const id in bySrc){ const o = bySrc[id]; per[id] = 100*o.h/o.w; s += o.h; w += o.w; }
   return { v: w ? 100*s/w : null, per };

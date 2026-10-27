@@ -189,7 +189,7 @@ function derive(i){
   if (rec.length){ risk.recovery = RISK[Math.max(...rec.map(r => r.lv))]; why.recovery = rec.map(r => `${r.name}: gusts ${r.gmax == null ? "–" : Math.round(r.gmax) + " kt"}, seas ${r.wmax == null ? "–" : r.wmax.toFixed(1) + " ft"}`).join("; "); }
   return {
     pov: pov == null ? null : r5(pov), concerns: concerns.length ? concerns.join(", ") : "None", seg, wx, vis:`${visMi} mi.`,
-    temp: T == null ? "" : `${Math.round(T)}°F`, rh: T != null && Td != null ? `${Math.round(rhFrom((T - 32)*5/9, (Td - 32)*5/9))}%` : "",
+    temp: T == null ? "" : `${Math.round(T)}°F`, rh: T != null && Td != null ? `${Math.round(rhFrom(T, Td))}%` : "",
     wind: lo == null || dir == null ? "" : `${String(Math.round(dir/10)*10 || 360).padStart(3, "0")}° ${lo} - ${hi} mph`, clouds, risk, why, ranks,
   };
 }
@@ -271,7 +271,18 @@ function productHTML(logo){
     </footer>
   </div>`;
 }
-const LM_CSS = `.schline{margin:-4px 0 4px;font-size:12px}.schline .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.schline .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}.pdffmt{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2)}.pdffmt select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}.sealrow{margin:6px 0 0;text-align:right}.sealrow .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.sealrow .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}
+const LM_CSS = `.lg{background:#fff;color:#000;max-width:780px;margin:0 auto;padding:18px;border-radius:10px;font-family:Helvetica,Arial,sans-serif}
+.lg-note{font:600 11px Arial,sans-serif;color:#7D8B97;text-transform:uppercase;letter-spacing:.6px;margin:0 0 8px}
+.lg-t{width:100%;border-collapse:collapse;font-size:12.5px;line-height:1.3}.lg-t td,.lg-t th{border:1px solid #000;padding:4px 7px;vertical-align:top}
+.lg-head{position:relative;display:table-cell;padding:10px 12px}.lg-head{height:110px}.lg-seal{position:absolute;left:10px;top:9px;height:92px}.lg-logo{position:absolute;right:10px;top:9px;height:92px}
+.lg-title{margin-left:120px}.lg-title h2{margin:2px 0 6px;font:700 21px Helvetica,Arial,sans-serif}.lg-title p,.lg-wx p,.lg-rk p{margin:2px 0;display:flex;gap:8px}.lg-title b{min-width:64px}
+.lg-disc{font-size:12.5px;line-height:1.35}
+.lg-side{width:30px;padding:0!important;text-align:center;vertical-align:middle!important}.lg-side span{display:inline-block;writing-mode:vertical-rl;transform:rotate(180deg);font:700 17px Helvetica,Arial,sans-serif;white-space:nowrap}
+.lg-notes{background:#fff}.lg-band{text-align:center;font-weight:700;font-size:13.5px}.lg-band sup{font-size:8px}
+.lg-pov{display:table-cell}.lg-pov .lg-pct{display:inline-block;width:62px;font-size:21px;border-right:1px solid #000;margin:-4px 10px -4px -7px;padding:7px 0 7px 8px}
+.lg-wx{width:36%}.lg-wx p b{min-width:128px}.lg-cl{border-left:1px dotted #000!important}.lg-clh{text-align:center;font-weight:700;margin-bottom:2px}.lg-cl table{width:100%;border-collapse:collapse}.lg-cl th,.lg-cl td{border:0!important;padding:1px 3px!important;text-align:left;font-size:12px}.lg-cl th{font-weight:400;font-size:10px}
+.lg-rk{width:30%}.lg-rk p{justify-content:space-between}.lg-fn p{margin:2px 0;font-style:italic;font-size:10.5px}.lg-faq{text-align:center}.lg-faq a{color:#0645C4}.lg-next{font-size:13px}
+.schline{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:2px 0 8px}.schline .mut{font-size:12px;flex-basis:100%}.fileb{position:relative;overflow:hidden;cursor:pointer}.fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}.pdffmt{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2)}.pdffmt select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}.sealrow{margin:6px 0 0;text-align:right}.sealrow .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.sealrow .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .lm{font-family:"Barlow","Segoe UI",Arial,sans-serif;color:#13202E;background:#fff;max-width:900px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 1px 0 #D4DBDF}
 .lm-head{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;padding:20px 24px;background:linear-gradient(120deg,#0B1D33 0%,#123457 60%,#1C4A73 100%);color:#fff}
 .lm-head img{height:92px;width:auto;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
@@ -560,9 +571,17 @@ function pdfLMEFLegacy(logo, seal){
   return pdfAssemble(pages.map(p => p.join("\n")), logo, W, Hp, { image2: seal || null, links });
 }
 /* optional seal for the left of the legacy header, kept on this computer */
+let SEAL_IMG;
 async function loadSeal(){
-  try { const d = localStorage.getItem("lmef:seal"); if (!d) return null; const bin = atob(d.split(",")[1]); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return await decodeImage(u, d.slice(5, d.indexOf(";"))); } catch (e) { return null; }
+  try {
+    const d = localStorage.getItem("lmef:seal");
+    if (d){ const bin = atob(d.split(",")[1]); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return await decodeImage(u, d.slice(5, d.indexOf(";"))); }
+    if (SEAL_IMG !== undefined) return SEAL_IMG;
+    const r = await fetch(SEAL_SRC); if (!r.ok) throw new Error("no seal");
+    SEAL_IMG = await decodeImage(new Uint8Array(await r.arrayBuffer()), "image/png"); return SEAL_IMG;
+  } catch (e) { SEAL_IMG = null; return null; }
 }
+const sealURL = () => localStorage.getItem("lmef:seal") || SEAL_SRC;
 function htmlLMEF(logo){
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LMEF ${hesc(L.mission || "")}</title><link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet"><style>body{margin:0;padding:24px;background:#EEF2F4}${LM_CSS}@media print{body{background:#fff;padding:0}.lm{box-shadow:none}}</style></head><body>${productHTML(logo)}</body></html>`;
 }
@@ -576,7 +595,7 @@ const SETUP_HTML = `
       <h3>Mission</h3>
       <div class="edgrid">
         <label class="wide">Upcoming Space Coast launch <select id="lmMission"><option>Loading</option></select></label>
-        <p class="wide mut schline">Official schedule: <span class="btn ghost fileb sm">Upload CSV<input type="file" id="lmSchFile" accept=".csv,text/csv"></span> <button type="button" class="lnk" id="lmSchTpl">CSV template</button> <button type="button" class="lnk" id="lmSchClear" hidden>clear</button> <span id="lmSchNote">launches you upload appear first in the list, kept on this computer only</span></p>
+        <div class="wide schline"><span class="btn fileb">Upload official launch schedule (CSV)<input type="file" id="lmSchFile" accept=".csv,text/csv"></span> <button type="button" class="btn ghost" id="lmSchTpl">CSV template</button> <button type="button" class="btn ghost" id="lmSchClear" hidden>Clear schedule</button><span class="mut" id="lmSchNote">Uploaded launches appear first in the list. Kept on this computer only.</span></div>
         <label class="wide">Mission name <input id="lmName" autocomplete="off"></label>
         <label>Vehicle <input id="lmVeh" list="lmVehList" autocomplete="off"></label>
         <label>Pad <select id="lmPad"></select></label>
@@ -604,7 +623,7 @@ const PRODUCT_HTML = `
 <section class="panel lmprod" id="lmProduct" aria-label="LMEF product">
   <div class="lmprodhead"><h2>LMEF product</h2><span class="mut">Built from the forecast above. Type in a field to override it for the product; ↺ goes back to the forecast.</span>
     <div class="actions"><button class="btn" id="lmCsv">CSV</button><button class="btn" id="lmXlsx">Excel</button><button class="btn" id="lmHtml">HTML</button><label class="pdffmt">PDF format <select id="lmPdfFmt"><option value="legacy">Legacy</option><option value="modern">New</option></select></label><button class="btn primary" id="lmPdf">Download PDF</button></div>
-    <p class="mut sealrow" id="lmSealRow">Legacy header seal: <span id="lmSealState">none</span> <span class="btn ghost fileb sm">Choose image<input type="file" id="lmSeal" accept="image/png,image/jpeg"></span> <button type="button" class="lnk" id="lmSealClear" hidden>remove</button></p></div>
+    <p class="mut sealrow" id="lmSealRow">Legacy header seal: <span id="lmSealState">Space Force seal</span> <span class="fileb lnk">use a different image<input type="file" id="lmSeal" accept="image/png,image/jpeg"></span> <button type="button" class="lnk" id="lmSealClear" hidden>back to the Space Force seal</button></p></div>
   <div class="lmprodgrid">
     <div class="lmed">
       <h3>Forecast discussion <button type="button" class="lnk" id="lmDiscReset">redraft from the forecast</button></h3>
@@ -696,7 +715,38 @@ function fields(i, d, ov){
     ${risksOn().map(r => `<label class="${ov.risk && ov.risk[r.id] ? "ov" : ""}">${hesc(r.name)} <select data-risk="${r.id}">${opt(RISK, D.risk[r.id] || "Low")}</select></label>`).join("")}
   </div>`;
 }
-function renderPreview(){ $("lmPreview").innerHTML = productHTML(null); }
+function renderPreview(){
+  const legacy = (L.pdfFmt || "legacy") === "legacy", el = $("lmPreview");
+  el.innerHTML = legacy ? productHTMLLegacy() : productHTML(null);
+  const h = document.querySelector("#lmPreviewHead, .lm-prevhead"); if (h) h.dataset.fmt = legacy ? "legacy" : "new";
+}
+/* on-screen preview of the legacy PDF layout */
+function productHTMLLegacy(){
+  const W0 = (L.windows || [])[0] || {}, rk = risksOn();
+  const sec = (w, i) => {
+    const D = dayData(i), fill = i === 0 ? "#ABB7C6" : "#D5DBE3", clouds = (D.clouds || []).filter(c => c.type && c.type !== "None").slice(0, 3);
+    const lift = `Liftoff Winds (${(L.liftoff && L.liftoff.h) || 200}’)`;
+    return `<tr class="lg-sec"><th class="lg-side" rowspan="4" style="background:${fill}"><span>${i === 0 ? "Launch Day" : hesc(winLabel(i).replace(/\b([a-z])/g, c => c.toUpperCase()))}</span></th>
+      <td class="lg-band" colspan="${rk.length ? 3 : 2}" style="background:${fill}">Probability of Violating Weather Constraints${i === 0 ? "<sup>1</sup>" : ""}</td></tr>
+      <tr><td colspan="${rk.length ? 3 : 2}" class="lg-pov"><b class="lg-pct">${D.past ? "–" : (D.pov ?? "–") + "%"}</b><span><b>Primary Concerns:</b> ${hesc(String(D.concerns || "None").split(/\s*,\s*/).join(", "))}</span></td></tr>
+      <tr><td class="lg-band" colspan="2" style="background:${fill}">Weather Conditions</td>${rk.length ? `<td class="lg-band" style="background:${fill}">Additional Risk Criteria${i === 0 ? "<sup>2</sup>" : ""}</td>` : ""}</tr>
+      <tr class="lg-body">
+        <td class="lg-wx"><p><b>Weather/Visibility:</b><span>${hesc(D.wx || "-")} / ${hesc(D.vis || "-")}</span></p><p><b>Temp/Humidity:</b><span>${hesc(D.temp || "-")} / ${hesc(D.rh || "-")}</span></p><p><b>${hesc(lift)}:</b><span>${hesc(D.wind || "-")}</span></p></td>
+        <td class="lg-cl"><div class="lg-clh">Clouds</div><table><tr><th>Type</th><th>Coverage</th><th>Base (ft)</th><th>Tops (ft)</th></tr>${clouds.map(c => `<tr><td>${hesc(c.type)}</td><td>${hesc(c.cov || "")}</td><td>${c.base ? Number(c.base).toLocaleString("en-US") : ""}</td><td>${c.tops ? Number(c.tops).toLocaleString("en-US") : ""}</td></tr>`).join("")}</table></td>
+        ${rk.length ? `<td class="lg-rk">${rk.slice(0, 3).map(r => `<p><b>${hesc(r.name)}:</b><span>${hesc((D.risk || {})[r.id] || "Low")}</span></p>`).join("")}</td>` : ""}
+      </tr>`;
+  };
+  const ncol = rk.length ? 3 : 2;
+  return `<div class="lg"><div class="lg-note">Preview of the legacy PDF</div><table class="lg-t">
+    <tr><td colspan="${ncol + 1}" class="lg-head"><img src="${hesc(sealURL())}" alt="" class="lg-seal" onerror="this.style.visibility='hidden'"><div class="lg-title"><h2>Launch Mission Execution Forecast</h2>
+      <p><b>Mission:</b><span>${hesc(L.mission || "")}</span></p><p><b>Issued:</b><span>${hesc(legacyTimes(L.issued || Date.now()))}</span></p><p><b>Valid:</b><span>${W0.a ? hesc(legacyTimes(W0.a, W0.b)) : ""}</span></p></div>
+      <img src="${hesc(LOGO_SRC)}" alt="" class="lg-logo" onerror="this.style.visibility='hidden'"></td></tr>
+    <tr><td colspan="${ncol + 1}" class="lg-disc"><b>Forecast Discussion:</b> ${hesc(L.discussion || "")}</td></tr>
+    ${(L.windows || []).map(sec).join("")}
+    <tr><th class="lg-side lg-notes"><span>Notes</span></th><td colspan="${ncol}" class="lg-fn"><p>1. The Probability of Violation (PoV) is the chance of a local safety or customer constraint violation occurring any random time during the launch window.</p>${rk.length ? "<p>2. Additional Risk Criteria, which are not included in the PoV, are mission-specific constraints that may not include all phenomena within each risk factor.</p>" : ""}<p class="lg-faq"><b>See Launch FAQ</b> <a href="${FAQ_URL}" target="_blank" rel="noopener">${FAQ_URL}</a> <b>for more information</b></p></td></tr>
+    <tr><td colspan="2" class="lg-next"><b>Next Forecast Will Be Issued</b></td><td colspan="${ncol - 1}" class="lg-next">${hesc(L.next || "As Required")}</td></tr>
+  </table></div>`;
+}
 let prodT = null;
 function refreshProduct(){ clearTimeout(prodT); prodT = setTimeout(() => { renderSetup(); renderProductEditor(); renderPreview(); }, 120); }
 /* settings that change the editor itself (pad, windows, constraints) */
@@ -790,14 +840,14 @@ function bindLM(){
   $("lmSchTpl").onclick = () => download(new Blob([SCHED_TEMPLATE], { type:"text/csv" }), "Official_Schedule_template.csv");
   $("lmSchClear").onclick = () => { if (!confirm("Remove the official launches stored on this computer?")) return; saveSched(loadSched().filter(x => x.type !== "launch")); renderMissions(); };
   $("lmPdfFmt").value = L.pdfFmt || "legacy";
-  $("lmPdfFmt").onchange = e => { L.pdfFmt = e.target.value; saveL(); showSealRow(); };
+  $("lmPdfFmt").onchange = e => { L.pdfFmt = e.target.value; saveL(); showSealRow(); renderPreview(); };
   $("lmPdf").onclick = async () => { const logo = await loadLogo(); download((L.pdfFmt || "legacy") === "legacy" ? pdfLMEFLegacy(logo, await loadSeal()) : pdfLMEF(logo), base() + ".pdf"); };
-  const showSealRow = () => { $("lmSealRow").hidden = (L.pdfFmt || "legacy") !== "legacy"; const has = !!localStorage.getItem("lmef:seal"); $("lmSealState").textContent = has ? "set (on the left of the header)" : "none"; $("lmSealClear").hidden = !has; };
+  const showSealRow = () => { $("lmSealRow").hidden = (L.pdfFmt || "legacy") !== "legacy"; const has = !!localStorage.getItem("lmef:seal"); $("lmSealState").textContent = has ? "your image" : "Space Force seal"; $("lmSealClear").hidden = !has; renderPreview(); };
   $("lmSeal").onchange = async e => {
     const f = e.target.files[0]; e.target.value = ""; if (!f) return;
     if (f.size > 1.5e6){ toast("Use an image under 1.5 MB"); return; }
     const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
-    try { localStorage.setItem("lmef:seal", url); toast("Seal saved on this computer for the legacy PDF"); } catch (err) { toast("Couldn't save the image (browser storage is full)"); }
+    try { localStorage.setItem("lmef:seal", url); toast("Image saved on this computer for the legacy header"); } catch (err) { toast("Couldn't save the image (browser storage is full)"); }
     showSealRow();
   };
   $("lmSealClear").onclick = () => { localStorage.removeItem("lmef:seal"); showSealRow(); };

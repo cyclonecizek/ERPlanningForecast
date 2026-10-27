@@ -363,7 +363,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 </head>
 <body>
-<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="./#brief" data-page="brief">Leadership brief</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><a href="verify.html" data-page="verify">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="burn.html" data-page="burn">Burn forecasts</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="taf.html" data-page="taf">TAF generator</a><a href="verify.html" data-page="verify">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
 <header class="top">
   <div class="brand">
     <img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()">
@@ -418,7 +418,7 @@ document.addEventListener("DOMContentLoaded", function(){
       <span class="mut schinfo" id="schInfo"></span>
     </div>
     <div class="esrow">
-      <label class="grow">Operation <input id="expOp" placeholder="e.g. Crane lift, vehicle rollout, propellant load" autocomplete="off"></label>
+      <label class="grow"><span id="expOpLab">Operation</span> <input id="expOp" placeholder="e.g. Crane lift, vehicle rollout, propellant load" autocomplete="off"></label>
       <label>Start <input type="datetime-local" id="expStart"></label>
       <label>End <input type="datetime-local" id="expEnd"></label>
       <span class="tzn" id="expTz"></span>
@@ -434,9 +434,9 @@ document.addEventListener("DOMContentLoaded", function(){
       <button class="btn" type="button" id="cuLoad">Load point</button>
     </div>
     <div class="cons">
-      <h3>Constraints</h3>
+      <h3 id="expConsTitle">Constraints</h3>
       <div id="expCons"></div>
-      <div class="actions"><button class="btn" type="button" id="addWind">+ Wind constraint</button><button class="btn" type="button" id="addTemp">+ Temperature constraint</button></div>
+      <div class="actions"><button class="btn" type="button" id="addWind">+ Wind constraint</button><button class="btn" type="button" id="addTemp">+ Temperature constraint</button><button class="btn" type="button" id="addRx" hidden>+ Prescription criterion</button></div>
     </div>
   </section>
   <section class="panel editor" aria-label="Graph editor">
@@ -536,7 +536,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </dialog>
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "exposure";</script>
-<script src="guidance.js?v=e1f10fcf42"></script>
-<script src="planning-app.js?v=3187625171"></script>
+<script src="guidance.js?v=7ab9e40bc3"></script>
+<script src="planning-app.js?v=d268185f3f"></script>
 </body>
 </html>

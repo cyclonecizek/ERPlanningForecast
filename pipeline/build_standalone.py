@@ -18,12 +18,12 @@ from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")
-PAGES = [("planning", "index.html", "Planning forecast"), ("exposure", "exposure.html", "Exposure forecasts"),
+PAGES = [("planning", "index.html", "Planning forecast"), ("exposure", "exposure.html", "Exposure forecasts"), ("burn", "burn.html", "Burn forecasts"),
          ("lmef", "lmef.html", "Launch forecast (LMEF)"), ("taf", "taf.html", "TAF generator"), ("verify", "verify.html", "Verification")]
-HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "lmef.html": "lmef", "taf.html": "taf", "verify.html": "verify", "verify.html#exposure": "verify", "./#brief": "planning#brief"}
+HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "burn.html": "burn", "lmef.html": "lmef", "taf.html": "taf", "verify.html": "verify", "verify.html#exposure": "verify", "./#brief": "planning#brief"}
 
 
-def page_html(fname, base, logo_uri):
+def page_html(fname, base, logo_uri, seal_uri=""):
     html = open(os.path.join(DOCS, fname), encoding="utf-8").read()
 
     # inline every local script
@@ -37,7 +37,7 @@ def page_html(fname, base, logo_uri):
     html = re.sub(r'<script src="([\w.-]+\.js(?:\?v=[0-9a-f]+)?)"></script>', inline, html)
     # logo and data locations
     html = html.replace('src="45ws-logo.png"', f'src="{logo_uri}"')
-    boot = ("<script>window.DATA_BASE = " + json.dumps(base) + "; window.LOGO_SRC = " + json.dumps(logo_uri)
+    boot = ("<script>window.DATA_BASE = " + json.dumps(base) + "; window.LOGO_SRC = " + json.dumps(logo_uri) + ("; window.SEAL_SRC = " + json.dumps(seal_uri) if seal_uri else "")
             + "; window.STANDALONE = true; try { window.FORCE_DEMO = /[?&]demo=1\\b/.test(window.parent.location.search); } catch (e) {}</script>\n"
             + STANDALONE_JS)
     html = html.replace("<head>", "<head>\n" + boot, 1)
@@ -115,6 +115,7 @@ iframe.on{display:block}
     <fieldset><legend>Tools</legend>
       <label><input type="checkbox" data-tool="planning" checked> Planning forecast and leadership brief</label>
       <label><input type="checkbox" data-tool="exposure" checked> Exposure forecasts</label>
+      <label><input type="checkbox" data-tool="burn" checked> Burn forecasts</label>
       <label><input type="checkbox" data-tool="lmef" checked> Launch forecast (LMEF)</label>
       <label><input type="checkbox" data-tool="taf" checked> TAF drafts</label>
     </fieldset>
@@ -146,7 +147,7 @@ window.addEventListener("message", function(e){ if (e.data && e.data.erwxTab) sh
 /* ---------- shared workspace file ----------
    Each tool keeps its work in this browser's storage under its own prefix; the workspace file
    carries those entries between computers. Personal settings (initials, theme) stay local. */
-var TOOLS = { planning:["planfx:"], exposure:["expfx:","schedfx:"], lmef:["lmfx:","lmef:","schedfx:"], taf:["taffx:"] };
+var TOOLS = { planning:["planfx:"], exposure:["expfx:","schedfx:"], burn:["burnfx:","schedfx:"], lmef:["lmfx:","lmef:","schedfx:"], taf:["taffx:"] };
 var PERSONAL = ["initials","tz","wu","theme"];
 var wsHandle = null;
 function chosen(){ return [].slice.call(document.querySelectorAll("#ws [data-tool]")).filter(function(c){ return c.checked; }).map(function(c){ return c.dataset.tool; }); }
@@ -228,7 +229,9 @@ def main():
     base = a.base if a.base.endswith("/") else a.base + "/"
     logo = open(os.path.join(DOCS, "45ws-logo.png"), "rb").read()
     logo_uri = "data:image/png;base64," + base64.b64encode(logo).decode()
-    pages = {key: page_html(fname, base, logo_uri) for key, fname, _ in PAGES if os.path.exists(os.path.join(DOCS, fname))}
+    seal_path = os.path.join(DOCS, "ussf-seal.png")
+    seal_uri = "data:image/png;base64," + base64.b64encode(open(seal_path, "rb").read()).decode() if os.path.exists(seal_path) else ""
+    pages = {key: page_html(fname, base, logo_uri, seal_uri) for key, fname, _ in PAGES if os.path.exists(os.path.join(DOCS, fname))}
     built = datetime.now(timezone.utc).strftime("%d %b %Y %H%MZ")
     out = (LAUNCHER.replace("__PAGES__", json.dumps(pages).replace("</", "<\\/"))
            .replace("__LOGO__", logo_uri).replace("__BUILT__", built).replace("__BASE__", base))

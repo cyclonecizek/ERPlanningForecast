@@ -3,9 +3,11 @@
    ============================================================ */
 /* this script runs the planning page and, with window.PAGE = "exposure", the exposure page */
 const PAGE = (typeof window !== "undefined" && window.PAGE) || "planning";
-const EXPO = PAGE === "exposure";
+/* the burn page is an exposure-style page with fire-weather parameters and a burn prescription */
+const BURN = PAGE === "burn";
+const EXPO = PAGE === "exposure" || BURN;
 const LMEF = PAGE === "lmef";
-const LS = EXPO ? { edits:"expfx:v1:edits", prefs:"expfx:v1:prefs", pub:"expfx:v1:published" } : LMEF ? { edits:"lmfx:v1:edits", prefs:"lmfx:v1:prefs", pub:"lmfx:v1:published" } : { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
+const LS = BURN ? { edits:"burnfx:v1:edits", prefs:"burnfx:v1:prefs", pub:"burnfx:v1:published" } : EXPO ? { edits:"expfx:v1:edits", prefs:"expfx:v1:prefs", pub:"expfx:v1:published" } : LMEF ? { edits:"lmfx:v1:edits", prefs:"lmfx:v1:prefs", pub:"lmfx:v1:published" } : { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
 /* the LMEF page supplies its own points, parameters, rows and rule guidance through these hooks */
 const HOOKS = (typeof window !== "undefined" && (window.EDITOR_HOOKS = window.EDITOR_HOOKS || {})) || {};
 const PLANNING_PARAMS = PARAMS.map(p => ({ ...p }));
@@ -38,7 +40,28 @@ const wuLabel = () => prefs.wu || "kt";
 const toDispW = v => v == null ? v : v*wfac();
 /* "Winds (kt)" group labels follow the display unit */
 const grpLabel = g => g.replace("Winds (kt)", `Winds (${wuLabel()})`);
+/* burn prescription criteria: field, operator, value(s) */
+const RXF = {
+  rh:    { l:"Relative humidity", short:"RH", unit:"%", key:"rh" },
+  t:     { l:"Temperature", short:"Temp", unit:"°F", key:"t" },
+  s20:   { l:"20 ft wind, sustained", short:"20 ft wind", wind:true, key:"s20" },
+  g20:   { l:"20 ft wind, peak", short:"20 ft peak", wind:true, key:"g20" },
+  dir:   { l:"20 ft wind direction", short:"Wind from", sector:true, key:"dirm", dep:"dir" },
+  tw:    { l:"Transport wind", short:"Transport", wind:true, key:"tw" },
+  mixh:  { l:"Mixing height", short:"Mixing ht", unit:"ft", key:"mixh" },
+  di:    { l:"Dispersion index", short:"DI", unit:"", key:"di" },
+  lvori: { l:"LVORI", short:"LVORI", unit:"", key:"lvori" },
+  haines:{ l:"Haines index", short:"Haines", unit:"", key:"haines" },
+};
+function burnDefaults(){
+  const d = new Date(), st = capeToUTC(d.getFullYear(), d.getMonth() + 1, d.getDate() + 1, 8, 0);
+  return { op:"", start:st, end:st + 10*H, hourly:"all", custom:{ name:"Burn unit", lat:28.66, lon:-80.70 },
+    /* an example prescription: replace with the burn plan's own limits */
+    constraints:[ { id:"r1", type:"rx", f:"rh", op:">=", v:30 }, { id:"r2", type:"rx", f:"rh", op:"<=", v:55 }, { id:"r3", type:"rx", f:"s20", op:">=", v:4, unit:"mph" }, { id:"r4", type:"rx", f:"s20", op:"<=", v:15, unit:"mph" },
+      { id:"r5", type:"rx", f:"mixh", op:">=", v:1700 }, { id:"r6", type:"rx", f:"tw", op:">=", v:9, unit:"mph" }, { id:"r7", type:"rx", f:"di", op:">=", v:21 }, { id:"r8", type:"rx", f:"lvori", op:"<=", v:4 } ] };
+}
 function expDefaults(){
+  if (BURN) return burnDefaults();
   const st = Math.ceil(Date.now()/H)*H;
   return { op:"", start:st, end:st + 48*H, hourly:24, custom:{ name:"Custom point", lat:28.5, lon:-80.6 },
     constraints:[ { id:"c1", type:"wind", h:60, kind:"peak", op:">=", v:25, unit:"kt" }, { id:"c2", type:"temp", op:"<", v:40, unit:"F" } ] };
@@ -47,11 +70,36 @@ const expStored = EXPO ? (store.get(LS.prefs, {}).exp || expDefaults()) : null;
 function expPoints(exp){
   const c = exp.custom || {}; let stn = null, best = 30;
   for (const k in MOS_STATIONS){ const d = kmBetween(+c.lat, +c.lon, MOS_STATIONS[k][0], MOS_STATIONS[k][1]); if (d < best){ best = d; stn = k; } }
-  return [...EXP_POINTS, { id:"custom", name: c.name || "Custom point", point: c.name || "Custom", tag:"C", off:[6,3,"start"], stn, lat:+c.lat || 28.5, lon:+c.lon || -80.6, custom:true }];
+  const cust = { id:"custom", name: c.name || (BURN ? "Burn unit" : "Custom point"), point: c.name || (BURN ? "Burn unit" : "Custom"), tag:"C", off:[6,3,"start"], stn, lat:+c.lat || 28.5, lon:+c.lon || -80.6, custom:true };
+  return BURN ? [cust, ...EXP_POINTS] : [...EXP_POINTS, cust];
 }
 const fmtNum = v => (Math.round(v*10)/10).toString();
 const opText = op => ({ ">":">", ">=":"≥", "<":"<", "<=":"≤" })[op] || op;
+function rxValueText(c){ const f = RXF[c.f] || {}; if (f.sector) return `${Math.round(+c.v)}–${Math.round(+c.v2)}°`; return `${fmtNum(+c.v)}${f.wind ? " " + (c.unit || "mph") : f.unit === "%" ? "%" : f.unit === "°F" ? "°F" : f.unit ? " " + f.unit : ""}`; }
+function rxParams(exp){
+  const list = (exp.constraints || []).filter(c => RXF[c.f]).map(c => {
+    const f = RXF[c.f], vNum = f.wind ? (+c.v || 0)*(WIND_UNITS[c.unit || "mph"] || 1) : +c.v;
+    const title = f.sector ? `${f.l} from ${rxValueText(c)}` : `${f.l} ${opText(c.op)} ${rxValueText(c)}`;
+    const base = { k:"x" + c.id, g:"Prescription (%)", l: f.sector ? rxValueText(c) : `${opText(c.op)}${rxValueText(c)}`, s:f.short, chip:`${f.short} ${f.sector ? rxValueText(c) : opText(c.op) + rxValueText(c)}`, kind:"prob", title, csv:`p_${c.f}_${f.sector ? "from" + Math.round(+c.v) + "to" + Math.round(+c.v2) : (c.op === ">=" || c.op === ">" ? "ge" : "le") + fmtNum(+c.v)}_pct`, cons:c };
+    if (f.sector) return { ...base, ex:"dirm", dep:["dir"], op:"in", v:[+c.v, +c.v2], noShift:true };
+    return { ...base, ex: f.key + (c.op === ">=" || c.op === ">" ? "Lo" : "Hi"), dep:[f.key], op:c.op, v:vNum };
+  });
+  return list.length ? [{ k:"xall", g:"Prescription (%)", l:"All criteria", s:"in Rx", chip:"In prescription", kind:"prob", ex:"rx", op:">=", v:1, noShift:true, title:"Chance every prescription criterion is met", csv:"p_in_prescription_pct" }, ...list] : [];
+}
+/* the per-member test the engine runs on each row's block: every criterion met */
+function setFireRx(params){
+  const crit = params.filter(p => p.k !== "xall");
+  window.FIRE_RX = o => {
+    for (const p of crit){
+      const x = o[p.ex]; if (x == null) return null;
+      const ok = p.op === "in" ? inSector(x, p.v[0], p.v[1]) : p.op === ">=" ? x >= p.v : p.op === ">" ? x > p.v : p.op === "<=" ? x <= p.v : x < p.v;
+      if (!ok) return 0;
+    }
+    return 1;
+  };
+}
 function constraintParams(exp){
+  if (BURN) return rxParams(exp);
   return (exp.constraints || []).map(c => {
     if (c.type === "wind"){
       const ft = Math.round(+c.h) || 54, kt = (+c.v || 0)*(WIND_UNITS[c.unit] || 1), key = (c.kind === "sust" ? "s" : "g") + ft;
@@ -63,8 +111,36 @@ function constraintParams(exp){
       title:`Temperature ${below ? "below" : "above"} ${fmtNum(+c.v)}°${c.unit}`, csv:`p_temp_${below ? "lt" : "gt"}${fmtNum(+c.v)}${c.unit}_pct`, cons:c };
   });
 }
+/* the burn page: 20 ft winds, fire-weather rows and the prescription */
+function applyBurnConfig(exp){
+  SITES.splice(0, SITES.length, ...expPoints(exp));
+  HEIGHTS.splice(0, HEIGHTS.length, 20);
+  const rx = rxParams(exp); setFireRx(rx);
+  const base = k => ({ ...PLANNING_PARAMS.find(p => p.k === k) });
+  const thrOf = key => rx.filter(p => p.dep && p.dep[0] === key && typeof p.v === "number").map(p => Math.round(p.v));
+  const list = [...["sky","t","td"].map(base),
+    { k:"rh", g:"Temperature (°F)", l:"RH", s:"%", kind:"num", unit:"%", step:1, lo:1, hi:100, title:"Relative humidity", csv:"rh_pct" },
+    ...["pp1","pp3","pp6","lt1","lt3","lt6"].map(base),
+    { k:"s20", g:"Winds (kt)", l:"20 ft", s:"sust", kind:"num", unit:"kt", step:1, lo:0, title:"20 ft sustained wind", thr:thrOf("s20"), csv:"wind20ft_sust_kt" },
+    { k:"g20", g:"Winds (kt)", l:"20 ft", s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:"20 ft peak wind", thr:thrOf("g20"), peakOf:"s20", csv:"wind20ft_peak_kt" },
+    { ...base("dir"), s:"20 ft" },
+    { k:"mixh", g:"Smoke and dispersion", l:"Mixing ht", s:"ft AGL", kind:"num", unit:"ft", step:100, lo:0, title:"Mixing height (ft above ground)", thr:thrOf("mixh"), csv:"mixing_height_ft" },
+    { k:"tw", g:"Smoke and dispersion", l:"Transport", s:"wind", kind:"num", unit:"kt", step:1, lo:0, title:"Transport wind (mean through the mixed layer)", thr:thrOf("tw"), csv:"transport_wind_kt" },
+    { k:"tdir", g:"Smoke and dispersion", l:"Transport", s:"dir", kind:"dir", title:"Transport wind direction", csv:"transport_dir_deg" },
+    { k:"vr", g:"Smoke and dispersion", l:"Ventilation", s:"m²/s", kind:"num", unit:"m²/s", step:100, lo:0, title:"Ventilation rate (mixing height × transport wind)", csv:"ventilation_m2s" },
+    { k:"di", g:"Smoke and dispersion", l:"Dispersion", s:"index (est.)", kind:"num", unit:"", step:1, lo:1, title:"Dispersion index (estimate from ventilation)", thr:thrOf("di"), csv:"dispersion_index" },
+    { k:"lvori", g:"Smoke and dispersion", l:"LVORI", s:"(est.)", kind:"num", unit:"", step:1, lo:1, hi:10, title:"Low visibility occurrence risk index (estimate)", thr:thrOf("lvori"), csv:"lvori" },
+    { k:"haines", g:"Smoke and dispersion", l:"Haines", s:"low elev.", kind:"num", unit:"", step:1, lo:2, hi:6, title:"Haines index (low elevation, 950-850 hPa)", csv:"haines" },
+    ...rx.map(p => ({ ...p, unit:"%", step:1, lo:0, hi:100 })), base("sev")];
+  const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg", sev:"spc_category" };
+  list.forEach(p => { if (CSVN[p.k]) p.csv = CSVN[p.k]; });
+  PARAMS.splice(0, PARAMS.length, ...list);
+  for (const k of Object.keys(P)) delete P[k];
+  PARAMS.forEach(p => P[p.k] = p);
+}
 /* swap in the exposure points, wind heights and parameters */
 function applyExposureConfig(exp){
+  if (BURN) return applyBurnConfig(exp);
   SITES.splice(0, SITES.length, ...expPoints(exp));
   const cons = constraintParams(exp);
   const hs = [...new Set(cons.filter(p => p.ft).map(p => p.ft))].sort((a, b) => a - b); if (!hs.length) hs.push(54);
@@ -85,12 +161,13 @@ function applyExposureConfig(exp){
 }
 function constraintSummary(){
   if (!EXPO) return "";
+  if (BURN) return burnSummary();
   const cons = constraintParams(prefs.exp || expStored);
   return cons.length ? "Constraints: " + cons.map((p, j) => j ? p.title.charAt(0).toLowerCase() + p.title.slice(1) : p.title).join("; ") + "." : "No constraints set.";
 }
 if (EXPO) applyExposureConfig(expStored);
 if (LMEF && HOOKS.config) HOOKS.config();
-const prefs = Object.assign({ enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param:"t" }, store.get(LS.prefs, {}));
+const prefs = Object.assign({ wu: BURN ? "mph" : undefined, enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param: BURN ? "rh" : "t" }, store.get(LS.prefs, {}));
 let edits = store.get(LS.edits, {});
 if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
 if (/^(pp|lt)\d$/.test(prefs.param)) prefs.param = prefs.param.slice(0, 2);
@@ -321,7 +398,7 @@ function renderSites(){
   const s = site();
   if (EXPO){
     const e = prefs.exp, z = zulu(), r0 = S.rows && S.rows[0], r1 = S.rows && S.rows[S.rows.length - 1];
-    $("where").innerHTML = `<b>${e.op ? e.op.replace(/</g, "&lt;") : "Exposure forecast"}</b> at ${s.name} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)})${s.stn ? `, MOS from ${s.stn}` : ""}${r0 ? `, ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)}${z ? "Z" : " " + tzAbbr(r0.a)}` : ""}`;
+    $("where").innerHTML = `<b>${e.op ? e.op.replace(/</g, "&lt;") : BURN ? "Burn forecast" : "Exposure forecast"}</b> at ${s.name} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)})${s.stn ? `, MOS from ${s.stn}` : ""}${r0 ? `, ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)}${z ? "Z" : " " + tzAbbr(r0.a)}` : ""}`;
   } else $("where").innerHTML = `<b>${s.name}</b>, forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}), MOS from ${s.stn}`;
   renderLocator();
   if (!EXPO) $("hotThr").value = hotOf(s);
@@ -348,6 +425,16 @@ function renderExpSetup(){
   $("expCustom").hidden = prefs.site !== "custom";
   if (!$("expCustom").contains(el)){ $("cuName").value = e.custom.name || ""; $("cuLat").value = e.custom.lat; $("cuLon").value = e.custom.lon; }
   const sel = (id, opts, v) => `<select data-f="${id}">${opts.map(([val, lab]) => `<option value="${val}" ${String(val) === String(v) ? "selected" : ""}>${lab}</option>`).join("")}</select>`;
+  if (BURN){
+    const fields = Object.entries(RXF).map(([k, f]) => [k, f.l]);
+    $("expCons").innerHTML = e.constraints.filter(c => RXF[c.f]).length ? e.constraints.filter(c => RXF[c.f]).map(c => {
+      const f = RXF[c.f];
+      const val = f.sector ? `<label>from <input data-f="v" type="number" min="0" max="360" step="5" value="${c.v ?? 0}">°</label><label>to <input data-f="v2" type="number" min="0" max="360" step="5" value="${c.v2 ?? 90}">°</label><span class="mut">clockwise</span>`
+        : `${sel("op", [[">=","at least"],["<=","at most"]], c.op)}<input data-f="v" type="number" step="${c.f === "mixh" ? 100 : 1}" value="${c.v}">${f.wind ? sel("unit", [["mph","mph"],["kt","kt"]], c.unit || "mph") : `<span class="mut">${f.unit || ""}</span>`}`;
+      return `<div class="con" data-id="${c.id}">${sel("f", fields, c.f)}${val}<button type="button" class="x" data-del="${c.id}" aria-label="Remove">×</button></div>`;
+    }).join("") : `<p class="mut">No prescription yet. Add the burn plan's limits (humidity, winds, mixing height, transport wind, dispersion) to get the chance each one, and all together, is met.</p>`;
+    return;
+  }
   $("expCons").innerHTML = e.constraints.length ? e.constraints.map(c => c.type === "wind"
     ? `<div class="con" data-id="${c.id}"><span class="ct">Wind</span><label><input data-f="h" type="number" min="5" max="600" step="1" value="${c.h}"> ft</label>${sel("kind", [["peak","Peak"],["sust","Sustained"]], c.kind)}${sel("op", [[">=","≥"],[">",">"]], c.op)}<input data-f="v" type="number" min="0" step="1" value="${c.v}">${sel("unit", Object.keys(WIND_UNITS).map(u => [u, u]), c.unit)}<button type="button" class="x" data-del="${c.id}" aria-label="Remove constraint">×</button></div>`
     : `<div class="con" data-id="${c.id}"><span class="ct">Temperature</span>${sel("op", [["<","Below"],[">","Above"]], c.op)}<input data-f="v" type="number" step="1" value="${c.v}">${sel("unit", [["F","°F"],["C","°C"]], c.unit)}<button type="button" class="x" data-del="${c.id}" aria-label="Remove constraint">×</button></div>`).join("")
@@ -474,7 +561,7 @@ function useSchedExpo(id){
    A template keeps the operation name, point, constraints, hourly setting and window length.
    Loading one keeps the current start time. Templates live in this browser (and travel with a
    workspace file); Export / Import shares them as a JSON file. */
-const TPL_KEY = "expfx:v1:templates";
+const TPL_KEY = BURN ? "burnfx:v1:templates" : "expfx:v1:templates";
 const loadTpls = () => store.get(TPL_KEY, []);
 const saveTpls = t => store.set(TPL_KEY, t);
 function renderTpls(sel){
@@ -528,8 +615,8 @@ function bindExp(){
   if (!EXPO) return;
   $("expSetup").hidden = false;
   document.querySelectorAll(".plan-only").forEach(x => x.hidden = true);
-  $("pageTitle").textContent = "Exposure forecast";
-  document.title = "Exposure Forecast | KSC and CCSFS";
+  $("pageTitle").textContent = BURN ? "Burn forecast" : "Exposure forecast";
+  document.title = BURN ? "Burn Forecast | KSC and CCSFS" : "Exposure Forecast | KSC and CCSFS";
   $("expOp").oninput = e => { prefs.exp.op = e.target.value; savePrefs(); renderSites(); };
   const range = () => {
     let a = dtParse($("expStart").value), b = dtParse($("expEnd").value);
@@ -553,10 +640,17 @@ function bindExp(){
   $("expCons").onchange = ev => {
     const row = ev.target.closest("[data-id]"), f = ev.target.dataset.f; if (!row || !f) return;
     const c = prefs.exp.constraints.find(x => x.id === row.dataset.id); if (!c) return;
-    c[f] = ev.target.type === "number" ? +ev.target.value : ev.target.value; expChanged(false);
+    c[f] = ev.target.type === "number" ? +ev.target.value : ev.target.value;
+    if (BURN && f === "f"){ const d = { rh:[">=",30], t:["<=",90], s20:["<=",15], g20:["<=",20], dir:[null,0], tw:[">=",9], mixh:[">=",1700], di:[">=",21], lvori:["<=",4], haines:["<=",4] }[c.f]; if (d){ c.op = d[0] || c.op; c.v = d[1]; if (c.f === "dir"){ c.v = 0; c.v2 = 90; } if (RXF[c.f].wind) c.unit = c.unit || "mph"; } renderExpSetup(); }
+    expChanged(false);
   };
   $("expCons").onclick = ev => { const d = ev.target.closest("[data-del]"); if (!d) return; prefs.exp.constraints = prefs.exp.constraints.filter(x => x.id !== d.dataset.del); expChanged(false); };
   const newId = () => "c" + Date.now().toString(36);
+  if (BURN){
+    $("expOpLab").textContent = "Burn unit"; $("expOp").placeholder = "e.g. KSC Unit 12, Happy Creek block";
+    $("expConsTitle").textContent = "Prescription"; $("addWind").hidden = true; $("addTemp").hidden = true; $("addRx").hidden = false;
+    $("addRx").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"rx", f:"rh", op:">=", v:30 }); expChanged(false); };
+  }
   $("addWind").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"wind", h:60, kind:"peak", op:">=", v:25, unit:"kt" }); expChanged(false); };
   $("addTemp").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"temp", op:">", v:95, unit:"F" }); expChanged(false); };
   bindTpls();
@@ -568,6 +662,10 @@ function bindExp(){
   $("schClear").onclick = () => { if (!confirm("Remove the official schedule stored on this computer?")) return; saveSched([]); renderSchedExpo(); };
   $("foot1").textContent = "Rows are hourly for the period you choose, then 3-hour blocks to the end of the window. In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the block. Constraint probabilities are the chance that the constraint is met (for example, a peak wind at or above the limit) at any time in the row, from all the guidance members, and they move with your wind and temperature edits. 3 and 6 hr precipitation and lightning cells are merged across the hours they cover and linked to the 1 hr values. Press Enter to edit a table cell, Delete to return it to guidance.";
   const f2 = $("foot1").nextElementSibling; if (f2) f2.textContent = "Winds at each constraint height are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing), and peaks scale the 10 m gust factor with height. The custom point uses the nearest MOS station within 30 km and the nearest high-res pipeline point within 15 km. Lightning comes only from guidance with explicit thunder probabilities.";
+  if (BURN){
+    $("foot1").textContent = "Rows are hourly for the period you choose, then 3-hour blocks. Prescription rows give the chance each criterion, and all of them together, is met through the hour, from all the guidance members; individual criteria move with your edits, \"All criteria\" follows the guidance. Press Enter to edit a cell, Delete to return it to guidance.";
+    if (f2) f2.textContent = "Mixing height is the models' boundary-layer height (ft above ground). Transport wind is the mean wind through the mixed layer from the pressure levels. Ventilation is mixing height × transport wind. The dispersion index and LVORI are estimates computed from those, not the Florida Forest Service values, and Haines uses the low-elevation 950–850 hPa form: check them against the NWS fire weather forecast. 20 ft winds are scaled from the 10 m winds.";
+  }
   renderExpSetup();
 }
 function renderLocator(){
@@ -932,10 +1030,10 @@ const linkedFlag = (sid, k, key) => !!(((LINKED[sid] || {})[k] || {})[key]);
 function setLinkedFlag(sid, k, key, on){ const m = ((LINKED[sid] = LINKED[sid] || {})[k] = LINKED[sid][k] || {}); if (on) m[key] = 1; else delete m[key]; }
 /* Alt (Option), pressed or held while clicking, makes the NEXT edit apply to this point only */
 const MOD = { alt:false, once:false };
-const armOnce = on => { MOD.once = on; const h = document.querySelector("#linkBar .lhint"); if (h && prefs.link !== false) h.textContent = on ? "Next edit: this point only (Esc to cancel)" : "Press Alt (Option) before an edit to change this point only"; const bar = document.getElementById("linkBar"); if (bar) bar.classList.toggle("once", on); };
+const armOnce = on => { MOD.once = on; const h = document.querySelector("#linkBar .lhint"); if (h && prefs.linkPts !== false) h.textContent = on ? "Next edit: this point only (Esc to cancel)" : "Press Alt (Option) before an edit to change this point only"; const bar = document.getElementById("linkBar"); if (bar) bar.classList.toggle("once", on); };
 addEventListener("keydown", e => { if (e.key === "Alt" && !e.repeat && linkOn()) armOnce(!MOD.once); if (e.key === "Escape" && MOD.once) armOnce(false); }, true);
 document.addEventListener("pointerdown", e => { if (e.altKey && linkOn() && !MOD.once) armOnce(true); }, true);
-const linkOn = () => !EXPO && !LMEF && prefs.link !== false && SITES.length > 1;
+const linkOn = () => !EXPO && !LMEF && prefs.linkPts !== false && SITES.length > 1;
 function linkWeight(a, b){ const d = kmBetween(a.lat, a.lon, b.lat, b.lon); return Math.max(0.4, Math.min(1, 1 - (d - 15)/50)); }
 function linkTargets(){ const on = prefs.linkTo || {}; return SITES.filter(x => x.id !== prefs.site && on[x.id] !== false); }
 function adjust(k, p, vA, gA, gB, w){
@@ -1014,7 +1112,7 @@ function renderLinkBar(){
   const bar = $("linkBar"); if (!bar) return;
   if (EXPO || LMEF || SITES.length < 2){ bar.hidden = true; return; }
   bar.hidden = false;
-  const src = site(), on = prefs.linkTo || {}, linking = prefs.link !== false;
+  const src = site(), on = prefs.linkTo || {}, linking = prefs.linkPts !== false;
   const issues = S.consCache || [];
   clearTimeout(S.consT); S.consT = setTimeout(() => { const n = consistencyIssues(); const changed = n.length !== (S.consCache || []).length; S.consCache = n; if (changed) renderLinkBar(); }, 350);
   bar.innerHTML = `<label class="lsw"><input type="checkbox" id="linkSw" ${linking ? "checked" : ""}> <b>Edits also apply to</b></label>
@@ -1640,8 +1738,30 @@ function workbook(sheets, logo){
 }
 const xcols = () => ["Day","Time","Period", ...PARAMS.map(p => p.k)];
 /* product name for titles, sheets and files */
-const FILE_BASE = () => EXPO ? ((prefs.exp && prefs.exp.op ? prefs.exp.op.replace(/[^A-Za-z0-9]+/g, "_") + "_" : "") + "Exposure_Forecast") : "Planning_Forecast";
-const productName = s => EXPO ? `${(prefs.exp && prefs.exp.op) ? prefs.exp.op + " " : ""}Exposure Forecast` : "Daily Planning Forecast";
+const FILE_BASE = () => EXPO ? ((prefs.exp && prefs.exp.op ? prefs.exp.op.replace(/[^A-Za-z0-9]+/g, "_") + "_" : "") + (BURN ? "Burn_Forecast" : "Exposure_Forecast")) : "Planning_Forecast";
+const productName = s => EXPO ? `${(prefs.exp && prefs.exp.op) ? prefs.exp.op + " " : ""}${BURN ? "Burn Forecast" : "Exposure Forecast"}` : "Daily Planning Forecast";
+/* prescription in words, plus the hours the official forecast meets every criterion */
+function burnSummary(){
+  const exp = prefs.exp || expStored, cons = (exp.constraints || []).filter(c => RXF[c.f]);
+  if (!cons.length) return "No prescription set.";
+  const rx = "Prescription: " + cons.map(c => { const f = RXF[c.f]; return f.sector ? `${f.l} from ${rxValueText(c)}` : `${f.short} ${opText(c.op)} ${rxValueText(c)}`; }).join("; ") + ".";
+  if (!S.rows || !S.G[prefs.site]) return rx;
+  const OFs = officialFor(prefs.site), o = OFs.o, ok = [];
+  S.rows.forEach((r, i) => {
+    let good = true;
+    for (const c of cons){
+      const f = RXF[c.f], key = f.sector ? "dir" : f.key, x = o[key] ? o[key][i] : null; if (x == null){ good = false; break; }
+      const v = f.wind ? (+c.v)*(WIND_UNITS[c.unit || "mph"] || 1) : +c.v;
+      const pass = f.sector ? inSector(x, +c.v, +c.v2) : c.op === ">=" ? x >= v : c.op === ">" ? x > v : c.op === "<=" ? x <= v : x < v;
+      if (!pass){ good = false; break; }
+    }
+    if (good) ok.push(r);
+  });
+  if (!ok.length) return rx + " Forecast: no hours fully in prescription.";
+  const spans = []; ok.forEach(r => { const l = spans[spans.length - 1]; if (l && l.b === r.a) l.b = r.b; else spans.push({ a:r.a, b:r.b }); });
+  const t = ms => hhmm(ms, zulu()) + (zulu() ? "Z" : "L");
+  return rx + " Forecast in prescription: " + spans.map(sp => `${dayLabel(sp.a, zulu()).wd.slice(0, 3)} ${t(sp.a)}–${t(sp.b)}`).join(", ") + ".";
+}
 function siteSheet(s, OFs, issued, by){
   const XCOLS = xcols();
   const z = zulu(), tz = z ? "UTC" : tzAbbr(issued), o = OFs.o, rows = S.rows;
@@ -1853,7 +1973,7 @@ td.mut{color:#9AA6B0}.hd{display:flex;gap:14px;align-items:center;margin-bottom:
    beside the official values; the customer files carry neither */
 function keepForVerification(list, issued, by){
   try {
-    const text = csvFor(list, issued, by, true), kind = EXPO ? "exposure" : LMEF ? null : "planning"; if (!kind) return;
+    const text = csvFor(list, issued, by, true), kind = BURN ? null : EXPO ? "exposure" : LMEF ? null : "planning"; if (!kind) return;
     const q = indexedDB.open("erwx-verify", 1);
     q.onupgradeneeded = () => q.result.createObjectStore("official");
     q.onsuccess = () => {
@@ -1878,6 +1998,7 @@ function tintA(p, v){
 }
 /* the customer-facing explanation of the table (the editor's footnote is for forecasters) */
 function productNote(){
+  if (BURN) return "Rows are hourly. Prescription rows give the chance each criterion, and all of them together, is met through the hour. Mixing height is above ground; transport wind is the mean wind through the mixed layer; ventilation is mixing height × transport wind. The dispersion index and LVORI are estimates from the forecast mixing height, transport wind, humidity and wind; Haines is the low-elevation form. Winds are in the selected unit; temperatures in °F.";
   const blocks = EXPO ? `Rows are hourly for the first ${prefs.exp && prefs.exp.hourly != null ? prefs.exp.hourly : 24} hours, then 3-hour blocks to the end of the period.` : "Rows are hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7.";
   return `${blocks} In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the period shown. 3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time.${EXPO ? " Constraint probabilities are the chance that the constraint is met at any time in the row." : ""} Winds are in the selected unit; temperatures in °F.`;
 }
@@ -2133,7 +2254,12 @@ function pdfReport(models, logo){
       if (logo) cs.push(`q ${f(LW)} 0 0 ${f(LH)} ${f(M)} ${f(Hp - M + 4 - LH)} cm /Im1 Do Q`);
       const ty = logo ? M + 14 : M + 12;
       text(m.title, TX, ty, fitText(m.title, W - M - TX - 60, 13, true), { bold:true });
-      text(m.sub, TX, ty + 13, fitText(m.sub, W - M - TX, 7.5, false), { color:[75,90,104] });
+      { /* long subtitles (a burn prescription, many constraints) wrap onto up to three lines */
+        const words = String(m.sub).split(" "), lines = []; let ln = "";
+        for (const w of words){ const t2 = ln ? ln + " " + w : w; if (tw(t2, 7.5, false) > W - M - TX && ln){ lines.push(ln); ln = w; } else ln = t2; }
+        if (ln) lines.push(ln);
+        const keep = lines.slice(0, 3); if (lines.length > 3) keep[2] = lines.slice(2).join(" ");
+        keep.forEach((l2, k) => text(l2, TX, ty + 13 + k*9, k === 2 ? fitText(l2, W - M - TX, 7.5, false) : 7.5, { color:[75,90,104] })); }
       if (m.pages.length > 1) text(`Page ${pi + 1} of ${m.pages.length}`, W - M, M + 12, 7.5, { align:"r", color:[125,139,151] });
       const { gw, lw } = m._hw || (m._hw = headerWidths(m)), x0 = M + gw + lw, ncol = pg.times.length;
       const cw = Math.min(24, (W - M - x0)/ncol), top = M + Math.max(38, LH + 4), dh = 12, th = 18, rh = 13.2;
@@ -2548,6 +2674,14 @@ function demoSeries(TL, r, bias){
     m.pr[i] = !post && h >= 13 && h <= 19 && r() < 0.18 ? 0.05 + r()*0.3 : (Math.abs(t - front) < 6*H && r() < 0.4 ? 0.1 : 0);
     m.pp[i] = !post && h >= 13 && h <= 19 ? 25 + r()*20 : 5;
     m.cl[i] = Math.min(100, m.sky[i]*0.7); m.cm[i] = Math.min(100, m.sky[i]*0.4); m.ch[i] = Math.min(100, m.sky[i]*0.6); m.lcb[i] = 3500 + r()*1500;
+    if (BURN){
+      /* demo fire weather: a daytime mixed layer, winds increasing with height */
+      const day = Math.max(0, Math.sin((h - 8)/11*Math.PI));
+      m.td[i] -= 16*day;
+      (m.blh = m.blh || [])[i] = 180 + 1300*day + (r() - 0.5)*150;
+      [[975,300],[950,550],[925,800],[900,1050],[850,1550],[800,2050]].forEach(([p, z], k) => { (m["z" + p] = m["z" + p] || [])[i] = z; (m["ws" + p] = m["ws" + p] || [])[i] = m.s80[i]*(1.05 + 0.12*k); (m["wd" + p] = m["wd" + p] || [])[i] = (m.d10[i] + 8*k) % 360; });
+      (m.t950 = m.t950 || [])[i] = m.t[i] - 5 - 3*day; (m.t850 = m.t850 || [])[i] = m.t[i] - 16 - 2*day; (m.rh950 = m.rh950 || [])[i] = 75; (m.rh850 = m.rh850 || [])[i] = 45 + 25*r();
+    }
   }
   return m;
 }
@@ -2663,7 +2797,7 @@ function bind(){
   const lb = document.getElementById("linkBar");
   if (lb){
     lb.addEventListener("change", ev => {
-      if (ev.target.id === "linkSw"){ prefs.link = ev.target.checked; savePrefs(); renderLinkBar(); toast(prefs.link ? "Edits apply to the other points" : "Edits change this point only"); }
+      if (ev.target.id === "linkSw"){ prefs.linkPts = ev.target.checked; savePrefs(); renderLinkBar(); toast(prefs.linkPts ? "Edits apply to the other points" : "Edits change this point only"); }
       else if (ev.target.dataset.lt){ prefs.linkTo = prefs.linkTo || {}; prefs.linkTo[ev.target.dataset.lt] = ev.target.checked; savePrefs(); }
     });
     lb.addEventListener("click", ev => { if (ev.target.closest("#consBtn")) openConsistency(); });
