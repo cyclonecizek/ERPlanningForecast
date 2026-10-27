@@ -170,6 +170,37 @@ amber, ↺ to go back). Additional risk criteria can be switched off or added:
 
 Export as PDF, HTML, Excel or CSV.
 
+## Mission weather products (MWP)
+`docs/mwp.html` builds the mission execution forecasts for the flying units: **PSFB (KCOF)** and
+**NASA SLF (KTTS)**.
+* **Valid blocks:** DTAC (0800-1700L), NTAC (1600-2400L) and OTAC, each with editable hours; any date.
+* **Take-off/landing data** are built hour by hour from the station TAF, so the product matches it:
+  the TAF generator draft when it covers the block, otherwise the latest issued TAF (or choose).
+  FM and BECMG groups set the prevailing conditions, TEMPO lines show underneath. Temperature, dew
+  point, RH and altimeter come from the models (GFS, ECMWF, HRRR, NBM through Open-Meteo); pressure
+  altitude uses the field elevation; crosswinds use each runway's true heading and the gust when
+  given. A CAT column gives the airfield category. Every cell can be edited (amber when changed).
+* **Flight-level winds and temperature** at 100-4,000 ft AGL for a chosen hour, interpolated from the
+  10 m, 80 m and 1000-850 hPa levels; the freezing level in hundreds of feet.
+* **Solar/lunar (local):** sunrise and sunset, nautical twilight, and either civil twilight (PSFB) or
+  the moon's altitude and meridian passing (NASA); moonrise, moonset and illumination. Computed here
+  (SunCalc method), within a few minutes of almanac times.
+* **Sea state:** wave height from the NWS coastal waters forecast (AMZ572 for the 41009 block,
+  AMZ552 for Kathy), choosing the day or night period that matches the block; sea temperature from
+  the latest buoy observation (41009, and the 41113 nearshore buoy for Kathy); the Open-Meteo marine
+  model fills in when either is missing and gives Kathy's hourly waves, period and direction. The
+  product shows the NWS seas text and the latest 41009 observation in their own rows. The MOS
+  workflow mirrors the buoys (NDBC realtime) into `data/buoys.json` and the coastal waters forecast
+  (api.weather.gov) into `data/cwf.json` every 30 minutes; the page asks the NWS directly if the
+  mirror isn't there yet.
+* **Planning, alternate and divert TAFs** from aviationweather.gov (or pasted), every line tagged
+  with its category, and a category strip across the valid block.
+* **DZ hazards (PSFB, page 2):** the 920th and DOS drop zones on two maps, a first-guess hazard for
+  each from the models (thunder, instability, gusts) that the forecaster sets, the legend and the
+  hazard discussion. Avon Park and Kathy use the coordinates given; Bam Bam/Judy uses KCOF; the
+  others are estimated from the old map (marked *) and can be corrected on the page.
+* **Output:** PDF (US Letter portrait; page 2 for PSFB) and HTML.
+
 ## Burn forecasts
 `docs/burn.html` is an exposure-style page for prescribed burns. Points are a named burn unit
 (latitude and longitude) first, then the pads and airfields. Rows are hourly through the chosen

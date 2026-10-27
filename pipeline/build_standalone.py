@@ -19,8 +19,8 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")
 PAGES = [("planning", "index.html", "Planning forecast"), ("exposure", "exposure.html", "Exposure forecasts"), ("burn", "burn.html", "Burn forecasts"),
-         ("lmef", "lmef.html", "Launch forecast (LMEF)"), ("taf", "taf.html", "TAF generator"), ("verify", "verify.html", "Verification")]
-HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "burn.html": "burn", "lmef.html": "lmef", "taf.html": "taf", "verify.html": "verify", "verify.html#exposure": "verify", "./#brief": "planning#brief"}
+         ("lmef", "lmef.html", "Launch forecast (LMEF)"), ("taf", "taf.html", "TAF generator"), ("mwp", "mwp.html", "Mission weather products"), ("verify", "verify.html", "Verification")]
+HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "burn.html": "burn", "lmef.html": "lmef", "taf.html": "taf", "mwp.html": "mwp", "verify.html": "verify", "verify.html#exposure": "verify", "./#brief": "planning#brief"}
 
 
 def page_html(fname, base, logo_uri, seal_uri=""):
@@ -118,6 +118,7 @@ iframe.on{display:block}
       <label><input type="checkbox" data-tool="burn" checked> Burn forecasts</label>
       <label><input type="checkbox" data-tool="lmef" checked> Launch forecast (LMEF)</label>
       <label><input type="checkbox" data-tool="taf" checked> TAF drafts</label>
+      <label><input type="checkbox" data-tool="mwp" checked> Mission weather products</label>
     </fieldset>
     <label class="note">Handoff note (optional)<textarea id="wsNote" rows="3" placeholder="e.g. Updated LC-39A exposure for the crane lift; LMEF delay day still needs review"></textarea></label>
     <div id="wsInfo" class="info"></div>
@@ -147,7 +148,7 @@ window.addEventListener("message", function(e){ if (e.data && e.data.erwxTab) sh
 /* ---------- shared workspace file ----------
    Each tool keeps its work in this browser's storage under its own prefix; the workspace file
    carries those entries between computers. Personal settings (initials, theme) stay local. */
-var TOOLS = { planning:["planfx:"], exposure:["expfx:","schedfx:"], burn:["burnfx:","schedfx:"], lmef:["lmfx:","lmef:","schedfx:"], taf:["taffx:"] };
+var TOOLS = { planning:["planfx:"], exposure:["expfx:","schedfx:"], burn:["burnfx:","schedfx:"], lmef:["lmfx:","lmef:","schedfx:"], taf:["taffx:"], mwp:["mwpfx:"] };
 var PERSONAL = ["initials","tz","wu","theme"];
 var wsHandle = null;
 function chosen(){ return [].slice.call(document.querySelectorAll("#ws [data-tool]")).filter(function(c){ return c.checked; }).map(function(c){ return c.dataset.tool; }); }

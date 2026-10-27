@@ -1620,15 +1620,7 @@ function crc32(b){ let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CR
 /* ---------- 45 WS logo for published products ---------- */
 let LOGO = null;
 /* decode an image into what the PDF writer needs: RGB plus a separate alpha mask */
-async function decodeImage(bytes, type){
-  const img = await createImageBitmap(new Blob([bytes], { type: type || "image/png" }));
-  const rh = 200, rw = Math.round(img.width*rh/img.height);
-  const c = document.createElement("canvas"); c.width = rw; c.height = rh;
-  const x = c.getContext("2d"); x.drawImage(img, 0, 0, rw, rh);
-  const d = x.getImageData(0, 0, rw, rh).data, rgb = new Uint8Array(rw*rh*3), alpha = new Uint8Array(rw*rh);
-  for (let i = 0, j = 0, k = 0; i < d.length; i += 4, k++){ rgb[j++] = d[i]; rgb[j++] = d[i + 1]; rgb[j++] = d[i + 2]; alpha[k] = d[i + 3]; }
-  return { w: img.width, h: img.height, rgb, alpha, rw, rh };
-}
+
 async function loadLogo(){
   if (LOGO !== null) return LOGO;
   try {
@@ -2214,9 +2206,6 @@ function reportViewer(){
 }
 
 /* ---------- PDF (hand-built, Helvetica, US Letter landscape) ---------- */
-const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
-const textW = (s, size, bold) => { let w = 0; for (const ch of String(s)){ const c = ch.charCodeAt(0); w += c >= 32 && c <= 126 ? HW[c - 32] : ch === "–" ? 556 : ch === "°" ? 400 : 556; } return w*size/1000*(bold ? 1.06 : 1); };
-const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "•") return "\\225"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; if (ch === "’") return "\\222"; if (ch === "‘") return "\\221"; if (ch === "“") return "\\223"; if (ch === "”") return "\\224"; if (ch === "¹") return "\\271"; if (ch === "²") return "\\262"; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
 function pdfReport(models, logo){
   const W = 792, Hp = 612, M = 28, ops = [];
   const LH = logo ? 46 : 0, LW = logo ? LH*logo.rw/logo.rh : 0, TX = logo ? M + LW + 10 : M;
@@ -2302,44 +2291,7 @@ function pdfReport(models, logo){
   }
   return pdfAssemble(pages, logo, W, Hp);
 }
-function pdfAssemble(pages, logo, W, Hp, opts){
-  opts = opts || {};
-  /* assemble objects */
-  const objs = [];
-  const add = s => { objs.push(s); return objs.length; };
-  const fontR = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
-  const fontB = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
-  const fontI = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>");
-  const fontBI = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-BoldOblique /Encoding /WinAnsiEncoding >>");
-  const im2 = opts.image2 ? (() => { const g = opts.image2; const sm = g.alpha ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${g.rw} /Height ${g.rh} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${g.alpha.length} >>\nstream\n`, bin:g.alpha, tail:"\nendstream" }) : null; return add({ head:`<< /Type /XObject /Subtype /Image /Width ${g.rw} /Height ${g.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8${sm ? ` /SMask ${sm} 0 R` : ""} /Length ${g.rgb.length} >>\nstream\n`, bin:g.rgb, tail:"\nendstream" }); })() : null;
-  const annots = (opts.links || []).map(l => ({ page:l.page || 0, id: add(`<< /Type /Annot /Subtype /Link /Rect [${l.x.toFixed(1)} ${(Hp - l.y - l.h).toFixed(1)} ${(l.x + l.w).toFixed(1)} ${(Hp - l.y).toFixed(1)}] /Border [0 0 0] /A << /S /URI /URI (${l.url}) >> >>`) }));
-  const smask = logo && logo.alpha ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceGray /BitsPerComponent 8 /Length ${logo.alpha.length} >>\nstream\n`, bin:logo.alpha, tail:"\nendstream" }) : null;
-  const img = logo ? add({ head:`<< /Type /XObject /Subtype /Image /Width ${logo.rw} /Height ${logo.rh} /ColorSpace /DeviceRGB /BitsPerComponent 8${smask ? ` /SMask ${smask} 0 R` : ""} /Length ${logo.rgb.length} >>\nstream\n`, bin:logo.rgb, tail:"\nendstream" }) : null;
-  const pagesId = objs.length + 1 + pages.length*2;   /* reserved after page objects */
-  const kids = [];
-  pages.forEach((c, pi) => {
-    const sid = add(`<< /Length ${c.length} >>\nstream\n${c}\nendstream`);
-    const an = annots.filter(a => a.page === pi).map(a => a.id + " 0 R");
-    const xo = [img ? `/Im1 ${img} 0 R` : "", im2 ? `/Im2 ${im2} 0 R` : ""].filter(Boolean).join(" ");
-    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${Hp}] /Resources << /Font << /F1 ${fontR} 0 R /F2 ${fontB} 0 R /F3 ${fontI} 0 R /F4 ${fontBI} 0 R >>${xo ? ` /XObject << ${xo} >>` : ""} >>${an.length ? ` /Annots [${an.join(" ")}]` : ""} /Contents ${sid} 0 R >>`));
-  });
-  add(`<< /Type /Pages /Kids [${kids.map(k => k + " 0 R").join(" ")}] /Count ${kids.length} >>`);
-  const cat = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
-  const parts = []; let pos = 0;
-  const putS = str => { const b = new Uint8Array(str.length); for (let i = 0; i < str.length; i++) b[i] = str.charCodeAt(i) & 0xFF; parts.push(b); pos += b.length; };
-  const putB = b => { parts.push(b); pos += b.length; };
-  const offs = [];
-  putS("%PDF-1.4\n");
-  objs.forEach((o, i) => {
-    offs.push(pos);
-    if (typeof o === "string") putS(`${i + 1} 0 obj\n${o}\nendobj\n`);
-    else { putS(`${i + 1} 0 obj\n${o.head}`); putB(o.bin); putS(`${o.tail}\nendobj\n`); }
-  });
-  const xref = pos;
-  putS(`xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join(""));
-  putS(`trailer\n<< /Size ${objs.length + 1} /Root ${cat} 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
-  return new Blob(parts, { type:"application/pdf" });
-}
+
 
 /* ============================================================
    Leadership quick look: one page built from the official forecast

@@ -9,6 +9,7 @@ Standard library only. A failed download keeps the previous file, so a bad hour 
 the page.
 """
 import json
+from datetime import datetime, timezone
 import os
 import sys
 import time
@@ -52,6 +53,79 @@ def rows_of(js):
     return d if isinstance(d, list) else []
 
 
+# ---------- marine: NDBC buoy observations and the NWS coastal waters forecast ----------
+BUOYS = {"41009": ("Canaveral 20 nm east", 28.519, -80.166), "41113": ("Cape Canaveral nearshore", 28.400, -80.534), "41010": ("Canaveral 120 nm east", 28.878, -78.485)}
+CWF_ZONES = {"AMZ552": "Volusia-Brevard County Line to Sebastian Inlet 0-20 nm", "AMZ572": "Volusia-Brevard County Line to Sebastian Inlet 20-60 nm", "AMZ550": "Flagler Beach to Volusia-Brevard County Line 0-20 nm"}
+
+
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if x in (99.0, 999.0, 9999.0) or v in ("MM",) else x
+
+
+def buoys():
+    """last 24 h of standard meteorological observations (NDBC realtime2); metric units as NDBC gives them"""
+    out = {}
+    for sid, (name, lat, lon) in BUOYS.items():
+        try:
+            with urllib.request.urlopen(urllib.request.Request(f"https://www.ndbc.noaa.gov/data/realtime2/{sid}.txt", headers=UA), timeout=40) as r:
+                lines = r.read().decode("utf-8", "replace").splitlines()
+        except Exception as e:  # noqa: BLE001
+            print(f"buoy {sid}: {e}")
+            continue
+        head = lines[0].lstrip("#").split() if lines else []
+        obs = []
+        for ln in lines[2:]:
+            c = dict(zip(head, ln.split()))
+            try:
+                t = f"{c['YY']}-{c['MM']}-{c['DD']}T{c['hh']}:{c['mm']}:00Z"
+            except KeyError:
+                continue
+            obs.append({"t": t, "wdir": _num(c.get("WDIR")), "wspd_ms": _num(c.get("WSPD")), "gst_ms": _num(c.get("GST")), "wvht_m": _num(c.get("WVHT")),
+                        "dpd_s": _num(c.get("DPD")), "mwd": _num(c.get("MWD")), "atmp_c": _num(c.get("ATMP")), "wtmp_c": _num(c.get("WTMP"))})
+            if len(obs) >= 48:
+                break
+        out[sid] = {"name": name, "lat": lat, "lon": lon, "obs": obs}
+        print(f"buoy {sid}: {len(obs)} obs")
+    if out:
+        write_data("buoys.json", {"updated": datetime.now(timezone.utc).isoformat(), "buoys": out})
+
+
+def cwf():
+    """NWS coastal waters forecast periods for the zones off the Cape"""
+    out = {}
+    for zone, name in CWF_ZONES.items():
+        try:
+            with urllib.request.urlopen(urllib.request.Request(f"https://api.weather.gov/zones/forecast/{zone}/forecast", headers={**UA, "Accept": "application/geo+json"}), timeout=40) as r:
+                js = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception as e:  # noqa: BLE001
+            print(f"cwf {zone}: {e}")
+            continue
+        props = js.get("properties", {})
+        out[zone] = {"name": name, "updated": props.get("updated"), "periods": [{"name": p.get("name"), "text": p.get("detailedForecast")} for p in props.get("periods", [])][:8]}
+        print(f"cwf {zone}: {len(out[zone]['periods'])} periods")
+    if out:
+        write_data("cwf.json", {"updated": datetime.now(timezone.utc).isoformat(), "zones": out})
+
+
+def write_data(name, obj):
+    path = os.path.join(ROOT, "docs", "data", name)
+    with open(path + ".tmp", "w") as f:
+        json.dump(obj, f, separators=(",", ":"))
+    os.replace(path + ".tmp", path)
+
+
+def marine():
+    for fn in (buoys, cwf):
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001
+            print(f"{fn.__name__}: {e}")
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     ok = 0
@@ -91,6 +165,7 @@ def main():
                 print(f"{name}: saved")
         except Exception as e:  # noqa: BLE001
             print(f"{name}: failed ({e}), keeping previous file")
+    marine()
     # SWPC 3-day forecast text (solar radiation storm probabilities for proton flux)
     try:
         with urllib.request.urlopen(urllib.request.Request(THREEDAY, headers=UA), timeout=45) as r:

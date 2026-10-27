@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mission Weather Products | 45th Weather Squadron</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF2F1; --panel:#FFFFFF; --panel-2:#F6F8F8; --ink:#13202E; --ink-2:#4B5A68; --ink-3:#7D8B97;
+  --rule:#D4DBDF; --rule-2:#E6EBED; --accent:#0B6E79; --accent-ink:#FFFFFF; --edit:#B5730C; --edit-bg:#FFF4DF;
+  --warn:#B23A2E; --warn-bg:#FBE9E6; --ok:#2F7A4A;
+  --c1:#F6D58A; --c2:#EFA765; --c3:#E07152; --c4:#C2414A; --c5:#8E2F5B;
+  --hires:#7A4FA0; --blend:#0B6E79; --global:#3D6FB0; --ens:#8A9AA8; --mos:#B5730C; --ct:#B4472A; --peak:#3359A8;
+  --p:11,110,121; --hot:178,58,46; --cold:52,102,170;
+  --font:"Barlow", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --cond:"Barlow Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+    --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+    --warn:#F08070; --warn-bg:#3B1C18; --ok:#6CC08A;
+    --c1:#6B5A26; --c2:#7A4A26; --c3:#80382A; --c4:#7A2430; --c5:#5E1E44;
+    --hires:#B892DA; --blend:#4DBFC8; --global:#7FA8E0; --ens:#6E7F8D; --mos:#E3A53D; --ct:#F08A6A; --peak:#93B4F0;
+    --p:77,191,200; --hot:240,128,112; --cold:120,160,230;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+  --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+  --warn:#F08070; --warn-bg:#3B1C18; --ok:#6CC08A;
+  --c1:#6B5A26; --c2:#7A4A26; --c3:#80382A; --c4:#7A2430; --c5:#5E1E44;
+  --p:77,191,200; color-scheme: dark;
+}
+:root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+body{ margin:0; background:var(--paper); color:var(--ink); font:15px/1.45 var(--font); font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
+button,input,select,textarea{ font:inherit; color:inherit; }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+a{ color:var(--accent); }
+
+.top{ display:grid; grid-template-columns:1fr auto; gap:14px 28px; align-items:center; padding:18px 28px 16px; background:var(--panel); border-bottom:1px solid var(--rule); }
+.top h1{ margin:0; font:700 26px/1 var(--cond); }
+.top .where{ margin-top:6px; color:var(--ink-2); font-size:14px; }
+.top .where b{ color:var(--ink); }
+.actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.btn{ border:1px solid var(--rule); background:var(--panel); border-radius:8px; padding:7px 13px; cursor:pointer; font-weight:500; white-space:nowrap; text-decoration:none; color:var(--ink); display:inline-block; }
+.btn:hover{ border-color:var(--ink-3); }
+.btn.primary{ background:var(--ink); color:var(--panel); border-color:var(--ink); font-weight:600; padding:8px 18px; }
+.seg{ display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden; }
+.seg button{ border:0; background:var(--panel); padding:6px 12px; cursor:pointer; font-size:13.5px; }
+.seg button[aria-pressed="true"]{ background:var(--ink); color:var(--panel); }
+
+.statusline{ display:flex; flex-wrap:wrap; gap:8px 22px; align-items:center; padding:10px 28px; font-size:13.5px; color:var(--ink-2); border-bottom:1px solid var(--rule); background:var(--panel-2); }
+.statusline .k{ color:var(--ink-3); margin-right:6px; }
+.statusline .live::before{ content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-right:7px; vertical-align:1px; }
+.statusline .live.err::before{ background:var(--warn); }
+.statusline label{ display:inline-flex; gap:7px; align-items:center; }
+.statusline input{ width:78px; padding:3px 7px; border:1px solid var(--rule); border-radius:6px; background:var(--panel); font-family:var(--mono); }
+.statusline .sp{ flex:1; }
+.stnline{ background:var(--panel); }
+.stnother{ display:inline-flex; gap:10px; align-items:center; }
+.stnother[hidden]{ display:none; }
+.statusline select{ border:1px solid var(--rule); border-radius:6px; padding:3px 6px; background:var(--panel); }
+.banner{ margin:14px 28px 0; padding:10px 14px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-weight:500; display:none; }
+.banner.show{ display:block; }
+.banner.demo{ background:var(--edit-bg); color:var(--edit); }
+
+main{ padding:18px 28px 40px; display:grid; gap:18px; }
+main > *{ min-width:0; }
+.tbrand{ display:flex; gap:14px; align-items:center; }
+.unitlogo{ height:60px; width:auto; flex:none; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
+.pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
+.pagenav{ align-items:center; }
+.pagenav .navsp{ flex:1; }
+.pagenav a.offl{ font:500 13px var(--font); border-bottom:0; margin-right:10px; }
+.pagenav .theme{ margin:0 0 4px; }
+.pagenav .theme button{ padding:4px 10px; font-size:12.5px; }
+.pagenav a{ padding:8px 16px 9px; font:600 15px var(--cond); letter-spacing:.2px; color:var(--ink-2); text-decoration:none; border-bottom:3px solid transparent; }
+.pagenav a:hover{ color:var(--ink); }
+.pagenav a[aria-current="page"]{ color:var(--accent); border-bottom-color:var(--accent); }
+.panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; }
+
+/* TAF text: the product itself */
+.taf{ padding:16px 18px 14px; }
+.tafhead{ display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:10px; }
+.tafhead h2{ margin:0; font:700 22px/1 var(--cond); }
+.tafhead .note{ color:var(--ink-3); font-size:13px; flex:1; }
+.tafhead .note.edited{ color:var(--edit); }
+textarea#taf{ width:100%; resize:vertical; border:1px solid var(--rule); border-radius:10px; background:var(--panel-2); padding:14px 16px; font:500 16px/1.75 var(--mono); letter-spacing:.2px; white-space:pre; overflow:auto; }
+textarea#taf:focus{ outline:2px solid var(--accent); outline-offset:-1px; background:var(--panel); }
+.lint{ margin:10px 0 0; padding:0; list-style:none; display:grid; gap:4px; font-size:13.5px; }
+.lint li{ display:flex; gap:8px; align-items:baseline; }
+.lint li::before{ content:""; flex:none; width:7px; height:7px; border-radius:50%; background:var(--warn); transform:translateY(-1px); }
+.lint li.ok{ color:var(--ok); }
+.lint li.ok::before{ background:var(--ok); }
+.lint li.err{ color:var(--warn); }
+.lint li.info{ color:var(--ink-2); }
+.lint li.info::before{ background:var(--ink-3); }
+.lint code{ font:500 13px var(--mono); background:var(--panel-2); padding:0 4px; border-radius:4px; }
+
+/* hourly guidance strip */
+.strip{ padding:14px 0 6px; }
+.strip h2{ margin:0 18px 2px; font:700 20px/1 var(--cond); }
+.strip .sub{ margin:4px 18px 10px; color:var(--ink-3); font-size:13px; }
+.gridwrap{ overflow-x:auto; }
+table.hr{ border-collapse:separate; border-spacing:0; font-size:13px; width:max-content; min-width:100%; }
+.hr th,.hr td{ border-bottom:1px solid var(--rule-2); border-right:1px solid var(--rule-2); padding:4px 6px; text-align:center; white-space:nowrap; }
+.hr th.rl{ position:sticky; left:0; z-index:2; background:var(--panel); text-align:left; font:600 13px var(--cond); color:var(--ink-2); padding:4px 12px 4px 18px; min-width:118px; border-right:1px solid var(--rule); }
+.hr thead th{ font:600 12.5px var(--cond); color:var(--ink-2); min-width:54px; }
+.hr thead th small{ display:block; color:var(--ink-3); font-weight:500; }
+.hr thead th.day{ border-left:2px solid var(--ink-3); }
+.hr td.day{ border-left:2px solid var(--ink-3); }
+.hr tr.groups td{ padding:3px 2px; font:600 11.5px var(--cond); }
+.hr .g{ display:block; border-radius:5px; padding:2px 4px; background:var(--panel-2); color:var(--ink-2); }
+.hr .g.init{ background:rgba(var(--p),.18); color:var(--ink); }
+.hr .g.becmg{ background:rgba(var(--p),.32); color:var(--ink); }
+.hr .g.tempo{ background:var(--edit-bg); color:var(--edit); }
+.hr td.c1{ background:var(--c1); } .hr td.c2{ background:var(--c2); } .hr td.c3{ background:var(--c3); color:#fff; } .hr td.c4{ background:var(--c4); color:#fff; } .hr td.c5{ background:var(--c5); color:#fff; }
+.hr td.mono{ font-family:var(--mono); font-size:12.5px; }
+.hr td.p{ font-weight:600; }
+
+/* settings + sources */
+details.cfg > summary{ list-style:none; cursor:pointer; padding:12px 16px; display:flex; gap:12px; align-items:center; font-weight:600; }
+details.cfg > summary::-webkit-details-marker{ display:none; }
+details.cfg > summary .chev{ color:var(--ink-3); transition:transform .15s; }
+details.cfg[open] > summary .chev{ transform:rotate(90deg); }
+details.cfg > summary .sum{ font-weight:400; color:var(--ink-2); font-size:13.5px; }
+.cfggrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px 26px; padding:4px 16px 18px; }
+.cfggrid h3{ margin:0 0 6px; font:600 13px var(--cond); color:var(--ink-3); letter-spacing:.3px; }
+.cfggrid label{ display:flex; justify-content:space-between; gap:10px; align-items:center; font-size:13.5px; padding:3px 0; }
+.cfggrid input{ width:110px; border:1px solid var(--rule); border-radius:6px; padding:3px 7px; background:var(--panel); font-family:var(--mono); font-size:13px; }
+.cfggrid input[type=checkbox]{ width:auto; }
+.srow{ display:flex; gap:8px; align-items:center; font-size:13.5px; padding:2px 0; }
+.srow .st{ font-size:12px; color:var(--ink-3); }
+.srow.na{ color:var(--ink-3); }
+.foot{ color:var(--ink-3); font-size:12.5px; max-width:100ch; }
+.foot p{ margin:4px 0; }
+.toast{ position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%) translateY(20px); background:var(--ink); color:var(--panel); padding:10px 18px; border-radius:10px; font-weight:500; opacity:0; transition:all .2s; pointer-events:none; z-index:50; }
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+@media (max-width:760px){
+  .top{ grid-template-columns:1fr; }
+  .top,.statusline,main{ padding-left:14px; padding-right:14px; }
+  .banner{ margin-left:14px; margin-right:14px; }
+  textarea#taf{ font-size:14px; }
+}
+@media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+<script>
+/* color theme shared by all pages: auto (follow the system), light or dark */
+(function(){ var t; try { t = localStorage.getItem("erwx:theme"); } catch (e) {} if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); })();
+document.addEventListener("DOMContentLoaded", function(){
+  var cur = function(){ return document.documentElement.getAttribute("data-theme") || "auto"; };
+  var mark = function(){ document.querySelectorAll(".theme [data-th]").forEach(function(b){ b.setAttribute("aria-pressed", b.getAttribute("data-th") === cur()); }); };
+  document.querySelectorAll(".theme [data-th]").forEach(function(b){ b.addEventListener("click", function(){
+    var t = b.getAttribute("data-th");
+    if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t);
+    try { localStorage.setItem("erwx:theme", t); } catch (e) {}
+    mark(); window.dispatchEvent(new Event("themechange"));
+  }); });
+  mark();
+});
+</script>
+</head>
+<body>
+<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="exposure.html">Exposure forecasts</a><a href="burn.html">Burn forecasts</a><a href="lmef.html">Launch forecast (LMEF)</a><a href="taf.html">TAF generator</a><a href="mwp.html" aria-current="page">Mission weather (MWP)</a><a href="verify.html">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<header class="top">
+  <div class="tbrand"><img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()"><div>
+    <h1>Mission weather products</h1>
+    <div class="where">Mission execution forecasts for the flying units at Patrick SFB and the NASA SLF</div>
+  </div></div>
+  <div class="actions"><button class="btn" id="htmlBtn">HTML</button><button class="btn primary" id="pdfBtn">Download PDF</button></div>
+</header>
+<div class="statusline mwpbar">
+  <span class="seg" id="prodSel" role="group" aria-label="Product"><button data-p="psfb">PSFB (KCOF)</button><button data-p="nasa">NASA SLF (KTTS)</button></span>
+  <span class="seg" id="blkSel" role="group" aria-label="Valid block"><button data-b="DTAC">DTAC</button><button data-b="NTAC">NTAC</button><button data-b="OTAC">OTAC</button></span>
+  <label>From <input id="blkA" type="number" min="0" max="23" style="width:52px">L to <input id="blkB" type="number" min="1" max="30" style="width:52px">L</label>
+  <label>Date <input id="mdate" type="date"></label>
+  <label>Forecaster <input id="mfc" maxlength="12" style="width:84px" autocomplete="off"></label>
+  <label>MEF # <input id="mmef" maxlength="12" style="width:74px" autocomplete="off"></label>
+  <span class="sp"></span><button class="btn" id="reload" style="padding:4px 10px;font-size:13px">Refresh data</button>
+</div>
+<div class="statusline"><span class="live" id="live">Loading</span></div>
+<main class="mwpmain">
+  <section class="panel">
+    <div class="ph2"><h2>Take-off/landing data</h2>
+      <label class="mut">TAF <select id="tafSrc"><option value="auto">TAF generator draft if it covers the block, else issued</option><option value="draft">TAF generator draft</option><option value="issued">Latest issued TAF</option></select></label>
+      <span class="mut" id="tafInfo"></span><span class="sp"></span><button class="btn ghost" id="resetOv" type="button">Clear my edits</button></div>
+    <p class="mut">Built hour by hour from the TAF (FM and BECMG groups; TEMPO lines underneath) so the product matches it, with temperatures, altimeter and pressure altitude from the models. Click any cell to change it; edited cells are amber. CAT is the airfield category from the ceiling and visibility.</p>
+    <div class="scroll" id="tbl"></div>
+  </section>
+  <section class="panel two">
+    <div><h2>Flight-level winds and temperature</h2><label>Valid at <select id="flHour"></select></label>
+      <h2 style="margin-top:14px">Watches, warnings and advisories</h2>
+      <label class="col">Watch<textarea id="w_watch" rows="2"></textarea></label><label class="col">Warning<textarea id="w_warning" rows="2"></textarea></label><label class="col">Advisory<textarea id="w_advisory" rows="2"></textarea></label></div>
+    <div><h2>Planning, alternate and divert TAFs</h2><p class="mut">Loaded from aviationweather.gov, each line tagged with its category. If they can't load, paste them in.</p><button class="btn" id="altEdit" type="button">Edit or paste TAFs</button></div>
+  </section>
+  <section class="panel" id="dzPanel">
+    <h2>Drop zone hazards (PSFB)</h2>
+    <p class="mut">The first guess comes from the models for the valid block (thunder, instability, gusts); choose the hazard for each DZ. Positions marked estimated were taken from the hazard map: correct them here and they are kept on this computer.</p>
+    <div class="scroll"><table class="dzt2"><thead><tr><th>Unit</th><th>DZ</th><th>Lat, lon</th><th>Hazard</th><th>Guidance</th></tr></thead><tbody id="dzRows"></tbody></table></div>
+    <label class="col">Hazard discussion<textarea id="dzDisc" rows="3" placeholder="e.g. VCTS starting 14Z to 20Z, TSRA on DZ from 18Z to 20Z"></textarea></label>
+  </section>
+  <section class="panel"><h2>Product</h2><div id="preview"></div></section>
+</main>
+<dialog id="altDlg"><div class="dlg"><h2>Planning and alternate TAFs</h2><p class="sub">Paste a TAF to use it instead of the one loaded. Leave a box as loaded to keep it current.</p><div id="altBody" class="altbody"></div><div class="row"><button class="btn" id="altClose" type="button">Cancel</button><button class="btn primary" id="altSave" type="button">Use these</button></div></div></dialog>
+<div class="toast" id="toast"></div>
+<style>
+.mwpbar{ flex-wrap:wrap; gap:8px 14px; } .mwpbar input{ border:1px solid var(--rule); border-radius:7px; padding:4px 6px; background:var(--panel); color:var(--ink); }
+.mwpmain{ display:grid; gap:14px; padding:14px 22px 40px; } .panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; }
+.panel h2{ margin:0 0 6px; font:700 17px var(--cond); } .ph2{ display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; } .ph2 .sp{ flex:1; } .ph2 select{ border:1px solid var(--rule); border-radius:7px; padding:4px 6px; background:var(--panel); color:var(--ink); }
+.two{ display:grid; grid-template-columns:1fr 1fr; gap:18px; } @media (max-width:900px){ .two{ grid-template-columns:1fr; } }
+.col{ display:flex; flex-direction:column; gap:3px; font-size:13px; font-weight:600; margin-top:6px; } .col textarea, .altbody textarea{ border:1px solid var(--rule); border-radius:7px; padding:6px; font:13px var(--mono); background:var(--panel); color:var(--ink); }
+.scroll{ overflow-x:auto; } table.mt{ border-collapse:collapse; font:600 12.5px var(--mono); } .mt th{ font:600 11.5px var(--cond); color:var(--ink-2); padding:5px 7px; border-bottom:1px solid var(--rule); text-align:center; white-space:nowrap; }
+.mt td{ padding:5px 7px; border-bottom:1px solid var(--rule-2); text-align:center; white-space:nowrap; } .mt td.ed{ cursor:text; } .mt td.ed:focus{ outline:2px solid var(--accent); background:var(--panel-2); } .mt td.ov{ background:var(--edit-bg); color:var(--edit); }
+.mt td.wxr{ background:#FBE0DD; color:#B4231A; } .mt td.wxy{ background:#FDF0C6; color:#8A5A00; } .mt tr.tp td{ font:500 11.5px var(--mono); color:var(--ink-3); text-align:left; padding-top:0; }
+.cb{ display:inline-block; min-width:38px; padding:1px 4px; border-radius:4px; color:#fff; font:700 10.5px var(--font); text-align:center; } .cb.sm{ min-width:34px; font-size:9.5px; }
+.dzt2{ border-collapse:collapse; font-size:13px; } .dzt2 th,.dzt2 td{ padding:4px 8px; border-bottom:1px solid var(--rule-2); text-align:left; } .dzt2 input{ width:84px; border:1px solid var(--rule); border-radius:6px; padding:3px 5px; background:var(--panel); color:var(--ink); } .dzt2 select{ border:1px solid var(--rule); border-radius:6px; padding:3px 5px; max-width:380px; background:var(--panel); color:var(--ink); }
+.altbody{ display:grid; gap:8px; } .altbody label{ display:flex; flex-direction:column; gap:3px; font-weight:700; }
+.mut{ color:var(--ink-3); font-size:12.5px; }
+</style>
+<style id="prodcss">
+.prod{ background:#fff; color:#000; max-width:860px; margin:0 auto 18px; padding:10px; border:1px solid #ccc; font-family:Arial,Helvetica,sans-serif; font-size:11px; }
+.ph{ display:grid; grid-template-columns:64px 1fr 64px 190px; gap:8px; align-items:center; background:#10284A; color:#fff; padding:6px; } .ph img{ height:58px; width:auto; }
+.ph .pt{ display:flex; flex-direction:column; align-items:center; gap:2px; text-align:center; } .ph .pt b{ font-size:14px; } .ph .red{ color:#F0473C; font-weight:700; font-size:10px; }
+.pm{ background:#fff; color:#000; border-collapse:collapse; font-size:10.5px; } .pm th,.pm td{ border:1px solid #000; padding:2px 5px; } .pm th{ text-align:left; } .pm td{ font-weight:700; text-align:center; min-width:70px; }
+.bar{ background:#1A1A1A; color:#fff; text-align:center; font-weight:700; font-size:13px; padding:3px; margin-top:4px; }
+table.pt2{ width:100%; border-collapse:collapse; } .pt2 th,.pt2 td{ border:1px solid #000; padding:3px 4px; text-align:center; font-weight:700; font-size:10.5px; } .pt2 td.wxr{ background:#FBD7D5; color:#B4231A; } .pt2 td.wxy{ background:#FDECBA; }
+.mid{ display:grid; grid-template-columns:200px 1fr; gap:6px; margin-top:6px; } .fl,.sl,.ww{ width:100%; border-collapse:collapse; } .fl th,.fl td,.sl th,.sl td,.ww th,.ww td{ border:1px solid #000; padding:2px 4px; font-size:10.5px; text-align:center; }
+.dk{ background:#1A1A1A; color:#fff; } .sl td.lft{ text-align:left; font-weight:400; font-size:10px; } .dk span{ float:right; } .sl th{ text-align:right; font-size:9.5px; } .ww th{ background:#D3D6DA; width:90px; } .ww th.dk,.fl th.dk,.sl th.dk{ background:#1A1A1A; color:#fff; } .sl td.lft{ text-align:left; font-weight:400; font-size:10px; } .ww td{ text-align:left; height:22px; }
+.alts{ display:grid; grid-template-columns:1fr 1fr; gap:6px; } .alt{ border:1px solid #000; } .alt .ah{ background:#D3D6DA; text-align:center; font-weight:700; padding:2px; }
+.alt pre{ margin:0; padding:4px; font:10px/1.45 "Courier New",monospace; white-space:pre-wrap; } .cstrip{ display:flex; gap:1px; align-items:center; padding:3px 4px 0; } .cstrip i{ display:block; width:12px; height:6px; border-radius:1px; } .cstrip span{ font-size:9px; color:#555; margin-left:6px; }
+.p2 .dzh{ display:grid; grid-template-columns:1fr 1fr; gap:10px; } .dzt{ display:flex; justify-content:space-between; border:1px solid #000; padding:2px 6px; font-size:11px; } .dzmap{ width:100%; height:auto; display:block; border:1px solid #000; }
+.dzl{ display:grid; grid-template-columns:1fr 1fr; gap:0; margin-top:6px; } .leg .lh{ background:#000; color:#FFE14D; font-weight:700; text-align:center; padding:5px; font-size:10.5px; }
+.leg .li{ border:1px solid #000; padding:12px 8px; text-align:center; font-size:13px; } .leg .li.yellow{ background:#F7E11B; } .leg .li.red{ background:#E8211E; color:#300; }
+.disc{ border:1px solid #000; } .disc .lh2{ text-align:center; font-weight:700; font-size:13px; padding:3px; } .disc .warnb{ background:#E8211E; color:#FFE14D; font-weight:700; text-align:center; padding:5px; font-size:10px; } .disc p{ text-align:center; font-size:13px; padding:8px; } .disc .kat{ font-size:11px; }
+.est{ font-size:10px; color:#555; }
+</style>
+<script src="guidance.js?v=228e9db1d0"></script>
+<script src="mwp.js?v=cd02e14568"></script>
+</body>
+</html>
