@@ -453,9 +453,9 @@ const SCHED_KEY = "schedfx:v1:items";
 const loadSched = () => store.get(SCHED_KEY, []);
 const saveSched = x => store.set(SCHED_KEY, x);
 const SCHED_TEMPLATE = [
-  "type,name,vehicle,location,start,end,time_zone,backup_start,backup_end,template,liftoff_limit_kt,lat,lon,notes",
-  "launch,Starlink 10-12,Falcon 9,SLC-40,2026-10-30 01:15,2026-10-30 05:15,L,2026-10-31 00:50,2026-10-31 04:50,,30,,,Example row: replace with your mission",
-  "ground,Crane lift,,LC-39A,2026-10-28 07:00,2026-10-28 15:00,L,,,Crane lift (39A),,,,Example row: template is the name of a saved exposure template",
+  "Operation_ID,LSP,JON,Mission_Name,Vehicle,Primary_Date_Z,Primary_Window_Z,Primary_Window_Local,Primary_Date_Local,Backup_Date_Z,Backup_Date_Local,Backup_Window_Z,Backup_Window_Local,Landing,Launch_or_Ground,Location,OpEndDate_Z,OpEndTime_Z,OpNumber",
+  "1,EXAMPLE,,Example launch,Falcon 9,01-Jan-27,1200Z - 1300Z,0700L - 0800L,01-Jan-27,02-Jan-27,02-Jan-27,1200Z - 1300Z,0700L - 0800L,N/A,Launch,SLC-40,,,",
+  "2,EXAMPLE,,Example ground operation,,01-Jan-27,1300,,,,,,,,Ground,LC-39A,01-Jan-27,2100,",
 ].join("\r\n") + "\r\n";
 /* local wall time at the Cape to UTC milliseconds */
 function capeToUTC(y, mo, d, h, mi){
@@ -499,6 +499,11 @@ function parseSchedCSV(text, defaultType){
   const items = [], errors = [];
   lines.slice(1).forEach((l, n) => {
     const r = split(l);
+    /* combined range export (launch and ground ops in one file): Zulu date plus "HHMMZ - HHMMZ"
+       windows for launches, or a start time and an end date and time for ground ops */
+    if (head.includes("launch_or_ground") || head.includes("primary_date_z")){
+      const it = parseAllOpsRow(r, col, n + 2, errors); if (it) items.push(it); return;
+    }
     /* range export: separate Zulu date and time columns */
     const rangeFmt = head.includes("opstartdate_z");
     const zone = rangeFmt ? "Z" : col(r, "time_zone", "tz", "zone");
@@ -521,6 +526,32 @@ function parseSchedCSV(text, defaultType){
   });
   return { items, errors };
 }
+/* one row of the combined ops export */
+function parseAllOpsRow(r, col, rowNo, errors){
+  const type = /launch/i.test(col(r, "launch_or_ground", "type")) ? "launch" : "ground";
+  const name = (col(r, "mission_name", "op_name", "name") || "").trim();
+  const win = (date, w) => {
+    /* "1223Z - 1322Z" (a window) or "1200" (a start time); a close earlier than the open is the next day */
+    const m = String(w || "").match(/(\d{3,4})\s*Z?\s*(?:-|–|to)\s*(\d{3,4})\s*Z?/i), one = String(w || "").match(/^\s*(\d{3,4})\s*Z?\s*$/i);
+    if (!date || (!m && !one)) return null;
+    const a = parseWhen(`${date} ${(m ? m[1] : one[1]).padStart(4, "0")}`, "Z"); if (a == null) return null;
+    if (!m) return { a, b:null };
+    let b = parseWhen(`${date} ${m[2].padStart(4, "0")}`, "Z"); if (b != null && b <= a) b += 24*H;
+    return { a, b };
+  };
+  const pri = win(col(r, "primary_date_z", "opstartdate_z"), col(r, "primary_window_z", "opstarttime_z"));
+  if (!name || !pri){ errors.push(`row ${rowNo}: needs a name, a Zulu date and a window or start time`); return null; }
+  let b = pri.b;
+  if (b == null){ const e = col(r, "openddate_z"), et = col(r, "opendtime_z"); b = e && et ? parseWhen(`${e} ${et.padStart(4, "0")}`, "Z") : null; }
+  if (b == null || b <= pri.a) b = pri.a + (type === "launch" ? 0 : 4*H);
+  const bk = win(col(r, "backup_date_z"), col(r, "backup_window_z"));
+  const opid = col(r, "operation_id", "op_id", "id"), landing = col(r, "landing");
+  let location = col(r, "location", "pad", "site");
+  if (!EXP_POINTS_NAMES().has(normLoc(location))) location = padFromText(name) || (location && !/^(ER|WR|CCSFS|KSC)$/i.test(location) ? location : "");
+  return { id: opid ? `sched:op:${opid}` : `sched:${type}:${name}:${pri.a}`, type, name, provider: col(r, "lsp", "lsp_name"), jon: col(r, "jon"), opnum: col(r, "opnumber", "op_number"),
+    vehicle: col(r, "vehicle") || vehicleFromText(name), location, landing: landing && !/^n\/?a$/i.test(landing) ? landing : "",
+    a: pri.a, b, backup: bk ? { a:bk.a, b: bk.b != null ? bk.b : bk.a + (b - pri.a) } : null, template:"", limit:null, lat:null, lon:null, notes:"" };
+}
 const normLoc = v => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^(LC|SLC|PAD)/, "");
 const EXP_POINTS_NAMES = () => new Set(["39A","39B","40","41","37","36","46","SLF","XMR","KXMR","KTTS","KCOF","PATRICK"].concat(typeof EXP_POINTS !== "undefined" ? EXP_POINTS.flatMap(p => [normLoc(p.point), normLoc(p.name), normLoc(p.tag)]) : []));
 function schedUpload(file, after, defaultType){
@@ -540,7 +571,7 @@ function schedUpload(file, after, defaultType){
 function renderSchedExpo(){
   if (!EXPO || !$("schSel")) return;
   const list = loadSched().filter(x => x.type === "ground" && x.b > Date.now() - 6*H);
-  $("schSel").innerHTML = `<option value="">${list.length ? "Choose a scheduled operation" : "No scheduled operations loaded"}</option>` + list.map(x => `<option value="${hesc(x.id)}">${hesc(new Date(x.a).toLocaleString("en-US", { timeZone:TZ, month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }))}L · ${x.provider ? hesc(x.provider) + " · " : ""}${hesc(x.name)}${x.location ? " · " + hesc(x.location) : ""}</option>`).join("");
+  $("schSel").innerHTML = `<option value="">${list.length ? "Choose a scheduled operation" : "No scheduled operations loaded"}</option>` + list.map(x => { const f = t => new Date(t).toLocaleString("en-US", { timeZone:TZ, month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", hourCycle:"h23" }); return `<option value="${hesc(x.id)}">${x.a < Date.now() ? "Under way, to " + hesc(f(x.b)) : hesc(f(x.a))}L · ${x.provider ? hesc(x.provider) + " · " : ""}${hesc(x.name)}${x.location ? " · " + hesc(x.location) : ""}</option>`; }).join("");
   $("schClear").hidden = !loadSched().length;
 }
 function useSchedExpo(id){
@@ -548,7 +579,9 @@ function useSchedExpo(id){
   const e = prefs.exp;
   const t = x.template ? loadTpls().find(q => q.name.toLowerCase() === x.template.toLowerCase()) : null;
   if (t) applyTpl(t); else if (x.template) toast(`No saved template called "${x.template}"; times and point set, constraints unchanged`);
-  e.op = x.name; e.start = Math.floor(x.a/H)*H; e.end = Math.max(e.start + H, Math.ceil(x.b/H)*H);
+  e.op = x.name; e.start = Math.max(Math.floor(x.a/H)*H, Math.floor(Date.now()/H)*H); e.end = Math.max(e.start + H, Math.ceil(x.b/H)*H);
+  if (e.end - e.start > 7*24*H){ e.end = e.start + 7*24*H; setTimeout(() => toast(`${x.name} runs past the 7-day forecast; the window covers the next 7 days`), 2200); }
+  else if (x.a < e.start) setTimeout(() => toast(`${x.name} is already under way; the window starts now`), 2200);
   let full = false;
   if (x.lat && x.lon){ e.custom = { name: x.location || x.name, lat:x.lat, lon:x.lon }; prefs.site = "custom"; full = true; }
   else if (x.location){ const nl = normLoc(x.location); const s2 = EXP_POINTS.find(p => normLoc(p.point) === nl || normLoc(p.name) === nl || normLoc(p.id) === nl || normLoc(p.tag) === nl); if (s2) prefs.site = s2.id; else toast(`Location "${x.location}" not recognised; choose the point`); }

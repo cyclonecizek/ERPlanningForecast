@@ -48,7 +48,7 @@ async function fetchLaunches(){
     return {
       id: r.id || nm, name: parts[1] || nm, vehicle: (r.rocket && r.rocket.configuration && (r.rocket.configuration.name || r.rocket.configuration.full_name)) || parts[0] || "",
       pad: pad ? pad.id : null, padName, net: Date.parse(r.net), w0: Date.parse(r.window_start || r.net), w1: Date.parse(r.window_end || r.net),
-      status: r.status && (r.status.abbrev || r.status.name) || "",
+      status: r.status && (r.status.abbrev || r.status.name) || "", provider: (r.launch_service_provider && r.launch_service_provider.name) || "",
     };
   }).filter(x => isFinite(x.net)).sort((a, b) => a.net - b.net);
 }
@@ -61,7 +61,7 @@ async function fetchUpper(pad){
   const hr = j.hourly || {}, t = (hr.time || []).map(x => x*1000);
   return { t, max: t.map((_, i) => Math.max(...lv.map(l => (hr[`wind_speed_${l}hPa`] || [])[i] ?? 0))) };
 }
-/* proton flux: current GOES >=10 MeV integral flux, plus the SWPC 3-day S1-or-greater probabilities */
+/* solar activity: current GOES >=10 MeV integral flux, plus the SWPC 3-day S1-or-greater probabilities */
 async function fetchProton(){
   if (DEMO) return { now: 0.4, days: [{ d: Date.now(), p: 1 }, { d: Date.now() + 86400e3, p: 1 }, { d: Date.now() + 2*86400e3, p: 1 }] };
   const out = { now:null, days:[] };
@@ -271,7 +271,8 @@ function productHTML(logo){
     </footer>
   </div>`;
 }
-const LM_CSS = `.lg{background:#fff;color:#000;max-width:780px;margin:0 auto;padding:18px;border-radius:10px;font-family:Helvetica,Arial,sans-serif}
+const LM_CSS = `.proflin{margin:-2px 0 6px;font-size:12px}.nxt{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nxt input[type=date]:disabled{opacity:.45}
+.lg{background:#fff;color:#000;max-width:780px;margin:0 auto;padding:18px;border-radius:10px;font-family:Helvetica,Arial,sans-serif}
 .lg-note{font:600 11px Arial,sans-serif;color:#7D8B97;text-transform:uppercase;letter-spacing:.6px;margin:0 0 8px}
 .lg-t{width:100%;border-collapse:collapse;font-size:12.5px;line-height:1.3}.lg-t td,.lg-t th{border:1px solid #000;padding:4px 7px;vertical-align:top}
 .lg-head{position:relative;display:table-cell;padding:10px 12px}.lg-head{height:110px}.lg-seal{position:absolute;left:10px;top:9px;height:92px}.lg-logo{position:absolute;right:10px;top:9px;height:92px}
@@ -281,7 +282,7 @@ const LM_CSS = `.lg{background:#fff;color:#000;max-width:780px;margin:0 auto;pad
 .lg-notes{background:#fff}.lg-band{text-align:center;font-weight:700;font-size:13.5px}.lg-band sup{font-size:8px}
 .lg-pov{display:table-cell}.lg-pov .lg-pct{display:inline-block;width:62px;font-size:21px;border-right:1px solid #000;margin:-4px 10px -4px -7px;padding:7px 0 7px 8px}
 .lg-wx{width:36%}.lg-wx p b{min-width:128px}.lg-cl{border-left:1px dotted #000!important}.lg-clh{text-align:center;font-weight:700;margin-bottom:2px}.lg-cl table{width:100%;border-collapse:collapse}.lg-cl th,.lg-cl td{border:0!important;padding:1px 3px!important;text-align:left;font-size:12px}.lg-cl th{font-weight:400;font-size:10px}
-.lg-rk{width:30%}.lg-rk p{justify-content:space-between}.lg-fn p{margin:2px 0;font-style:italic;font-size:10.5px}.lg-faq{text-align:center}.lg-faq a{color:#0645C4}.lg-next{font-size:13px}
+.lg-rk{width:30%}.lg-rk.many p{margin:0;font-size:11.5px}.lg-rk p{justify-content:space-between}.lg-fn p{margin:2px 0;font-style:italic;font-size:10.5px}.lg-faq{text-align:center}.lg-faq a{color:#0645C4}.lg-next{font-size:13px}
 .schline{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:2px 0 8px}.schline .mut{font-size:12px;flex-basis:100%}.fileb{position:relative;overflow:hidden;cursor:pointer}.fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}.pdffmt{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2)}.pdffmt select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}.sealrow{margin:6px 0 0;text-align:right}.sealrow .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.sealrow .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .lm{font-family:"Barlow","Segoe UI",Arial,sans-serif;color:#13202E;background:#fff;max-width:900px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 1px 0 #D4DBDF}
 .lm-head{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;padding:20px 24px;background:linear-gradient(120deg,#0B1D33 0%,#123457 60%,#1C4A73 100%);color:#fff}
@@ -346,7 +347,7 @@ function csvLMEFWindows(){
   /* the schema is fixed so every file loads into the same table: the standard risk criteria always
      have a column (empty when off), and custom criteria share one "name: level" column */
   const pad = PADS.find(p => p.id === L.pad) || PADS[2], rk = risksOn(), lim = L.liftoff || {};
-  const STD = [["shear","risk_upper_level_wind_shear"], ["recovery","risk_booster_recovery_weather"], ["proton","risk_proton_flux"]];
+  const STD = [["shear","risk_upper_level_wind_shear"], ["recovery","risk_booster_recovery_weather"], ["proton","risk_solar_activity"]];
   const head = ["forecast_id","format_version","mission","vehicle","pad_id","pad_name","issued_utc","forecaster","window_index","window_key","window_open_utc","window_close_utc",
     "pov_pct","primary_concern_1","primary_concern_2","primary_concern_3","weather","visibility_mi","temperature_f","relative_humidity_pct",
     "liftoff_wind_height_ft","liftoff_wind_dir_deg","liftoff_wind_min_mph","liftoff_wind_max_mph","liftoff_wind_min_kt","liftoff_wind_max_kt",
@@ -552,8 +553,10 @@ function pdfLMEFLegacy(logo, seal){
     ["Type", "Coverage", "Base (ft)", "Tops (ft)"].forEach((h, k) => text(h, cx[k], y + 22, 7.5));
     (D.clouds || []).slice(0, 3).forEach((c, r) => { const yy = y + 37 + r*13; [c.type || "", c.cov || "", c.base ? Number(c.base).toLocaleString("en-US") : "", c.tops ? Number(c.tops).toLocaleString("en-US") : ""].forEach((v, k) => text(String(v), cx[k], yy, fit(String(v), (cx[k + 1] || XR - 2) - cx[k] - 4, 9.5, "r"))); });
     /* additional risk criteria */
-    const rvx = Math.min(X1 - 44, XR + 10 + Math.max(0, ...rk.slice(0, 3).map(r => tw(r.name + ":", 9.5, "b"))));
-    rk.slice(0, 3).forEach((r, n) => { const yy = y + 16 + n*24, nm = r.name + ":"; text(nm, XR + 6, yy, fit(nm, rvx - XR - 12, 9.5, "b"), "b"); text((D.risk || {})[r.id] || "Low", rvx, yy, 9.5); });
+    /* every criterion gets a line; with more than three the lines close up */
+    const rn = Math.max(1, rk.length), gap = Math.min(24, (bh - 12)/rn), rsz = rn > 3 ? 8.5 : 9.5;
+    const rvx = Math.min(X1 - 44, XR + 10 + Math.max(0, ...rk.map(r => tw(r.name + ":", rsz, "b"))));
+    rk.forEach((r, n) => { const yy = y + 4 + gap*(n + 0.5) + rsz*0.35, nm = r.name + ":"; text(nm, XR + 6, yy, fit(nm, rvx - XR - 12, rsz, "b"), "b"); text((D.risk || {})[r.id] || "Low", rvx, yy, rsz); });
     y += bh;
   });
   /* notes and next forecast */
@@ -595,6 +598,9 @@ const SETUP_HTML = `
       <h3>Mission</h3>
       <div class="edgrid">
         <label class="wide">Upcoming Space Coast launch <select id="lmMission"><option>Loading</option></select></label>
+        <label>Provider <select id="lmProv">${Object.keys(PROVIDERS).map(p => `<option>${p}</option>`).join("")}</select></label>
+        <label>Mission profile <select id="lmProf"></select></label>
+        <p class="wide mut proflin" id="lmProfNote"></p>
         <div class="wide schline"><span class="btn fileb">Upload official launch schedule (CSV)<input type="file" id="lmSchFile" accept=".csv,text/csv"></span> <button type="button" class="btn ghost" id="lmSchTpl">CSV template</button> <button type="button" class="btn ghost" id="lmSchClear" hidden>Clear schedule</button><span class="mut" id="lmSchNote">Uploaded launches appear first in the list. Kept on this computer only.</span></div>
         <label class="wide">Mission name <input id="lmName" autocomplete="off"></label>
         <label>Vehicle <input id="lmVeh" list="lmVehList" autocomplete="off"></label>
@@ -630,7 +636,7 @@ const PRODUCT_HTML = `
       <textarea id="lmDisc" rows="7"></textarea>
       <div id="lmDays"></div>
       <h3>Footer</h3>
-      <div class="edgrid"><label class="wide">Next forecast will be issued <input id="lmNext"></label></div>
+      <div class="edgrid"><label class="wide">Next forecast will be issued <span class="nxt"><select id="lmNextMode"><option value="req">As Required</option><option value="date">On</option></select><input type="date" id="lmNextDate"><button type="button" class="lnk" id="lmNextAuto" title="As Required within a day of launch, otherwise tomorrow">automatic</button></span></label></div>
       <datalist id="lmConcernList"></datalist>
     </div>
     <div class="lmprev"><div id="lmPreview"></div></div>
@@ -653,7 +659,7 @@ function lmRenderStatus(){ /* the editor's status line covers guidance loading *
 function schedLaunches(){
   return loadSched().filter(x => x.type === "launch" && x.b > Date.now() - 6*H).map(x => {
     const pad = PADS.find(p => normLoc(p.name) === normLoc(x.location) || p.match.test(x.location || ""));
-    return { id:x.id, name:x.name, vehicle:x.vehicle || x.provider || "", pad: pad ? pad.id : null, padName:x.location || "", net:x.a, w0:x.a, w1:x.b, backup:x.backup, limit:x.limit, official:true, status:"Official" };
+    return { id:x.id, name:x.name, vehicle:x.vehicle || x.provider || "", pad: pad ? pad.id : null, padName:x.location || "", net:x.a, w0:x.a, w1:x.b, backup:x.backup, limit:x.limit, landing:x.landing || "", official:true, status:"Official" };
   });
 }
 function allMissions(){ return [...(SX.official || []), ...(SX.launches || [])]; }
@@ -672,6 +678,11 @@ function renderMissions(){
 const opt = (list, v) => list.map(x => `<option ${x === v ? "selected" : ""}>${x}</option>`).join("");
 function renderSetup(){
   const ae = document.activeElement, set = (id, v) => { if ($(id) !== ae) $(id).value = v ?? ""; };
+  if (!L.provider || !PROVIDERS[L.provider]){ const gp = guessProfile("", L.mission, L.vehicle); L.provider = gp.provider; L.profile = L.profile || gp.profile; }
+  if ($("lmProv") !== ae) $("lmProv").value = L.provider;
+  const profs = PROVIDERS[L.provider] || ["Default"]; if (!profs.includes(L.profile)) L.profile = profs[0];
+  if ($("lmProf") !== ae) $("lmProf").innerHTML = profs.map(p => `<option ${p === L.profile ? "selected" : ""}>${p}</option>`).join("");
+  $("lmProfNote").textContent = `${PROFILE_DAYS[L.profile] || 2} forecast days; additional risk: ${(PROFILE_RISKS[L.profile] || []).map(id => (BUILTIN_RISKS.find(b => b.id === id) || {}).name).join(", ") || "none"} (plus upper-level wind shear if ticked). Changing the profile resets these; you can still tick criteria below.`;
   set("lmName", L.mission); set("lmVeh", L.vehicle); $("lmPad").value = L.pad; set("lmIss", toInput(L.issued || Date.now()));
   if (!$("lmLift").contains(ae)) $("lmLift").innerHTML = `<label>Height <span class="u"><input data-l="h" type="number" min="10" max="600" value="${L.liftoff.h}"> ft</span></label><label>Wind <select data-l="kind">${[["peak","Peak"],["sust","Sustained"]].map(([v, l]) => `<option value="${v}" ${L.liftoff.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Limit <span class="u"><select data-l="op"><option value=">" ${L.liftoff.op === ">" ? "selected" : ""}>&gt;</option><option value=">=" ${L.liftoff.op === ">=" ? "selected" : ""}>≥</option></select><input data-l="v" type="number" min="0" value="${L.liftoff.v}"></span></label><label>Units <select data-l="unit">${Object.keys(LIFT_UNITS).map(u => `<option ${u === L.liftoff.unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>`;
   $("lmFtp").checked = !!L.ftp;
@@ -682,7 +693,13 @@ function renderSetup(){
 function renderProductEditor(){
   const ae = document.activeElement, box = $("lmDays");
   if ($("lmDisc") !== ae){ if (!L.discussionEdited) L.discussion = draftDiscussion(); $("lmDisc").value = L.discussion || ""; }
-  if ($("lmNext") !== ae) $("lmNext").value = L.next || "";
+  autoNext();
+  /* older saves kept free text: read a date out of it if there is one */
+  if (L.nextDate === undefined){ const m = String(L.next || "").match(/(\d{1,2})\s+([A-Za-z]{3})\w*\s+(\d{4})/); const mi = m ? MON.findIndex(x => x.toLowerCase() === m[2].slice(0, 3).toLowerCase()) : -1; setNext(m && mi >= 0 ? `${m[3]}-${p2n(mi + 1)}-${p2n(+m[1])}` : null); }
+  if ($("lmNextMode") !== ae) $("lmNextMode").value = L.nextDate ? "date" : "req";
+  if ($("lmNextDate") !== ae) $("lmNextDate").value = L.nextDate || "";
+  $("lmNextDate").disabled = !L.nextDate;
+  $("lmNextAuto").hidden = !!L.nextAuto;
   if (box.contains(ae)) return;
   box.innerHTML = (L.windows || []).map((w, i) => {
     const d = derive(i), ov = (L.days[i] && L.days[i].ov) || {}, D = dayData(i);
@@ -733,7 +750,7 @@ function productHTMLLegacy(){
       <tr class="lg-body">
         <td class="lg-wx"><p><b>Weather/Visibility:</b><span>${hesc(D.wx || "-")} / ${hesc(D.vis || "-")}</span></p><p><b>Temp/Humidity:</b><span>${hesc(D.temp || "-")} / ${hesc(D.rh || "-")}</span></p><p><b>${hesc(lift)}:</b><span>${hesc(D.wind || "-")}</span></p></td>
         <td class="lg-cl"><div class="lg-clh">Clouds</div><table><tr><th>Type</th><th>Coverage</th><th>Base (ft)</th><th>Tops (ft)</th></tr>${clouds.map(c => `<tr><td>${hesc(c.type)}</td><td>${hesc(c.cov || "")}</td><td>${c.base ? Number(c.base).toLocaleString("en-US") : ""}</td><td>${c.tops ? Number(c.tops).toLocaleString("en-US") : ""}</td></tr>`).join("")}</table></td>
-        ${rk.length ? `<td class="lg-rk">${rk.slice(0, 3).map(r => `<p><b>${hesc(r.name)}:</b><span>${hesc((D.risk || {})[r.id] || "Low")}</span></p>`).join("")}</td>` : ""}
+        ${rk.length ? `<td class="lg-rk${rk.length > 3 ? " many" : ""}">${rk.map(r => `<p><b>${hesc(r.name)}:</b><span>${hesc((D.risk || {})[r.id] || "Low")}</span></p>`).join("")}</td>` : ""}
       </tr>`;
   };
   const ncol = rk.length ? 3 : 2;
@@ -759,6 +776,35 @@ function reconfigure(full){
   else rebuildGuidance();
   refreshProduct();
 }
+/* apply a mission profile: number of forecast days and the additional risk criteria shown */
+function applyProfile(profile, landing){
+  L.profile = profile;
+  const want = new Set(PROFILE_RISKS[profile] || []);
+  /* no booster recovery criterion when the schedule says there is no landing */
+  if (landing !== undefined && (!landing || /^n\/?a$/i.test(landing))) want.delete("recovery");
+  L.risks.forEach(r => { if (r.builtin && r.id !== "shear") r.on = want.has(r.id); });
+  const days = PROFILE_DAYS[profile] || 2, w = L.windows || [];
+  if (w.length && w.length !== days){
+    const w0 = w[0], len = w0.b - w0.a;
+    L.windows = Array.from({ length:days }, (_, k) => w[k] || { a:w0.a + k*24*H, b:w0.a + k*24*H + len });
+  }
+}
+/* next forecast: as required on L-1 and L-0, otherwise tomorrow's date */
+function autoNext(){
+  if (!L.nextAuto) return;
+  const W0 = (L.windows || [])[0]; if (!W0) return;
+  const iss = L.issued || Date.now(), d0 = lp(iss), d1 = lp(W0.a);
+  const days = Math.round((Date.UTC(d1.y, d1.mo - 1, d1.d) - Date.UTC(d0.y, d0.mo - 1, d0.d))/86400e3);
+  if (days <= 1) setNext(null);
+  else { const t = lp(iss + 24*H); setNext(`${t.y}-${p2n(t.mo)}-${p2n(t.d)}`); }
+}
+/* the product text from the stored choice: "As Required" or the date as dd Mon yyyy */
+function setNext(isoDate){
+  L.nextDate = isoDate || null;
+  if (!isoDate){ L.next = "As Required"; return; }
+  const [y, mo, d] = isoDate.split("-").map(Number); L.next = `${p2n(d)} ${MON[mo - 1]} ${y}`;
+}
+const p2n = n => String(n).padStart(2, "0");
 function pickMission(id){
   const x = allMissions().find(l => l.id === id); L.missionId = id || "";
   if (x){
@@ -766,7 +812,9 @@ function pickMission(id){
     const b = Math.max(x.w1, x.w0);
     L.windows = [{ a:x.w0, b }, x.backup ? { a:x.backup.a, b:Math.max(x.backup.a, x.backup.b) } : { a:x.w0 + 24*H, b:b + 24*H }];
     if (x.limit){ L.liftoff = Object.assign(L.liftoff || {}, { v:x.limit, unit:"kt" }); }
+    const gp = guessProfile(x.provider, x.name, x.vehicle); L.provider = gp.provider; applyProfile(gp.profile, x.official ? (x.landing || "") : undefined);
     if (x.official && !x.pad) setTimeout(() => toast(`${x.name}: the schedule gives no pad, so check the pad below`), 1500);
+    if (x.official && x.landing) setTimeout(() => toast(`${x.name}: booster landing ${x.landing}; add the recovery site under Recovery weather if needed`), 3200);
     /* the liftoff wind constraint stays as the forecaster set it */
     L.days = []; L.discussionEdited = false;
   }
@@ -779,7 +827,16 @@ function bindLM(){
   $("lmVeh").addEventListener("input", e => { L.vehicle = e.target.value; saveL(); renderPreview(); });
   $("lmPad").addEventListener("change", e => { L.pad = e.target.value; reconfigure(true); });
   $("lmIss").addEventListener("change", e => { L.issued = fromInput(e.target.value); saveL(); renderPreview(); });
-  $("lmNext").addEventListener("input", e => { L.next = e.target.value; saveL(); renderPreview(); });
+  const nextChanged = () => {
+    const mode = $("lmNextMode").value; let d = $("lmNextDate").value;
+    if (mode === "date" && !d){ const t = lp(Date.now() + 24*H); d = `${t.y}-${p2n(t.mo)}-${p2n(t.d)}`; $("lmNextDate").value = d; }
+    setNext(mode === "date" ? d : null); L.nextAuto = false; $("lmNextAuto").hidden = false; $("lmNextDate").disabled = mode !== "date"; saveL(); renderPreview();
+  };
+  $("lmNextMode").addEventListener("change", nextChanged);
+  $("lmNextDate").addEventListener("change", () => { $("lmNextMode").value = "date"; nextChanged(); });
+  $("lmNextAuto").onclick = () => { L.nextAuto = true; autoNext(); saveL(); renderProductEditor(); renderPreview(); };
+  $("lmProv").onchange = e => { L.provider = e.target.value; applyProfile((PROVIDERS[L.provider] || ["Default"])[0]); saveL(); reconfigure(false); };
+  $("lmProf").onchange = e => { applyProfile(e.target.value); saveL(); reconfigure(false); };
   $("lmDisc").addEventListener("input", e => { L.discussion = e.target.value; L.discussionEdited = true; saveL(); renderPreview(); });
   $("lmDiscReset").onclick = () => { L.discussionEdited = false; L.discussion = draftDiscussion(); saveL(); $("lmDisc").value = L.discussion; renderPreview(); };
   $("lmLift").addEventListener("change", e => { const k = e.target.dataset.l; if (!k) return; L.liftoff[k] = e.target.type === "number" ? +e.target.value : e.target.value; reconfigure(false); });

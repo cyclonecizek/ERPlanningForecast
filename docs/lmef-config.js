@@ -21,8 +21,45 @@ const VEHICLE_LIMITS = {};
 const BUILTIN_RISKS = [
   { id:"shear",    name:"Upper-Level Wind Shear",   auto:"GFS 300-200 hPa winds" },
   { id:"recovery", name:"Booster Recovery Weather", auto:"recovery site winds and seas" },
-  { id:"proton",   name:"Proton Flux",              auto:"GOES ≥10 MeV protons and the SWPC 3-day forecast" },
+  { id:"proton",   name:"Solar Activity",           auto:"GOES ≥10 MeV protons and the SWPC 3-day forecast" },
+  /* set by the forecaster (no automatic value); turned on by the mission profiles that use them */
+  { id:"ascent",   name:"Ascent Corridor Weather",  auto:null },
+  { id:"padesc",   name:"Pad Escape Winds",         auto:null },
+  { id:"capsule",  name:"Capsule Return Weather",   auto:null },
+  { id:"offshore", name:"Offshore Landing Weather", auto:null },
 ];
+/* mission profiles (from the legacy LMEF builder): provider -> profiles; each profile sets the number
+   of forecast days and which additional risk criteria appear */
+const PROVIDERS = {
+  "SPACEX": ["Non-Dragon F9/FH", "Crew Dragon", "Cargo Dragon", "Free-Flyer", "Starship"],
+  "UNITED LAUNCH ALLIANCE (ULA)": ["Atlas", "Vulcan"],
+  "NASA": ["NASA Default"],
+  "BLUE ORIGIN": ["Blue Origin Default"],
+  "RANGE SUPPORT": ["Navy", "Boeing"],
+  "US NAVY": ["Navy"],
+  "OTHER": ["Default"],
+};
+const PROFILE_RISKS = {
+  "Non-Dragon F9/FH": ["proton", "recovery"],
+  "Crew Dragon": ["proton", "recovery", "ascent", "padesc"],
+  "Cargo Dragon": ["proton", "recovery"],
+  "Free-Flyer": ["proton", "ascent", "padesc", "capsule"],
+  "Starship": ["proton"], "Atlas": ["proton"], "Vulcan": ["proton"], "NASA Default": ["proton"],
+  "Blue Origin Default": ["proton", "offshore"],
+  "Navy": [], "Boeing": [], "Default": ["proton"],
+};
+const PROFILE_DAYS = { "Crew Dragon": 3, "Cargo Dragon": 3 };
+/* the provider and profile a mission most likely is, from its provider, name and vehicle */
+function guessProfile(provider, name, vehicle){
+  const p = String(provider || ""), n = String(name || ""), v = String(vehicle || "");
+  const prov = /space\s*x/i.test(p) || /falcon|starship/i.test(v) ? "SPACEX" : /ula|united launch/i.test(p) || /atlas|vulcan/i.test(v) ? "UNITED LAUNCH ALLIANCE (ULA)"
+    : /blue origin/i.test(p) || /new glenn/i.test(v) ? "BLUE ORIGIN" : /navy/i.test(p) ? "US NAVY" : /range support|boeing/i.test(p) ? "RANGE SUPPORT" : /nasa/i.test(p) || /\bSLS\b/i.test(v) ? "NASA" : "OTHER";
+  let prof = PROVIDERS[prov][0];
+  if (prov === "SPACEX") prof = /crew/i.test(n) ? "Crew Dragon" : /\bCRS\b/i.test(n) ? "Cargo Dragon" : /starship/i.test(n) || /starship/i.test(v) ? "Starship" : "Non-Dragon F9/FH";
+  if (prov === "UNITED LAUNCH ALLIANCE (ULA)") prof = /atlas/i.test(v) || /atlas/i.test(n) ? "Atlas" : "Vulcan";
+  if (prov === "RANGE SUPPORT") prof = /boeing/i.test(p) || /boeing/i.test(n) ? "Boeing" : "Navy";
+  return { provider:prov, profile:prof };
+}
 const LS2 = {
   get(d){ try { const v = localStorage.getItem(LMK); return v ? JSON.parse(v) : d; } catch (e){ return d; } },
   set(v){ try { localStorage.setItem(LMK, JSON.stringify(v)); } catch (e){ /* storage unavailable */ } },
@@ -36,7 +73,11 @@ if (!L.windows){
 }
 if (!Array.isArray(L.days)) L.days = [];
 if (!L.risks) L.risks = BUILTIN_RISKS.map(r => ({ id:r.id, name:r.name, on:true, builtin:true }));
-L.risks.forEach(r => { if (r.id === "solar"){ r.id = "proton"; r.name = "Proton Flux"; } });
+/* the solar activity row (GOES protons): older saves called it "solar" or "Proton Flux" */
+L.risks.forEach(r => { if (r.id === "solar") r.id = "proton"; if (r.id === "proton" && (!r.name || r.name === "Proton Flux")) r.name = "Solar Activity"; });
+/* criteria added since this computer last saved: present but off */
+BUILTIN_RISKS.forEach(b => { if (!L.risks.some(r => r.id === b.id)) L.risks.push({ id:b.id, name:b.name, on:false, builtin:true }); });
+if (L.nextAuto === undefined) L.nextAuto = true;
 const saveL = () => LS2.set(L);
 const winLabel = i => i === 0 ? "Launch day" : `${i*24}-hour delay`;
 const LIFT_UNITS = { kt:1, mph:0.868976, "m/s":1.943844, "ft/s":0.592484, "km/h":0.539957 };

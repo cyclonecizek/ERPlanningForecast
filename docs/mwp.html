@@ -204,7 +204,8 @@ document.addEventListener("DOMContentLoaded", function(){
   </section>
   <section class="panel" id="dzPanel">
     <h2>Drop zone hazards (PSFB)</h2>
-    <p class="mut">The first guess comes from the models for the valid block (thunder, instability, gusts); choose the hazard for each DZ. Positions marked estimated were taken from the hazard map: correct them here and they are kept on this computer.</p>
+    <p class="mut">The first guess comes from the models for the valid block (thunder, instability, gusts); choose the hazard for each DZ. Drop zone positions are not part of these tools: load them from your positions file (or type them, in decimal degrees or degrees and minutes). They stay on this computer and in workspace files.</p>
+    <div class="dzfile"><span class="btn fileb">Open positions file<input type="file" id="dzOpen" accept=".json,.csv,application/json,text/csv"></span><button class="btn ghost" id="dzSaveFile" type="button">Save positions file</button><button class="btn ghost" id="dzClear" type="button">Clear positions</button><span class="mut" id="dzPosState"></span></div>
     <div class="scroll"><table class="dzt2"><thead><tr><th>Unit</th><th>DZ</th><th>Lat, lon</th><th>Hazard</th><th>Guidance</th></tr></thead><tbody id="dzRows"></tbody></table></div>
     <label class="col">Hazard discussion<textarea id="dzDisc" rows="3" placeholder="e.g. VCTS starting 14Z to 20Z, TSRA on DZ from 18Z to 20Z"></textarea></label>
   </section>
@@ -224,7 +225,7 @@ document.addEventListener("DOMContentLoaded", function(){
 .cb{ display:inline-block; min-width:38px; padding:1px 4px; border-radius:4px; color:#fff; font:700 10.5px var(--font); text-align:center; } .cb.sm{ min-width:34px; font-size:9.5px; }
 .dzt2{ border-collapse:collapse; font-size:13px; } .dzt2 th,.dzt2 td{ padding:4px 8px; border-bottom:1px solid var(--rule-2); text-align:left; } .dzt2 input{ width:84px; border:1px solid var(--rule); border-radius:6px; padding:3px 5px; background:var(--panel); color:var(--ink); } .dzt2 select{ border:1px solid var(--rule); border-radius:6px; padding:3px 5px; max-width:380px; background:var(--panel); color:var(--ink); }
 .altbody{ display:grid; gap:8px; } .altbody label{ display:flex; flex-direction:column; gap:3px; font-weight:700; }
-.mut{ color:var(--ink-3); font-size:12.5px; }
+.mut{ color:var(--ink-3); font-size:12.5px; } .dzfile{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0 8px; } .fileb{ position:relative; overflow:hidden; cursor:pointer; } .fileb input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 </style>
 <style id="prodcss">
 .prod{ background:#fff; color:#000; max-width:860px; margin:0 auto 18px; padding:10px; border:1px solid #ccc; font-family:Arial,Helvetica,sans-serif; font-size:11px; }
@@ -244,6 +245,6 @@ table.pt2{ width:100%; border-collapse:collapse; } .pt2 th,.pt2 td{ border:1px s
 .est{ font-size:10px; color:#555; }
 </style>
 <script src="guidance.js?v=228e9db1d0"></script>
-<script src="mwp.js?v=cd02e14568"></script>
+<script src="mwp.js?v=4acb8a7f6f"></script>
 </body>
 </html>

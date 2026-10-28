@@ -166,7 +166,7 @@ liftoff winds and clouds come from the same forecast. Any product field can be o
 amber, ↺ to go back). Additional risk criteria can be switched off or added:
 * Upper-Level Wind Shear: GFS 300-200 hPa winds (100 kt moderate, 140 kt high),
 * Booster Recovery Weather: gusts and wave heights at each recovery site against your limits,
-* Proton Flux: GOES >=10 MeV flux and the SWPC 3-day S1-or-greater probabilities.
+* Solar Activity: GOES >=10 MeV proton flux and the SWPC 3-day S1-or-greater probabilities.
 
 Export as PDF, HTML, Excel or CSV.
 
@@ -197,8 +197,10 @@ Export as PDF, HTML, Excel or CSV.
   with its category, and a category strip across the valid block.
 * **DZ hazards (PSFB, page 2):** the 920th and DOS drop zones on two maps, a first-guess hazard for
   each from the models (thunder, instability, gusts) that the forecaster sets, the legend and the
-  hazard discussion. Avon Park and Kathy use the coordinates given; Bam Bam/Judy uses KCOF; the
-  others are estimated from the old map (marked *) and can be corrected on the page.
+  hazard discussion. **Drop zone positions are not in this repository.** Each forecaster loads them
+  from a positions file (**Open positions file**: JSON saved by the page, or CSV with name, lat, lon in
+  decimal degrees or degrees and minutes) or types them; they stay in that browser and in workspace
+  files, and `.gitignore` blocks positions files from commits.
 * **Output:** PDF (US Letter portrait; page 2 for PSFB) and HTML.
 
 ## Burn forecasts
@@ -235,10 +237,31 @@ named there. Files named for launch or non-launch ops set the kind; otherwise th
 decides (exposure: ground, LMEF: launch). The schedule is kept only in that browser (and in workspace files),
 and `.gitignore` blocks schedule CSVs from the repository.
 
+**Combined ops export.** One file with launch and ground ops (`Operation_ID, LSP, JON, Mission_Name,
+Vehicle, Primary_Date_Z, Primary_Window_Z, ..., Backup_Date_Z, Backup_Window_Z, Landing,
+Launch_or_Ground, Location, OpEndDate_Z, OpEndTime_Z, OpNumber`) is read as-is. The Zulu columns are
+used and the local ones ignored; a window that closes after 0000Z ends the next day; ground ops run from
+the start time to `OpEndDate_Z`/`OpEndTime_Z` (an op already under way starts now, and long ones are
+capped at the 7-day forecast); a `Landing` other than N/A is noted when the LMEF opens.
+
 ## LMEF PDF format
 **PDF format** next to Download PDF chooses the **Legacy** layout (the one-page portrait 45 WS LMEF,
 the default) or the **New** layout. The legacy header can carry a seal on the left: choose an image
 once and it is kept on that computer.
+
+## LMEF mission profiles
+**Mission profiles** (from the legacy LMEF builder): a **Provider** (SpaceX, ULA, NASA, Blue Origin,
+Range Support, US Navy, Other) and a **Mission profile** under it, picked automatically from the
+provider, mission name and vehicle when a launch opens (SpaceX: "Crew" -> Crew Dragon, "CRS" -> Cargo
+Dragon, Starship, otherwise Non-Dragon F9/FH; ULA: Atlas or Vulcan) and changeable on the page.
+* **Forecast days:** 3 for Crew and Cargo Dragon, otherwise 2.
+* **Additional risk criteria** per profile: Solar Activity for most; Booster
+  Recovery Weather for Falcon profiles; Ascent Corridor Weather and Pad Escape Winds for Crew Dragon and
+  Free-Flyer; Capsule Return Weather for Free-Flyer; Offshore Landing Weather for Blue Origin; none for
+  Range Support and US Navy. Upper-level wind shear is left as ticked. Booster Recovery Weather is
+  dropped when the official schedule gives no landing (blank or N/A).
+* **Next forecast** is a choice of **As Required** or a date (date picker; printed dd Mon yyyy). It is
+  automatic until changed: As Required on L-1 and L-0, otherwise tomorrow. **automatic** puts it back.
 
 ## LMEF CSV export (for databases)
 **CSV** on the LMEF page downloads two tables that join on `forecast_id`
@@ -250,7 +273,7 @@ comma-separated, CRLF line ends, text quoted only when needed. `format_version` 
   index and key (`launch_day`, `24_hour_delay`, ...), open and close, `pov_pct`, up to three primary
   concerns, weather, `visibility_mi`, `temperature_f`, `relative_humidity_pct`, liftoff wind direction
   and min/max in mph and kt, three cloud layers (type, coverage, base and tops in ft), the three standard
-  risk criteria (empty when turned off) plus `risk_custom` ("name: level; ..."), the liftoff
+  risk criteria (`risk_upper_level_wind_shear`, `risk_booster_recovery_weather`, `risk_solar_activity`; empty when turned off) plus `risk_custom` ("name: level; ..."), the liftoff
   constraint, the flight-through-precipitation flag, next forecast and the discussion.
 * `<file>_hourly.csv`: one row per hour of each window: `pov_pct`, every rule's probability
   (`lightning_rule_pct`, ..., `flight_through_precipitation_pct`, `liftoff_winds_pct`; empty when a

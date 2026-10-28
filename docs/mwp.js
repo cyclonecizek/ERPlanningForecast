@@ -21,20 +21,21 @@ const PROD = {
     rwys:[["R15/33", 144]], rh:true, civil:false, moonAlt:true, alts:["KTIX","KMLB","KSFB","KCOF"], dz:false },
 };
 const BUOY = { id:"41009", name:"Farshore 41009", lat:28.519, lon:-80.166 };
-/* drop zones: given positions where the 45 WS supplied them, map estimates otherwise (verify) */
+/* drop zones: names only. Positions are not in this code (it is public): each forecaster loads them
+   once from a positions file, and they stay in this browser and in workspace files. */
 const DZS = [
-  { id:"ferreira", g:"920", name:"Ferreira", lat:28.46, lon:-80.58, est:true },
-  { id:"bambam",   g:"920", name:"Bam Bam/Judy", lat:28.2349, lon:-80.6101, note:"same as KCOF" },
-  { id:"ar15v",    g:"920", name:"AR15V", lat:28.34, lon:-80.30, est:true, kind:"air refueling track" },
-  { id:"avon",     g:"920", name:"Avon Park/Hardluck", lat:27.64653, lon:-81.34115, note:"LZ center point, 17R ML 66347 58094" },
-  { id:"armarian", g:"920", name:"AR Marian", lat:27.62, lon:-80.95, est:true, kind:"air refueling area" },
-  { id:"kathy",    g:"920", name:"Kathy (water DZ)", lat:28.23397, lon:-80.53130, water:true, note:"17R NM 46003 23233" },
-  { id:"site11",   g:"dos", name:"Site 11", lat:28.33, lon:-80.97, est:true },
-  { id:"northlz",  g:"dos", name:"North LZ", lat:28.34, lon:-80.88, est:true },
-  { id:"cowpie",   g:"dos", name:"Cowpie", lat:28.18, lon:-80.90, est:true },
-  { id:"bridge",   g:"dos", name:"Bridge/Picnic", lat:28.00, lon:-80.82, est:true },
-  { id:"reno",     g:"dos", name:"Reno", lat:27.81, lon:-80.85, est:true },
-  { id:"southlz",  g:"dos", name:"South LZ", lat:27.50, lon:-80.69, est:true },
+  { id:"ferreira", g:"920", name:"Ferreira" },
+  { id:"bambam",   g:"920", name:"Bam Bam/Judy" },
+  { id:"ar15v",    g:"920", name:"AR15V", kind:"air refueling track" },
+  { id:"avon",     g:"920", name:"Avon Park/Hardluck" },
+  { id:"armarian", g:"920", name:"AR Marian", kind:"air refueling area" },
+  { id:"kathy",    g:"920", name:"Kathy (water DZ)", water:true },
+  { id:"site11",   g:"dos", name:"Site 11" },
+  { id:"northlz",  g:"dos", name:"North LZ" },
+  { id:"cowpie",   g:"dos", name:"Cowpie" },
+  { id:"bridge",   g:"dos", name:"Bridge/Picnic" },
+  { id:"reno",     g:"dos", name:"Reno" },
+  { id:"southlz",  g:"dos", name:"South LZ" },
 ];
 const HAZ = [
   { id:"none",  c:"green",  t:"No hazards" },
@@ -229,14 +230,15 @@ async function fetchWx(){
 }
 async function fetchDZ(){
   if (DEMO) return demoDZ();
-  const pts = dzList(), lat = pts.map(d => d.lat).join(","), lon = pts.map(d => d.lon).join(",");
+  const pts = dzWithPos(); if (!pts.length) return {};
+  const lat = pts.map(d => d.lat).join(","), lon = pts.map(d => d.lon).join(",");
   const js = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weather_code,cape,precipitation_probability,wind_gusts_10m,wind_speed_10m,wind_direction_10m,temperature_2m&models=gfs_seamless,ncep_hrrr_conus&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=3`, 40000);
   const arr = Array.isArray(js) ? js : [js];
   return Object.fromEntries(pts.map((d, k) => [d.id, (arr[k] || {}).hourly || {}]));
 }
 async function fetchSea(){
   if (DEMO) return demoSea();
-  const pts = [BUOY, DZS.find(d => d.id === "kathy")];
+  const kat = dzWithPos().find(d => d.id === "kathy"), pts = kat ? [BUOY, kat] : [BUOY];
   const js = await getJSON(`https://marine-api.open-meteo.com/v1/marine?latitude=${pts.map(p => p.lat).join(",")}&longitude=${pts.map(p => p.lon).join(",")}&hourly=wave_height,wave_period,wave_direction,sea_surface_temperature&timezone=GMT&timeformat=unixtime&forecast_days=3`, 30000);
   const arr = Array.isArray(js) ? js : [js];
   return { buoy:(arr[0] || {}).hourly || {}, kathy:(arr[1] || {}).hourly || {} };
@@ -248,7 +250,10 @@ async function fetchTAFs(ids){
   for (const ptx of parts){ const m = ptx.match(/^(?:TAF\s+)?(?:AMD\s+|COR\s+)?([A-Z]{4})\b/); if (m) out[m[1]] = ptx.startsWith("TAF") ? ptx : "TAF " + ptx; }
   return out;
 }
-const dzList = () => DZS.map(d => ({ ...d, ...(M.dzPos[d.id] || {}) }));
+const DEMO_POS = (() => { const o = {}; DZS.forEach((d, k) => { const g = d.g === "920" ? 0 : 1, n = DZS.filter(q => q.g === d.g).indexOf(d); o[d.id] = { lat: 28.6 - n*0.22, lon: (g ? -80.95 : -80.85) + (n % 2)*0.18, est:true }; }); return o; })();
+/* every DZ with its position when one is loaded (demo mode uses a made-up layout) */
+const dzList = () => DZS.map(d => { const p = DEMO ? (M.dzPos[d.id] || DEMO_POS[d.id]) : M.dzPos[d.id]; return p && isFinite(p.lat) && isFinite(p.lon) ? { ...d, lat:+p.lat, lon:+p.lon, est:!!p.est, has:true } : { ...d, has:false }; });
+const dzWithPos = () => dzList().filter(d => d.has);
 function stationTAF(){
   /* the TAF generator's draft for the station when it covers this block, else the latest issued TAF */
   const draft = store.get(`taffx:v1:draft:${PR().stn}`, null), br = blockRange();
@@ -319,6 +324,7 @@ function seaAt(src, t){
 const waveText = ft => ft == null ? "" : (() => { const lo = Math.max(0, Math.floor(ft)), hi = Math.ceil(ft + 0.5); return lo === hi || hi - lo < 1 ? `${lo} FT` : `${lo}-${hi} FT`; })();
 /* first-guess DZ hazard for the block from the models (the forecaster sets the final one) */
 function dzAuto(id){
+  if (!dzWithPos().some(d => d.id === id)) return { id:"none", why:"no position loaded" };
   const h = G.dz && G.dz[id]; if (!h || !h.time) return { id:"none", why:"no guidance" };
   const br = blockRange(); let ts = 0, conv = 0, gust = 0;
   h.time.forEach((tt, i) => { const t = tt*1000; if (t < br.a || t >= br.b) return;
@@ -332,6 +338,35 @@ function dzAuto(id){
 }
 const dzState = id => { const s = M.dz[id]; const a = dzAuto(id); return s && s !== "auto" ? { id:s, auto:false, why:a.why } : { ...a, auto:true }; };
 
+/* coordinates: decimal degrees, or degrees and decimal minutes ("28 15.500 N", "080 40.250 W") */
+function parseCoord(t){
+  t = String(t || "").trim().toUpperCase(); if (!t) return null;
+  const neg = /[SW]$/.test(t) || t.startsWith("-"); const nums = t.replace(/[^0-9.\s]/g, " ").trim().split(/\s+/).map(Number).filter(isFinite);
+  if (!nums.length) return null;
+  const v = nums[0] + (nums[1] || 0)/60 + (nums[2] || 0)/3600;
+  return neg ? -v : v;
+}
+/* a positions file: JSON from "Save positions file", or CSV with name or id, lat, lon */
+function importDZ(text){
+  let rows = [];
+  try { const js = JSON.parse(text); if (js && js.positions) rows = Object.entries(js.positions).map(([id, p]) => ({ id, name:p.name, lat:p.lat, lon:p.lon })); else throw new Error("not a positions file"); }
+  catch (e){
+    const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim()); const head = lines[0].toLowerCase().split(",").map(x => x.trim());
+    const ix = k => head.findIndex(h => h === k || h.startsWith(k));
+    if (ix("lat") < 0 || ix("lon") < 0) throw new Error("needs lat and lon columns");
+    rows = lines.slice(1).map(l => { const c = l.split(","); return { id:(c[ix("id")] || "").trim(), name:(c[ix("name")] || c[0] || "").trim(), lat:c[ix("lat")], lon:c[ix("lon")] }; });
+  }
+  const norm = v => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  let n = 0;
+  for (const r of rows){
+    const d = DZS.find(q => q.id === r.id || norm(q.name) === norm(r.name) || norm(q.name).startsWith(norm(r.name)) && norm(r.name).length > 3);
+    const la = parseCoord(r.lat), lo = parseCoord(r.lon);
+    if (!d || la == null || lo == null) continue;
+    M.dzPos[d.id] = { lat:la, lon: lo > 0 ? -lo : lo, est:false }; n++;
+  }
+  save(); return n;
+}
+function toast(msg){ const t = $("toast"); if (!t) return; t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 3200); }
 /* ---------- render ---------- */
 function renderControls(){
   document.querySelectorAll("#prodSel button").forEach(b => b.setAttribute("aria-pressed", b.dataset.p === M.prod));
@@ -382,7 +417,8 @@ function altBox(id){
 const MAPB = { la0:27.30, la1:28.95, lo0:-81.55, lo1:-80.05 };
 /* each map frames its own DZs, and labels move to the left or down when they would overlap */
 function dzLayout(group, W, Hh, cw){
-  const dz = dzList().filter(d => d.g === group);
+  const dz = dzWithPos().filter(d => d.g === group);
+  if (!dz.length){ const x = v => (v - MAPB.lo0)/(MAPB.lo1 - MAPB.lo0)*W, y = v => (MAPB.la1 - v)/(MAPB.la1 - MAPB.la0)*Hh; return { x, y, pts:[] }; }
   const la = dz.map(d => d.lat), lo = dz.map(d => d.lon);
   let la0 = Math.min(...la) - 0.22, la1 = Math.max(...la) + 0.22, lo0 = Math.min(...lo) - 0.35, lo1 = Math.max(...lo) + 0.35;
   /* keep the map's shape (a degree of longitude is about 0.88 of a degree of latitude here) */
@@ -417,9 +453,10 @@ function dzPage(){
     <div class="dzl"><div class="leg"><div class="lh">DZ HAZARD LEGEND: CONTACT WX FOR SPECIFIC DZ TIMING/HAZARDS. SEVERE TURBULENCE/ICING IS ASSUMED WITH THUNDERSTORMS.</div>${HAZ.slice(1).map(h => `<div class="li ${h.c}">${h.t.toUpperCase()}</div>`).join("")}</div>
     <div class="disc"><div class="lh2">HAZARD DISCUSSION</div><div class="warnb">DUE TO LOCAL EFFECTS, HAZARDS ARE SUBJECT TO RAPID CHANGE. CALL 24/7 OPS CENTER AT 321-853-8485 FOR VALIDATION.</div><p>${esc(M.dzDisc || "")}</p>
     ${kathyHTML()}</div></div>
-    <p class="mut est">* position estimated from the hazard map; verify with the unit.</p>`;
+    ${DEMO ? '<p class="mut est">Demo mode: drop zone positions are made up.</p>' : dzWithPos().length < DZS.length ? `<p class="mut est">${DZS.length - dzWithPos().length} drop zone(s) not shown: position not loaded.</p>` : ""}`;
 }
 function kathyLines(){
+  if (!dzWithPos().some(d => d.id === "kathy")) return ["KATHY (WATER DZ): position not loaded on this computer"];
   const k = seaSummary("kathy"), m = k.model, out = [];
   out.push(`KATHY (WATER DZ): seas ${k.wave || "–"}${k.waveSrc ? ` (${k.waveSrc})` : ""}; sea temp ${k.sst != null ? k.sst + "F" : "–"}${k.sstSrc ? ` (${k.sstSrc})` : ""}`);
   if (k.nws) out.push(nwsText(k.nws));
@@ -430,7 +467,8 @@ function kathyLines(){
 const kathyHTML = () => { const L2 = kathyLines(); return `<p class="kat"><b>${esc(L2[0].split(":")[0])}:</b>${esc(L2[0].slice(L2[0].indexOf(":") + 1))}${L2.slice(1).map(l => `<br>${esc(l)}`).join("")}</p>`; };
 function renderDZ(){
   if (!PR().dz) return;
-  $("dzRows").innerHTML = dzList().map(d => { const s = dzState(d.id); return `<tr><td>${d.g === "920" ? "920th" : "DOS"}</td><td><b>${esc(d.name)}</b>${d.est ? ' <span class="mut">(estimated)</span>' : ""}</td><td><input data-dzp="${d.id}" data-k="lat" value="${d.lat}" inputmode="decimal"> <input data-dzp="${d.id}" data-k="lon" value="${d.lon}" inputmode="decimal"></td>
+  const n = dzWithPos().length; $("dzPosState").textContent = DEMO ? "Demo mode: made-up positions." : n ? `${n} of ${DZS.length} positions loaded on this computer.` : "No positions loaded yet: open the positions file, or type them in.";
+  $("dzRows").innerHTML = dzList().map(d => { const s = dzState(d.id); return `<tr><td>${d.g === "920" ? "920th" : "DOS"}</td><td><b>${esc(d.name)}</b>${d.has && d.est ? ' <span class="mut">(estimated)</span>' : ""}</td><td><input data-dzp="${d.id}" data-k="lat" value="${d.has ? d.lat : ""}" placeholder="lat" inputmode="decimal"> <input data-dzp="${d.id}" data-k="lon" value="${d.has ? d.lon : ""}" placeholder="lon" inputmode="decimal"></td>
     <td><select data-dz="${d.id}"><option value="auto" ${s.auto ? "selected" : ""}>Auto: ${esc((HAZ.find(h => h.id === dzAuto(d.id).id) || HAZ[0]).t)}</option>${HAZ.map(h => `<option value="${h.id}" ${!s.auto && s.id === h.id ? "selected" : ""}>${esc(h.t)}</option>`).join("")}</select></td><td class="mut">${esc(s.why || "")}</td></tr>`; }).join("");
   if (document.activeElement !== $("dzDisc")) $("dzDisc").value = M.dzDisc || "";
 }
@@ -551,7 +589,7 @@ async function pdfMWP(){
     const lines = []; for (const wd of words){ const t2 = ln ? ln + " " + wd : wd; if (textW(t2, 10, false) > mw - 20 && ln){ lines.push(ln); ln = wd; } else ln = t2; } if (ln) lines.push(ln);
     lines.slice(0, 8).forEach((l2, k) => text(l2, rx2 + mw/2, yy + k*13, 10, { align:"c" }));
     kathyLines().slice().reverse().forEach((l2, k) => text(l2.replace(/°/g, " deg"), rx2 + mw/2, y2 + lh2*5 - 8 - k*10, k === kathyLines().length - 1 ? 7.5 : 6.8, { bold: k === kathyLines().length - 1, align:"c", max:mw - 10 }));
-    text("* position estimated from the hazard map; verify with the unit.", X0, Math.min(Hp - 16, y2 + lh2*5 + 12), 6.5, { color:[90,100,110] });
+    const missing = DZS.length - dzWithPos().length; if (DEMO || missing) text(DEMO ? "Demo mode: drop zone positions are made up." : `${missing} drop zone(s) not shown: position not loaded.`, X0, Math.min(Hp - 16, y2 + lh2*5 + 12), 6.5, { color:[90,100,110] });
     pages.push(cs);
   }
   return pdfAssemble(pages.map(q => q.join("\n")), logo, W, Hp, { image2: seal });
@@ -578,7 +616,7 @@ function demoTAF(id){
   if (id === "KCOF" || id === "KTTS") return `TAF ${id} ${dd}${hh}00Z ${dd}${hh}/${ed}${eh} 13010KT 9999 SCT030 QNH2998INS\nBECMG ${fm}/${p2(mid.getUTCDate())}${p2((mid.getUTCHours() + 1) % 24)} 11012G20KT 4800 -TSRA BKN030CB QNH2995INS\nTEMPO ${fm}/${p2(mid.getUTCDate())}${p2((mid.getUTCHours() + 3) % 24)} 1600 TSRA BKN008CB`;
   return `TAF ${id} ${dd}${hh}20Z ${dd}${hh}/${ed}${eh} 12008KT P6SM SCT035\n FM${fm}00 11010KT P6SM VCTS SCT030CB BKN100\n TEMPO ${fm}/${p2(mid.getUTCDate())}${p2((mid.getUTCHours() + 3) % 24)} 3SM TSRA BKN012CB`;
 }
-function demoDZ(){ const br = blockRange(), times = Array.from({ length:48 }, (_, k) => (Math.floor(br.a/H) - 6 + k)*3600); return Object.fromEntries(dzList().map((d, j) => [d.id, { time:times, weather_code:times.map((t, k) => j % 4 === 0 && k > 12 && k < 15 ? 95 : 2), cape:times.map(() => j % 3 === 0 ? 1500 : 300), precipitation_probability:times.map(() => 40), wind_gusts_10m:times.map(() => 18 + j) }])); }
+function demoDZ(){ const br = blockRange(), times = Array.from({ length:48 }, (_, k) => (Math.floor(br.a/H) - 6 + k)*3600); return Object.fromEntries(dzWithPos().map((d, j) => [d.id, { time:times, weather_code:times.map((t, k) => j % 4 === 0 && k > 12 && k < 15 ? 95 : 2), cape:times.map(() => j % 3 === 0 ? 1500 : 300), precipitation_probability:times.map(() => 40), wind_gusts_10m:times.map(() => 18 + j) }])); }
 function demoMarine(){
   const now = Date.now(), t = k => new Date(now - k*1800e3).toISOString().replace(/:\d\d\.\d+Z$/, ":00Z");
   const [y, mo, d] = (M.date || todayLocal()).split("-").map(Number), wd = new Date(Date.UTC(y, mo - 1, d, 12)).toLocaleDateString("en-US", { weekday:"long", timeZone:"UTC" });
@@ -616,7 +654,10 @@ function bind(){
   $("tbl").addEventListener("input", e => { const td = e.target.closest("[data-c]"); if (!td) return; const t = +td.dataset.t, c = td.dataset.c, v = td.textContent.trim(); const auto = model().rows.find(r => r.t === t).auto[c]; if (v === auto || v === "") delete M.ov[ovKey(t, c)]; else M.ov[ovKey(t, c)] = v; save(); td.classList.toggle("ov", M.ov[ovKey(t, c)] !== undefined); renderProduct(); });
   $("tbl").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); e.target.blur(); } });
   $("resetOv").onclick = () => { const pre = `${M.prod}|`; for (const k of Object.keys(M.ov)) if (k.startsWith(pre)) delete M.ov[k]; save(); renderAll(); };
-  $("dzRows").addEventListener("change", e => { const s = e.target.closest("[data-dz]"); if (s){ M.dz[s.dataset.dz] = s.value; save(); renderAll(); return; } const q = e.target.closest("[data-dzp]"); if (q){ const v = +q.value; if (isFinite(v)){ (M.dzPos[q.dataset.dzp] = M.dzPos[q.dataset.dzp] || {})[q.dataset.k] = v; save(); renderProduct(); } } });
+  $("dzRows").addEventListener("change", e => { const s = e.target.closest("[data-dz]"); if (s){ M.dz[s.dataset.dz] = s.value; save(); renderAll(); return; } const q = e.target.closest("[data-dzp]"); if (q){ const raw = q.value.trim(), v = parseCoord(raw); const p = M.dzPos[q.dataset.dzp] = M.dzPos[q.dataset.dzp] || {}; if (raw === "") delete p[q.dataset.k]; else if (v != null) p[q.dataset.k] = q.dataset.k === "lon" && v > 0 ? -v : v; else { toast("Use decimal degrees, or degrees and minutes like 28 15.500"); return; } p.est = false; save(); loadAll(); } });
+  $("dzOpen").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return; try { const n = importDZ(await f.text()); toast(`Loaded ${n} drop zone position${n === 1 ? "" : "s"}`); loadAll(); } catch (err) { toast("Couldn't read that file: " + err.message); } };
+  $("dzSaveFile").onclick = () => { const out = { kind:"erwx-dz-positions", version:1, saved:new Date().toISOString(), positions:Object.fromEntries(DZS.map(d => [d.id, M.dzPos[d.id]]).filter(([, p]) => p && p.lat != null && p.lon != null).map(([id, p]) => [id, { name:DZS.find(d => d.id === id).name, lat:p.lat, lon:p.lon }])) }; download(new Blob([JSON.stringify(out, null, 2)], { type:"application/json" }), "DZ_Positions.json"); };
+  $("dzClear").onclick = () => { if (!confirm("Remove the drop zone positions stored on this computer?")) return; M.dzPos = {}; save(); loadAll(); };
   $("dzDisc").oninput = e => { M.dzDisc = e.target.value; save(); renderProduct(); };
   $("altEdit").onclick = () => { const d = $("altDlg"); $("altBody").innerHTML = PR().alts.map(id => `<label>${id}<textarea data-alt="${id}" rows="5">${esc(M.altPaste[id] || G.alts[id] || "")}</textarea></label>`).join(""); d.showModal(); };
   $("altSave").onclick = () => { document.querySelectorAll("[data-alt]").forEach(t => { const id = t.dataset.alt, v = t.value.trim(); if (v && v !== (G.alts[id] || "").trim()) M.altPaste[id] = v; else delete M.altPaste[id]; }); save(); $("altDlg").close(); renderAll(); };
