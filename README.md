@@ -13,6 +13,17 @@ published as Excel or CSV. Static page on GitHub Pages; everything runs in the b
 
 Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days 6 and 7.
 
+## NWS Forecast source
+Every forecast page (planning, exposure, burn, LMEF and TAF) adds the NWS forecast as a guidance source
+labelled **NWS Forecast**: the NDFD grids for each point from api.weather.gov (the `/points` lookup gives
+the forecast grid; its gridData holds every element as time series). Temperature, dew point, sky,
+wind, gust, visibility, ceiling, precipitation and thunder probabilities are used, and on the burn page
+also the NWS mixing height, transport wind and 20 ft wind. It is one member with the normal weight and can
+be weighted or switched off in the sources panel like any other source. The verification job archives it at each
+issue time with the models (temperature, dew point, 54 and 200 ft winds and peaks from the NWS 10 m wind
+and gust, and hourly PoP where the NWS gives one), so it is scored, appears on the scorecards and gets an
+automatic weight like the other sources.
+
 ## Layout
 ```
 docs/index.html                       the planning forecast page

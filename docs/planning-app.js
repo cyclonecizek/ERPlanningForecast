@@ -2663,6 +2663,12 @@ async function loadAll(){
     SITES.forEach(s => { const x = per[s.stn]; if (x && x.members[0].t.some(v => v != null)){ addSrc(s.id, d, x.members, { iv:x.iv, run:x.run }); n++; run = x.run; from = x.from; } });
     S.status[d.id] = n ? { ok:true, note: run ? `${pad2(new Date(run).getUTCHours())}Z run${from === "mirror" ? ", mirror" : ""}` : "loaded" } : { err:"no stations" };
   }).catch(e => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleRender)));
+  /* the NWS forecast (NDFD) for each point */
+  S.status.ndfd = { loading:true };
+  tasks.push((DEMO ? demoNDFD(S.TL) : fetchNDFD(SITES, S.TL)).then(per => {
+    let n = 0; SITES.forEach(s => { const x = per[s.id]; if (x && x.members[0].t.some(v => v != null)){ addSrc(s.id, NDFD, x.members, { iv:x.iv, run:x.run }); n++; } });
+    S.status.ndfd = n ? { ok:true, note: per[SITES[0].id] && per[SITES[0].id].run ? `issued ${pad2(new Date(per[SITES[0].id].run).getUTCHours())}${pad2(new Date(per[SITES[0].id].run).getUTCMinutes())}Z` : "loaded" } : { err:"not reachable" };
+  }).catch(() => { S.status.ndfd = { err:"not reachable" }; }).finally(scheduleRender));
   PIPE.forEach(d => S.status[d.id] = { loading:true });
   tasks.push((DEMO ? demoPipeline(S.TL) : fetchPipeline(S.TL)).then(res => {
     for (const d of PIPE){
@@ -2679,6 +2685,11 @@ async function loadAll(){
 }
 
 /* ---------- demo data (only with ?demo=1) ---------- */
+async function demoNDFD(TL){
+  const out = {}, r = rng(7);
+  SITES.forEach(s => { const m = demoSeries(TL, r, 0.5); m.gap = 3; deriveMember(m, TL.n); out[s.id] = { members:[m], iv:{ pop:[], tst:[] }, run: Date.now() - 3*H }; });
+  return out;
+}
 function rng(seed){ let x = seed >>> 0 || 1; return () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296; }
 function demoSeries(TL, r, bias){
   const m = {}; ["t","td","sky","s10","d10","g10","s80","vis","sw","pr","pp","cl","cm","ch","lcb"].forEach(k => m[k] = new Array(TL.n).fill(null));

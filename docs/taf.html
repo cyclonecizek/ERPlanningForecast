@@ -228,7 +228,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=fce30a78ee"></script>
+<script src="guidance.js?v=d4ff415d47"></script>
 <script>
 "use strict";
 /* ============================================================
@@ -618,6 +618,8 @@ async function loadAll(){
   const tasks = [];
   const om = (d, ens) => (DEMO ? demoOM(d, ens) : fetchOM(d, ens, S.TL)).then(per => { const ms = per[SI] || []; if (ms.length){ (tok === S.tok) && S.G.addSource(d, ms); S.status[d.id] = { ok:true, note: ens ? `${ms.length} members` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not available" }; }).finally(scheduleBuild);
   OM_DET.forEach(d => tasks.push(om(d, false))); OM_ENS.forEach(d => tasks.push(om(d, true)));
+  /* the NWS forecast (NDFD) at the station */
+  if (!DEMO){ S.status.ndfd = { loading:true }; tasks.push(fetchNDFD([{ id:"taf", lat:SITE.lat, lon:SITE.lon }], S.TL).then(per => { const x = per.taf; if (x && x.members[0].t.some(v => v != null)){ (tok === S.tok) && S.G.addSource(NDFD, x.members, { iv:x.iv, run:x.run }); S.status.ndfd = { ok:true, note:"loaded" }; } else S.status.ndfd = { err:"not reachable" }; }).catch(() => { S.status.ndfd = { err:"not reachable" }; })); }
   MOS.forEach(d => tasks.push((DEMO ? demoMOS(d) : fetchMOS(d, S.TL)).then(per => { const x = per[SITE.stn]; if (x && x.members[0].t.some(v => v != null)){ (tok === S.tok) && S.G.addSource(d, x.members, { iv:x.iv, run:x.run }); S.status[d.id] = { ok:true, note: x.run ? `${p2(new Date(x.run).getUTCHours())}Z run` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleBuild)));
   tasks.push((DEMO ? demoPipe() : fetchPipeline(S.TL)).then(res => { for (const d of PIPE){ const x = res[d.id], p = x && x.per[SITE.id]; if (!p){ S.status[d.id] = { err:"not in this run" }; continue; } (tok === S.tok) && S.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); S.status[d.id] = { ok:true, note:`${p2(new Date(x.run).getUTCHours())}Z run${p.members.length > 1 ? `, ${p.members.length} members` : ""}` }; } }).catch(() => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleBuild));
   await Promise.allSettled(tasks);

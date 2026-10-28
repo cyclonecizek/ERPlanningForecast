@@ -37,7 +37,10 @@ const FAMILIES = {
   ens:   { label:"Ensembles",       color:"var(--ens)" },
   mos:   { label:"MOS and LAMP",    color:"var(--mos)" },
   ct:    { label:"Calibrated thunder", color:"var(--ct)" },
+  nws:   { label:"NWS forecast",    color:"var(--blend)" },
 };
+/* the NWS forecast (NDFD grids from api.weather.gov, the Melbourne office's forecast) as one member */
+const NDFD = { id:"ndfd", name:"NWS Forecast", fam:"nws" };
 const OM_DET = [
   { id:"hrrr", name:"HRRR",       model:"ncep_hrrr_conus",               fam:"hires" },
   { id:"nam3", name:"NAM 3 km",   model:"ncep_nam_conus",                fam:"hires" },
@@ -71,7 +74,7 @@ const PIPE = [
   { id:"hrefct", name:"HREF calibrated thunder", fam:"ct", w:2 },
   { id:"refsct", name:"REFS calibrated thunder", fam:"ct", w:2 },
 ];
-const ALL_SOURCES = [...OM_DET.slice(0, 2), PIPE[0], PIPE[1], ...OM_DET.slice(2), ...OM_ENS, ...MOS, PIPE[2], PIPE[3]];
+const ALL_SOURCES = [NDFD, ...OM_DET.slice(0, 2), PIPE[0], PIPE[1], ...OM_DET.slice(2), ...OM_ENS, ...MOS, PIPE[2], PIPE[3]];
 
 /* ---------- parameters (matrix columns) ---------- */
 const SKY = [ ["CLR",0,6.25], ["FEW",6.25,31.25], ["SCT",31.25,56.25], ["BKN",56.25,93.75], ["OVC",93.75,101] ];
@@ -267,6 +270,7 @@ function deriveFire(m, n){
       if (!nn && m.s80[i] != null){ const wd = m.d80 && m.d80[i] != null ? m.d80[i] : m.d10[i]; if (wd != null){ u = -m.s80[i]*Math.sin(wd*Math.PI/180); v = -m.s80[i]*Math.cos(wd*Math.PI/180); nn = 1; } }
     }
     if (nn){ m.tw[i] = Math.hypot(u/nn, v/nn); m.twd[i] = (Math.atan2(-u/nn, -v/nn)*180/Math.PI + 360) % 360; }
+    if (m.ndfdTw && m.ndfdTw[i] != null){ m.tw[i] = m.ndfdTw[i]; m.twd[i] = m.ndfdTwd && m.ndfdTwd[i] != null ? m.ndfdTwd[i] : m.twd[i]; }
     /* ventilation (m2/s) and the Lavdas dispersion index (LDSI) */
     if (blh != null && m.tw[i] != null){ m.vr[i] = blh*m.tw[i]*0.514444; const t = LAST_TL ? LAST_TL.t0 + i*H : null; const di = t != null ? ldsi(m, i, t) : null; m.di[i] = di == null ? null : Math.max(0, Math.round(di)); }
     /* Haines, low elevation: stability 950-850 hPa, moisture at 850 hPa */
@@ -460,6 +464,47 @@ function parseMOS(rs, src, TL){
   return { members:[m], iv, run };
 }
 
+/* ---------- NWS forecast (NDFD) ----------
+   api.weather.gov: /points/{lat},{lon} gives the forecast grid; its gridData holds every NDFD element as
+   time series ("2026-10-28T12:00:00+00:00/PT3H"). Each value fills the hours it covers. */
+const _ndfdGrid = {};
+async function fetchNDFD(sites, TL){
+  const out = {};
+  const KMH2KT = 0.539957, M2FT = 3.28084;
+  const conv = (prop, v) => { if (v == null) return null; const u = String(prop.uom || prop.unitCode || "");
+    if (/degC/.test(u)) return v*9/5 + 32; if (/km_h/.test(u)) return v*KMH2KT; if (/m_s/.test(u)) return v*1.943844; return v; };
+  const dur = s => { const m = String(s || "").match(/P(?:(\d+)D)?T?(?:(\d+)H)?/); return ((+m[1] || 0)*24 + (+m[2] || 0)) || 1; };
+  for (const s of sites){
+    const key = `${(+s.lat).toFixed(3)},${(+s.lon).toFixed(3)}`;
+    try {
+      let url = _ndfdGrid[key];
+      if (!url){ const pt = await getJSON(`https://api.weather.gov/points/${key}`, 15000); url = _ndfdGrid[key] = pt.properties && pt.properties.forecastGridData; }
+      if (!url) continue;
+      const js = await getJSON(url, 25000), P = js.properties || {};
+      const m = { t:[], td:[], sky:[], s10:[], d10:[], g10:[], vis:[], cig:[], lcb:[], rh:[], ndfdTw:[], ndfdTwd:[], ndfd20:[], ndfdMix:[] };
+      Object.keys(m).forEach(k => m[k] = new Array(TL.n).fill(null));
+      const iv = { pop:[], tst:[] };
+      const fill = (name, key2, f) => { const prop = P[name]; if (!prop || !prop.values) return;
+        for (const it of prop.values){ const [st, d] = String(it.validTime).split("/"); const a = Date.parse(st), h = dur(d), v = f ? f(conv(prop, it.value)) : conv(prop, it.value); if (v == null || !isFinite(v)) continue;
+          for (let k = 0; k < h; k++){ const i = TL.idx(a + k*H); if (i >= 0 && i < TL.n) m[key2][i] = v; } } };
+      fill("temperature", "t"); fill("dewpoint", "td"); fill("skyCover", "sky"); fill("relativeHumidity", "rh");
+      fill("windSpeed", "s10"); fill("windDirection", "d10"); fill("windGust", "g10");
+      fill("visibility", "vis"); fill("ceilingHeight", "cig", v => v*M2FT);
+      fill("transportWindSpeed", "ndfdTw"); fill("transportWindDirection", "ndfdTwd"); fill("twentyFootWindSpeed", "ndfd20"); fill("mixingHeight", "ndfdMix");
+      /* probabilities as intervals, like MOS */
+      const ivs = (name, kind) => { const prop = P[name]; if (!prop || !prop.values) return; for (const it of prop.values){ const [st, d] = String(it.validTime).split("/"); const a = Date.parse(st); if (it.value == null) continue; iv[kind].push({ a, b: a + dur(d)*H, p: Math.max(0, Math.min(1, it.value/100)) }); } };
+      ivs("probabilityOfPrecipitation", "pop"); ivs("probabilityOfThunder", "tst");
+      /* NDFD gusts are only given when they exceed the wind; keep gust >= sustained */
+      for (let i = 0; i < TL.n; i++){ if (m.s10[i] != null && (m.g10[i] == null || m.g10[i] < m.s10[i])) m.g10[i] = m.s10[i]; }
+      /* fire weather: NDFD mixing height and transport wind stand in for the model fields */
+      m.blh = m.ndfdMix.slice();   /* meters, as the model boundary-layer height */
+      m.gap = 3; deriveMember(m, TL.n);
+      if (FIRE) for (let i = 0; i < TL.n; i++){ if (m.ndfd20[i] != null && m.s20) m.s20[i] = m.ndfd20[i]; }
+      out[s.id] = { members:[m], iv, run: Date.parse(P.updateTime || P.validTimes && String(P.validTimes).split("/")[0]) || null };
+    } catch (e) { /* this point isn't in an NWS grid, or the NWS isn't reachable */ }
+  }
+  return out;
+}
 /* High-res pipeline output: RRFS, REFS members, HREF / REFS calibrated thunder */
 async function fetchPipeline(TL){
   const js = await getJSON(`${DATA_BASE}data/hires.json?ts=${Date.now()}`, 15000);

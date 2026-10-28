@@ -22,7 +22,7 @@ const VARS = [
   { k:"x25",  label:">25 kt peak",     unit:"",   kind:"prob", grp:"x" },
   { k:"x35",  label:">35 kt peak",     unit:"",   kind:"prob", grp:"x" },
 ];
-const SRC_NAME = { official:"Official forecast", blend_auto:"Blend, auto-weighted", blend_equal:"Blend, equal weights",
+const SRC_NAME = { official:"Official forecast", blend_auto:"Blend, auto-weighted", blend_equal:"Blend, equal weights", ndfd:"NWS Forecast",
   hrrr:"HRRR", nam3:"NAM 3 km", nbm:"NBM", gfs:"GFS", ifs:"ECMWF IFS", aifs:"ECMWF AIFS", icon:"ICON", gem:"GEM", ukmo:"UKMO",
   gefs:"GEFS", eps:"ECMWF ENS", aifsens:"AIFS ENS", iconeps:"ICON EPS", geps:"GEPS", lav:"LAMP", mav:"GFS MOS", nbs:"NBM text", mex:"GFS MOS ext",
   rrfs:"RRFS", refsm:"REFS members", hrefct:"HREF cal. thunder", refsct:"REFS cal. thunder" };

@@ -24,6 +24,7 @@ Needs: numpy and eccodes for MRMS (pip install numpy eccodes); the rest is stand
 import gzip
 import json
 import math
+import re
 import os
 import sys
 import time
@@ -635,6 +636,72 @@ def mos_sources(issue):
     return out
 
 
+def ndfd_sources(issue):
+    """the NWS forecast (NDFD grids from api.weather.gov) at each verification point"""
+    def dur_h(d):
+        m = re.match(r"P(?:(\d+)D)?T?(?:(\d+)H)?", d or "")
+        return (int(m.group(1) or 0) * 24 + int(m.group(2) or 0)) or 1 if m else 1
+
+    def conv(prop, v):
+        if v is None:
+            return None
+        u = str(prop.get("uom") or prop.get("unitCode") or "")
+        if "degC" in u:
+            return v * 9 / 5 + 32
+        if "km_h" in u:
+            return v * 0.539957
+        if "m_s" in u:
+            return v * 1.943844
+        return v
+
+    per = {}
+    grids = {}
+    for pid, pt in POINTS.items():
+        if time_left() < 300:
+            break
+        try:
+            key = f"{pt['lat']:.3f},{pt['lon']:.3f}"
+            url = (get(f"https://api.weather.gov/points/{key}", timeout=40).get("properties") or {}).get("forecastGridData")
+            if not url:
+                continue
+            js = grids.get(url) or get(url, timeout=60)
+            grids[url] = js
+        except Exception as e:  # noqa: BLE001
+            LOG(f"guidance ndfd {pid}: {e}")
+            continue
+        P = js.get("properties") or {}
+        m = {k: [None] * (LEAD_H + 1) for k in ("t", "td", "s10", "d10", "g10", "s80", "pr", "pp")}
+
+        def fill(name, key, hourly_only=False):
+            prop = P.get(name) or {}
+            for it in prop.get("values") or []:
+                st, _, d = str(it.get("validTime", "")).partition("/")
+                h = dur_h(d)
+                if hourly_only and h != 1:
+                    continue   # a 6- or 12-hour PoP is not an hourly event probability
+                v = conv(prop, it.get("value"))
+                if v is None:
+                    continue
+                try:
+                    a = dt(st)
+                except Exception:  # noqa: BLE001
+                    continue
+                for k2 in range(h):
+                    k = int(round((a + k2 * H - issue).total_seconds() / 3600))
+                    if 0 <= k <= LEAD_H:
+                        m[key][k] = v
+        fill("temperature", "t"); fill("dewpoint", "td")
+        fill("windSpeed", "s10"); fill("windDirection", "d10"); fill("windGust", "g10")
+        fill("probabilityOfPrecipitation", "pp", hourly_only=True)
+        # NDFD gives a gust only when it exceeds the wind
+        for k in range(LEAD_H + 1):
+            if m["s10"][k] is not None and (m["g10"][k] is None or m["g10"][k] < m["s10"][k]):
+                m["g10"][k] = m["s10"][k]
+        if any(v is not None for v in m["t"]):
+            per[pid] = summarize([derive(m)])
+    return {"ndfd": per} if per else {}
+
+
 def hires_sources(issue):
     js = load(os.path.join(ROOT, "docs", "data", "hires.json"), None)
     out = {}
@@ -719,6 +786,7 @@ def archive_guidance(force=False):
     srcs.update(om_sources(issue))
     srcs.update(mos_sources(issue))
     srcs.update(hires_sources(issue))
+    srcs.update(ndfd_sources(issue))
     weights = load(os.path.join(OUT, "weights.json"), None)
     srcs["blend_equal"] = blend({k: v for k, v in srcs.items()})
     srcs["blend_auto"] = blend({k: v for k, v in srcs.items() if not k.startswith("blend")}, weights if weights and weights.get("weights") else None)
