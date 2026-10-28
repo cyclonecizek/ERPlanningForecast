@@ -263,6 +263,19 @@ Dragon, Starship, otherwise Non-Dragon F9/FH; ULA: Atlas or Vulcan) and changeab
 * **Next forecast** is a choice of **As Required** or a date (date picker; printed dd Mon yyyy). It is
   automatic until changed: As Required on L-1 and L-0, otherwise tomorrow. **automatic** puts it back.
 
+## LMEF liftoff wind range
+The liftoff wind on the product is at the liftoff constraint height, rounded to the nearest 5 mph, built
+one of three ways (**Wind range on the product** in the setup): **Sustained to peak (window average)**,
+the default; **Lowest sustained to highest peak**; or **Sustained only**. The direction is the forecast
+direction at the middle of the window.
+
+## LMEF PoV trend
+Each window can show its PoV as a trend (for example **10% → 25%**): tick **Show a trend on the product**
+in the product editor. The start and end default to the PoV in the window's first and last hour and can
+be changed. The trend appears in both PDF layouts, the preview and HTML; Excel shows the same text; the
+database CSV adds `pov_trend`, `pov_start_pct` and `pov_end_pct` (first- and last-hour PoV on every
+row, so the trend is there even when it isn't shown).
+
 ## LMEF CSV export (for databases)
 **CSV** on the LMEF page downloads two tables that join on `forecast_id`
 (`<mission slug>_<issued, YYYYMMDDTHHMMSSZ>`). Both use a fixed set of snake_case columns, so every
