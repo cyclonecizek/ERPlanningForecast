@@ -159,7 +159,7 @@ function derive(i){
   const midRi = inW[Math.floor(inW.length/2)][0];
   const pp = wmax("pp1") ?? 0, lt = wmax("lt1") ?? 0;
   const wx = lt >= 30 ? "Thunderstorms" : pp >= 40 ? "Showers" : pp >= 20 ? "Isolated showers" : "None";
-  const T = o.t[midRi], Td = o.td[midRi];
+  let T = o.t[midRi], Td = o.td[midRi];
   /* liftoff wind range at the constraint height, rounded to the nearest 5 mph:
      "avg" (default) window-average sustained to window-average peak, "minmax" lowest sustained to highest peak,
      "sust" lowest to highest sustained */
@@ -169,11 +169,24 @@ function derive(i){
   let lo = mode === "avg" ? n5(avg(sArr)) : n5(sArr.length ? Math.min(...sArr) : null);
   let hi = mode === "avg" ? n5(avg(gArr)) : mode === "sust" ? n5(sArr.length ? Math.max(...sArr) : null) : n5(gArr.length ? Math.max(...gArr) : null);
   if (lo != null && hi != null && hi <= lo) hi = lo + 5;
+  let dirW = dir, fallback = [];
   /* clouds and visibility come from the guidance members */
   const G = S.G[sid], TL = S.TL, i0 = TL.idx(Math.floor(w.a/H)*H), i1 = Math.min(TL.n - 1, TL.idx(Math.ceil(w.b/H)*H));
   const mem = G ? G.src.flatMap(s => s.members) : [];
   const mx = (m, k) => { let v = null; for (let x = i0; x <= i1; x++){ const q = m[k] && m[k][x]; if (q != null && (v == null || q > v)) v = q; } return v; };
   const mn = (m, k) => { let v = null; for (let x = i0; x <= i1; x++){ const q = m[k] && m[k][x]; if (q != null && (v == null || q < v)) v = q; } return v; };
+  /* when the official rows have no temperature or wind for this window (guidance still loading, a
+     source missing a field), read them straight from the members, like the clouds */
+  const atMid = k => { const x = TL.idx(Math.floor(rows[midRi].a/H)*H); return median(mem.map(m => m[k] ? m[k][x] : null).filter(v => v != null)); };
+  if (T == null){ T = atMid("t"); if (T != null) fallback.push("temperature"); }
+  if (Td == null) Td = atMid("td");
+  if (lo == null || hi == null || dirW == null){
+    const sM = median(mem.map(m => { let a = 0, n = 0; for (let x = i0; x <= i1; x++){ const q = (m["s" + hk] || m.s10 || [])[x]; if (q != null){ a += q; n++; } } return n ? a/n : null; }).filter(v => v != null));
+    const gM = median(mem.map(m => { let a = 0, n = 0; for (let x = i0; x <= i1; x++){ const q = (m["g" + hk] || m.g10 || [])[x]; if (q != null){ a += q; n++; } } return n ? a/n : null; }).filter(v => v != null));
+    if (lo == null && sM != null) lo = n5(sM); if (hi == null && gM != null) hi = Math.max((lo ?? 0) + 5, n5(gM));
+    if (dirW == null){ const x = TL.idx(Math.floor(rows[midRi].a/H)*H); let u = 0, v = 0, n = 0; for (const m of mem){ const d = (m.d10 || [])[x], sp = (m.s10 || [])[x]; if (d == null || sp == null) continue; u += -sp*Math.sin(d*Math.PI/180); v += -sp*Math.cos(d*Math.PI/180); n++; } if (n) dirW = (Math.atan2(-u/n, -v/n)*180/Math.PI + 360) % 360; }
+    if (lo != null) fallback.push("liftoff winds");
+  }
   const vis = median(mem.map(m => mn(m, "vis"))), visMi = vis == null ? 7 : Math.min(7, Math.max(0, Math.round(vis/1609.34)));
   const cl = median(mem.map(m => mx(m, "cl"))), cm = median(mem.map(m => mx(m, "cm"))), ch = median(mem.map(m => mx(m, "ch")));
   const lcb = median(mem.map(m => mn(m, "lcb")).filter(v => v != null && v < 12000));
@@ -198,7 +211,7 @@ function derive(i){
   return {
     pov: pov == null ? null : r5(pov), povFirst, povLast, multi: (w.b - w.a)/H >= 2, concerns: concerns.length ? concerns.join(", ") : "None", seg, wx, vis:`${visMi} mi.`,
     temp: T == null ? "" : `${Math.round(T)}°F`, rh: T != null && Td != null ? `${Math.round(rhFrom(T, Td))}%` : "",
-    wind: lo == null || dir == null ? "" : `${String(Math.round(dir/10)*10 || 360).padStart(3, "0")}° ${lo} - ${hi} mph`, clouds, risk, why, ranks,
+    wind: lo == null || dirW == null ? "" : `${String(Math.round(dirW/10)*10 || 360).padStart(3, "0")}° ${lo} - ${hi} mph`, fallback, clouds, risk, why, ranks,
   };
 }
 /* what the product shows: the derived values, with any field the forecaster overrode */
@@ -730,6 +743,7 @@ function renderProductEditor(){
     const top = (d.ranks || []).filter(x => x[1] >= 1).slice(0, 5).map(([k, v]) => `${CONCERN_NAMES[k]} ${Math.round(v)}%`).join(", ");
     return `<details class="dayed" open><summary>${winLabel(i).replace(/^./, c => c.toUpperCase())} <span class="mut">${winText(w.a, w.b)}</span></summary>${fields(i, d, ov)}
       ${d.seg ? `<label class="chk"><input type="checkbox" data-segon="${i}" ${D.showSeg ? "checked" : ""}> Show PoV through the window on the product</label>` : ""}
+      ${d.fallback && d.fallback.length ? `<p class="warnline">${hesc(d.fallback.join(" and "))} taken straight from the model members: the forecast table has no value for this window yet. Refresh guidance, or check the table.</p>` : ""}${!d.temp || !d.wind ? `<p class="warnline">No ${[!d.temp && "temperature", !d.wind && "liftoff wind"].filter(Boolean).join(" or ")} in the guidance for this window; fill it in below.</p>` : ""}
       <p class="mut gd">From the forecast: window PoV ${d.pov ?? "–"}% (average of the hourly PoV row). Rule averages: ${top || "all near zero"}.${Object.keys(d.why || {}).length ? " " + Object.entries(d.why).map(([k, v]) => `${(L.risks.find(r => r.id === k) || {}).name || k}: ${v}`).join(". ") + "." : ""}</p></details>`;
   }).join("");
 }

@@ -194,7 +194,8 @@ function wquant(vals, wts, qs){
 
 /* ---------- timeline + series ---------- */
 /* the timeline starts 30 h back so recent model values can be checked against observations */
-function makeTimeline(nowMs){ const t0 = Math.floor(nowMs/H)*H - 30*H; const n = 8*24 + 36; return { t0, n, idx: ms => Math.round((ms - t0)/H) }; }
+let LAST_TL = null;
+function makeTimeline(nowMs){ const t0 = Math.floor(nowMs/H)*H - 30*H; const n = 8*24 + 36; return (LAST_TL = { t0, n, idx: ms => Math.round((ms - t0)/H) }); }
 function fillGaps(arr, maxGap){
   let last = -1;
   for (let i = 0; i < arr.length; i++){
@@ -266,23 +267,74 @@ function deriveFire(m, n){
       if (!nn && m.s80[i] != null){ const wd = m.d80 && m.d80[i] != null ? m.d80[i] : m.d10[i]; if (wd != null){ u = -m.s80[i]*Math.sin(wd*Math.PI/180); v = -m.s80[i]*Math.cos(wd*Math.PI/180); nn = 1; } }
     }
     if (nn){ m.tw[i] = Math.hypot(u/nn, v/nn); m.twd[i] = (Math.atan2(-u/nn, -v/nn)*180/Math.PI + 360) % 360; }
-    /* ventilation (m2/s) and a dispersion index estimate scaled to the usual categories */
-    if (blh != null && m.tw[i] != null){ m.vr[i] = blh*m.tw[i]*0.514444; m.di[i] = Math.max(1, Math.round(m.vr[i]/200)); }
+    /* ventilation (m2/s) and the Lavdas dispersion index (LDSI) */
+    if (blh != null && m.tw[i] != null){ m.vr[i] = blh*m.tw[i]*0.514444; const t = LAST_TL ? LAST_TL.t0 + i*H : null; const di = t != null ? ldsi(m, i, t) : null; m.di[i] = di == null ? null : Math.max(0, Math.round(di)); }
     /* Haines, low elevation: stability 950-850 hPa, moisture at 850 hPa */
     const t95 = m.t950 ? m.t950[i] : null, t85 = m.t850 ? m.t850[i] : null, rh85 = m.rh850 ? m.rh850[i] : null;
     if (t95 != null && t85 != null && rh85 != null){
       const A = fToC(t95) - fToC(t85), tc = fToC(t85), g = Math.log(Math.max(1, rh85)/100) + 17.625*tc/(243.04 + tc), td85 = 243.04*g/(17.625 - g), B = tc - td85;
       m.haines[i] = (A < 4 ? 1 : A < 8 ? 2 : 3) + (B < 6 ? 1 : B < 10 ? 2 : 3);
     }
-    /* LVORI estimate (1-10): rises with humidity, light wind and poor dispersion */
-    const rh = m.rh[i], ws = m.s10[i] != null ? m.s10[i]*1.150779*0.93 : null;
-    if (rh != null && ws != null){
-      let L = rh < 70 ? 1 : rh < 80 ? 2 : rh < 90 ? 3 : rh < 95 ? 5 : 7;
-      if (rh >= 70){ if (ws < 4) L += 2; else if (ws < 7) L += 1; if (m.di[i] != null && m.di[i] < 7) L += 1; }
-      m.lvori[i] = Math.min(10, L);
-    }
+    /* LVORI from humidity and LDSI (MFL table) */
+    if (m.rh[i] != null && m.di[i] != null) m.lvori[i] = lvori(m.rh[i], m.di[i]);
   }
   return m;
+}
+/* ---------- LDSI (TBW_MLB_MFL_DSI GFE tool, Lavdas) and LVORI (MFL GFE tool) ----------
+   Inputs per member and hour: sky cover (%), ceiling (ft), 20 ft wind (kt), transport wind (kt),
+   mixing height (ft). Day or night follows the sun at the Space Coast. */
+const sunUp = t => {
+  /* solar elevation at 28.5 N, 80.7 W */
+  const d = new Date(t), doy = (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(d.getUTCFullYear(), 0, 0))/86400e3;
+  const g = 2*Math.PI/365*(doy - 1 + (d.getUTCHours() - 12)/24), dec = 0.006918 - 0.399912*Math.cos(g) + 0.070257*Math.sin(g) - 0.006758*Math.cos(2*g) + 0.000907*Math.sin(2*g);
+  const eq = 229.18*(0.000075 + 0.001868*Math.cos(g) - 0.032077*Math.sin(g) - 0.014615*Math.cos(2*g) - 0.040849*Math.sin(2*g));
+  const tst = d.getUTCHours()*60 + d.getUTCMinutes() + 30 + eq + 4*-80.7, ha = (tst/4 - 180)*Math.PI/180, lat = 28.5*Math.PI/180;
+  return Math.asin(Math.sin(lat)*Math.sin(dec) + Math.cos(lat)*Math.cos(dec)*Math.cos(ha)) > 0;
+};
+/* ceiling: MOS ceiling when the source has one, otherwise from the cloud layers */
+const ceilOf = (m, i) => { const c = m.cig && m.cig[i]; if (c != null) return c; const cl = m.cl && m.cl[i], cm = m.cm && m.cm[i], ch = m.ch && m.ch[i];
+  if (cl != null && cl >= 50) return m.lcb && m.lcb[i] != null ? m.lcb[i] : 3000; if (cm != null && cm >= 50) return 10000; if (ch != null && ch >= 50) return 25000; return 99999; };
+/* stability class by net radiation index (rows 4 .. -2) and 20 ft wind (kt) */
+const LAV_WIND = [1.5, 3.5, 5.5, 6.5, 7.5, 9.5, 10.5, 12.0];
+const LAV_STAB = { 4:[1,1,1,2,2,2,3,3,3], 3:[1,2,2,2,2,3,3,3,4], 2:[2,2,3,3,3,3,4,4,4], 1:[3,3,4,4,4,4,4,4,4], 0:[4,4,4,4,4,4,4,4,4], "-1":[6,6,5,5,4,4,4,4,4], "-2":[7,7,6,6,5,5,5,4,4] };
+function ldsi(m, i, t){
+  const sky = m.sky ? m.sky[i] : null, w20 = m.s20 ? m.s20[i] : (m.s10 ? m.s10[i] : null), tw = m.tw[i], mh = m.mixh[i];
+  if (sky == null || w20 == null || tw == null || mh == null) return null;
+  const ceil = ceilOf(m, i), ovc = sky >= 95, day = sunUp(t);
+  let nri = 0;
+  if (!day){ nri = sky <= 40 ? -2 : !ovc ? -1 : ceil >= 7000 ? -1 : 0; }
+  else {
+    const d = new Date(t), doy = (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(d.getUTCFullYear(), 0, 0))/86400e3;
+    let ic = doy > 75 && doy < 270 ? 4 : 3;                    /* sun above 60 deg mid-March to late September, else above 35 deg */
+    if (sky > 50 && !ovc){ if (ceil < 7000) ic -= 2; else if (ceil < 16000) ic -= 1; }
+    if (ovc && ceil >= 7000) ic -= 1;
+    if (ic < 1) ic = 1;
+    nri = ovc && ceil < 7000 ? 0 : ic;
+  }
+  const col = LAV_WIND.findIndex(x => w20 < x), stab = LAV_STAB[String(nri)][col < 0 ? 8 : col];
+  const mm = Math.max(100, mh*0.3048), T = tw*0.5148;
+  if (!day){
+    if (stab === 4) return (mm >= 600 ? 3 : mm >= 400 ? 2.5 : 2)*T;
+    if (stab === 5) return 1.5*T;
+    if (stab > 5) return T;
+    return 0;
+  }
+  if (stab === 1) return (-0.0000007*mm*mm + 0.0104*mm - 0.2822)*T;
+  if (stab === 2) return (-0.000001*mm*mm + 0.01*mm - 0.0081)*T;
+  if (stab === 3) return (4.0795*Math.log(mm) - 20.657)*T;
+  if (stab === 4) return (((-0.000001*mm*mm + 0.0056*mm) + 1.2128)*T + (2.0905*Math.log(mm) - 9.0519)*T)/2;
+  return 0;
+}
+/* LVORI: rows by RH band, columns LDSI >40, <=40, <=30, <=25, <=16, <=12, <=10, <=8, <=6, <=4, <=2, <=1 */
+const LVORI_COLS = [40, 30, 25, 16, 12, 10, 8, 6, 4, 2, 1];
+const LVORI_ROWS = [
+  [97.0001, [4,4,4,5,5,7,8,8,9,9,10,10]], [95, [4,4,4,5,5,6,6,6,7,8,8,9]], [92, [4,4,4,5,5,5,6,6,6,6,7,8]], [89, [4,4,4,4,5,5,5,5,6,6,7,7]],
+  [86, [4,4,4,4,4,5,5,5,5,6,6,6]], [83, [4,4,4,4,4,4,4,4,5,5,5,6]], [80, [3,3,3,3,4,4,4,4,4,5,5,6]], [75, [3,3,3,3,4,4,4,4,4,4,4,4]],
+  [70, [3,3,3,3,3,3,3,3,3,3,3,4]], [65, [1,3,3,3,3,3,3,3,3,3,3,4]], [60, [1,1,2,2,2,2,3,3,3,3,3,3]], [55, [1,1,2,2,2,2,2,3,3,3,3,3]], [0, [1,1,2,2,2,2,2,2,2,2,2,2]]];
+function lvori(rh, di){
+  const row = (rh > 97 ? LVORI_ROWS[0] : LVORI_ROWS.slice(1).find(r => rh >= r[0]) || LVORI_ROWS[LVORI_ROWS.length - 1])[1];
+  let k = 0; LVORI_COLS.forEach((c, j) => { if (di <= c) k = j + 1; });
+  return row[k];
 }
 const VKEYS = Object.keys(VMAP).sort((a, b) => b.length - a.length);
 async function getJSON(url, ms){

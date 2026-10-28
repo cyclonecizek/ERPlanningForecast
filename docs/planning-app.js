@@ -40,6 +40,38 @@ const wuLabel = () => prefs.wu || "kt";
 const toDispW = v => v == null ? v : v*wfac();
 /* "Winds (kt)" group labels follow the display unit */
 const grpLabel = g => g.replace("Winds (kt)", `Winds (${wuLabel()})`);
+/* burn page: RH follows edited temperature and dew point; LDSI follows edited sky, 20 ft wind,
+   transport wind and mixing height; LVORI follows RH and LDSI. Each shifts the guidance value by the
+   change the office formula gives for the edit, so an unedited row keeps the guidance; a row edited
+   directly is never overwritten. */
+const _ceilCache = {};
+function rowCeiling(sid, r){
+  const key = `${sid}|${r.a}`; if (_ceilCache[key] !== undefined) return _ceilCache[key];
+  const G = S.G[sid], x = S.TL.idx(Math.floor(r.a/H)*H), v = [];
+  if (G) for (const src of G.src) for (const m of src.members){ const c = ceilOf(m, x); if (c != null) v.push(c); }
+  v.sort((a, b) => a - b); const c = v.length ? v[v.length >> 1] : 99999;
+  if (Object.keys(_ceilCache).length > 4000) for (const k in _ceilCache) delete _ceilCache[k];
+  return (_ceilCache[key] = c);
+}
+function burnFollow(o, g, rows, ed, sid){
+  const one = (src, i, ceil) => ({ sky:[src.sky[i]], s20:[src.s20[i]], tw:[src.tw[i]], mixh:[src.mixh[i]], cig:[ceil] });
+  rows.forEach((r, i) => {
+    /* RH from edited temperature or dew point */
+    if (o.rh && ed("rh", r) === undefined && (ed("t", r) !== undefined || ed("td", r) !== undefined) && o.t[i] != null && o.td[i] != null && g.t[i] != null && g.td[i] != null && g.rh[i] != null)
+      o.rh[i] = Math.max(1, Math.min(100, Math.round(g.rh[i] + rhFrom(o.t[i], o.td[i]) - rhFrom(g.t[i], g.td[i]))));
+    /* LDSI from edited inputs */
+    const inEd = ["sky","s20","tw","mixh"].some(k => ed(k, r) !== undefined);
+    if (o.di && ed("di", r) === undefined && inEd && ["sky","s20","tw","mixh"].every(k => o[k] && o[k][i] != null && g[k] && g[k][i] != null)){
+      const t = r.a + Math.min(r.b - r.a, H)/2, ceil = rowCeiling(sid, r);
+      const Lo = ldsi(one(o, i, ceil), 0, t), Lg = ldsi(one(g, i, ceil), 0, t);
+      /* scale by the formula's response to the edit, so the blended guidance value carries over */
+      if (Lo != null && Lg != null){ const k = g.di[i] != null && Lg > 0.5 ? Math.max(0.5, Math.min(2, g.di[i]/Lg)) : 1; o.di[i] = Math.max(0, Math.round(Lo*k)); }
+    }
+    /* LVORI from RH and LDSI */
+    if (o.lvori && ed("lvori", r) === undefined && o.rh[i] != null && o.di[i] != null && (o.rh[i] !== g.rh[i] || o.di[i] !== g.di[i]))
+      o.lvori[i] = lvori(o.rh[i], o.di[i]);
+  });
+}
 /* burn prescription criteria: field, operator, value(s) */
 const RXF = {
   rh:    { l:"Relative humidity", short:"RH", unit:"%", key:"rh" },
@@ -49,7 +81,7 @@ const RXF = {
   dir:   { l:"20 ft wind direction", short:"Wind from", sector:true, key:"dirm", dep:"dir" },
   tw:    { l:"Transport wind", short:"Transport", wind:true, key:"tw" },
   mixh:  { l:"Mixing height", short:"Mixing ht", unit:"ft", key:"mixh" },
-  di:    { l:"Dispersion index", short:"DI", unit:"", key:"di" },
+  di:    { l:"Dispersion index (LDSI)", short:"LDSI", unit:"", key:"di" },
   lvori: { l:"LVORI", short:"LVORI", unit:"", key:"lvori" },
   haines:{ l:"Haines index", short:"Haines", unit:"", key:"haines" },
 };
@@ -128,8 +160,8 @@ function applyBurnConfig(exp){
     { k:"tw", g:"Smoke and dispersion", l:"Transport", s:"wind", kind:"num", unit:"kt", step:1, lo:0, title:"Transport wind (mean through the mixed layer)", thr:thrOf("tw"), csv:"transport_wind_kt" },
     { k:"tdir", g:"Smoke and dispersion", l:"Transport", s:"dir", kind:"dir", title:"Transport wind direction", csv:"transport_dir_deg" },
     { k:"vr", g:"Smoke and dispersion", l:"Ventilation", s:"m²/s", kind:"num", unit:"m²/s", step:100, lo:0, title:"Ventilation rate (mixing height × transport wind)", csv:"ventilation_m2s" },
-    { k:"di", g:"Smoke and dispersion", l:"Dispersion", s:"index (est.)", kind:"num", unit:"", step:1, lo:1, title:"Dispersion index (estimate from ventilation)", thr:thrOf("di"), csv:"dispersion_index" },
-    { k:"lvori", g:"Smoke and dispersion", l:"LVORI", s:"(est.)", kind:"num", unit:"", step:1, lo:1, hi:10, title:"Low visibility occurrence risk index (estimate)", thr:thrOf("lvori"), csv:"lvori" },
+    { k:"di", g:"Smoke and dispersion", l:"LDSI", s:"dispersion", kind:"num", unit:"", step:1, lo:0, title:"Lavdas dispersion index (stability class from net radiation and the 20 ft wind; mixing height and transport wind)", thr:thrOf("di"), csv:"ldsi" },
+    { k:"lvori", g:"Smoke and dispersion", l:"LVORI", s:"", kind:"num", unit:"", step:1, lo:1, hi:10, title:"Low visibility occurrence risk index (MFL table from RH and LDSI)", thr:thrOf("lvori"), csv:"lvori" },
     { k:"haines", g:"Smoke and dispersion", l:"Haines", s:"low elev.", kind:"num", unit:"", step:1, lo:2, hi:6, title:"Haines index (low elevation, 950-850 hPa)", csv:"haines" },
     ...rx.map(p => ({ ...p, unit:"%", step:1, lo:0, hi:100 })), base("sev")];
   const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg", sev:"spc_category" };
@@ -309,11 +341,12 @@ function officialFor(sid, fast){
   });
   /* WBGT follows edited temperature / dew point unless WBGT itself is edited */
   rows.forEach((r, i) => {
-    if (ed("wbgt", r) !== undefined || (ed("t", r) === undefined && ed("td", r) === undefined)) return;
+    if (!o.wbgt || !g.wbgt || ed("wbgt", r) !== undefined || (ed("t", r) === undefined && ed("td", r) === undefined)) return;
     if (o.t[i] == null || o.td[i] == null || g.t[i] == null || g.td[i] == null || g.wbgt[i] == null) return;
     const d = wbgtF(o.t[i], o.td[i], 400, 8) - wbgtF(g.t[i], g.td[i], 400, 8);
     o.wbgt[i] = Math.round(g.wbgt[i] + d);
   });
+  if (BURN) burnFollow(o, g, rows, ed, sid);
   const gx = {};
   if (fast && OF && OF.site === sid){
     /* while dragging: keep the exceedance probabilities from the last full pass */
@@ -338,6 +371,12 @@ function officialFor(sid, fast){
       const x = ed(p.k, r);
       o[p.k][i] = x !== undefined ? x : probRound(clampP(shifted.v));
     });
+  }
+  /* burn: the chance of meeting every criterion can't exceed the chance of meeting any one of them,
+     so edits that move a single criterion carry into "All criteria" */
+  if (BURN && o.xall){
+    const crit = PARAMS.filter(p => p.k.startsWith("x") && p.k !== "xall");
+    rows.forEach((r, i) => { if (ed("xall", r) !== undefined || o.xall[i] == null) return; const lo = Math.min(...crit.map(p => o[p.k][i]).filter(v => v != null)); if (isFinite(lo)) o.xall[i] = Math.min(o.xall[i], lo); });
   }
   const out = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
   if (HOOKS.official) HOOKS.official(out, ed, rows);
@@ -697,7 +736,7 @@ function bindExp(){
   const f2 = $("foot1").nextElementSibling; if (f2) f2.textContent = "Winds at each constraint height are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing), and peaks scale the 10 m gust factor with height. The custom point uses the nearest MOS station within 30 km and the nearest high-res pipeline point within 15 km. Lightning comes only from guidance with explicit thunder probabilities.";
   if (BURN){
     $("foot1").textContent = "Rows are hourly for the period you choose, then 3-hour blocks. Prescription rows give the chance each criterion, and all of them together, is met through the hour, from all the guidance members; individual criteria move with your edits, \"All criteria\" follows the guidance. Press Enter to edit a cell, Delete to return it to guidance.";
-    if (f2) f2.textContent = "Mixing height is the models' boundary-layer height (ft above ground). Transport wind is the mean wind through the mixed layer from the pressure levels. Ventilation is mixing height × transport wind. The dispersion index and LVORI are estimates computed from those, not the Florida Forest Service values, and Haines uses the low-elevation 950–850 hPa form: check them against the NWS fire weather forecast. 20 ft winds are scaled from the 10 m winds.";
+    if (f2) f2.textContent = "Mixing height is the models' boundary-layer height (ft above ground). Transport wind is the mean wind through the mixed layer from the pressure levels. Ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index (the TBW/MLB/MFL GFE tool): stability class from net radiation (sky cover, ceiling, sun) and the 20 ft wind, then the day or night equations with mixing height and transport wind. LVORI is the MFL table from RH and LDSI. Haines uses the low-elevation 950–850 hPa form. 20 ft winds are scaled from the 10 m winds; ceilings come from MOS or the model cloud layers.";
   }
   renderExpSetup();
 }
@@ -2023,7 +2062,7 @@ function tintA(p, v){
 }
 /* the customer-facing explanation of the table (the editor's footnote is for forecasters) */
 function productNote(){
-  if (BURN) return "Rows are hourly. Prescription rows give the chance each criterion, and all of them together, is met through the hour. Mixing height is above ground; transport wind is the mean wind through the mixed layer; ventilation is mixing height × transport wind. The dispersion index and LVORI are estimates from the forecast mixing height, transport wind, humidity and wind; Haines is the low-elevation form. Winds are in the selected unit; temperatures in °F.";
+  if (BURN) return "Rows are hourly. Prescription rows give the chance each criterion, and all of them together, is met through the hour. Mixing height is above ground; transport wind is the mean wind through the mixed layer; ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index and LVORI the MFL table from humidity and LDSI; Haines is the low-elevation form. Winds are in the selected unit; temperatures in °F.";
   const blocks = EXPO ? `Rows are hourly for the first ${prefs.exp && prefs.exp.hourly != null ? prefs.exp.hourly : 24} hours, then 3-hour blocks to the end of the period.` : "Rows are hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7.";
   return `${blocks} In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the period shown. 3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time.${EXPO ? " Constraint probabilities are the chance that the constraint is met at any time in the row." : ""} Winds are in the selected unit; temperatures in °F.`;
 }

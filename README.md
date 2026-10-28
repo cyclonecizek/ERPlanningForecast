@@ -210,10 +210,16 @@ window, winds default to mph, and the page fetches extra model fields: boundary-
 950/850 hPa temperature and humidity, and winds and heights at 975-800 hPa.
 * **Rows:** sky, temperature, dew point, relative humidity, precipitation and lightning chances,
   20 ft sustained and peak wind and direction, mixing height (ft AGL), transport wind (vector mean
-  through the mixed layer) and direction, ventilation (m²/s), a dispersion index estimate
-  (ventilation / 200, scaled to the usual 1-100 categories), an LVORI estimate (from humidity, wind
-  and dispersion), and Haines (low elevation, 950-850 hPa). The estimates are labelled as such; check
-  them against the NWS fire weather forecast.
+  through the mixed layer) and direction, ventilation (m²/s), **LDSI** (the Lavdas dispersion index, from the TBW/MLB/MFL GFE tool: stability
+  class from a net radiation index (sky cover, ceiling, sun elevation, season) and the 20 ft wind, then
+  the Lavdas day or night equations with mixing height and transport wind), **LVORI** (the MFL GFE
+  table from RH and LDSI), and Haines (low elevation, 950-850 hPa). They are computed for every guidance
+  member and hour, then blended like the other rows. They follow edits: RH follows edited temperature and dew point, LDSI follows edited
+  sky cover, 20 ft wind, transport wind and mixing height (scaled by the formula's response), LVORI follows
+  RH and LDSI, and "All criteria" never exceeds the lowest single-criterion chance; a value typed into one of
+  those rows is kept. The daytime insolation class is 4 from mid-March to late September and 3 otherwise,
+  as the tool intends (the original compares the date as text and never reaches class 4). Ceilings come from MOS when a source has them,
+  otherwise from the model cloud layers; sky cover of 95% or more counts as overcast.
 * **Prescription:** criteria on humidity, temperature, 20 ft wind, wind direction sector, transport
   wind, mixing height, dispersion, LVORI or Haines, each at least / at most a value. Each gets a
   probability row, plus **All criteria** (the share of guidance members meeting every criterion in
