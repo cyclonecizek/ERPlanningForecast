@@ -17,3 +17,8 @@ Leadership_Quick_Look_*
 Official_Schedule*.csv
 *schedule*.csv
 *Schedule*.csv
+# Drop zone positions (kept off the public repository)
+DZ_Positions*.json
+DZ_Positions*.csv
+*dz_positions*
+
