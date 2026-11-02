@@ -296,10 +296,42 @@ Dragon, Starship, otherwise Non-Dragon F9/FH; ULA: Atlas or Vulcan) and changeab
 * **Next forecast** is a choice of **As Required** or a date (date picker; printed dd Mon yyyy). It is
   automatic until changed: As Required on L-1 and L-0, otherwise tomorrow. **automatic** puts it back.
 
+## Personal forecast mode
+`guidance.js` and `planning-app.js` also run a general-purpose page with `window.PAGE = "personal"`
+(any point, title, editable summary, waves), published from its own repository. Changes to these two
+files apply to both.
+
 ## After editing a script
 Run `python3 pipeline/stamp_versions.py` so the pages load the new code (it stamps each script tag with
 the file's hash), then `python3 pipeline/build_standalone.py` to rebuild the offline file (the workflow
 also rebuilds it on push).
+
+## LMEF wording, units and database CSV (28 Oct updates)
+* **No upper-level wind shear** criterion for any customer; ULA defaults to Solar Activity only.
+* **Up to three cloud layers** on every product and in the editor (all three go into the database CSV).
+* **RH instead of dew point** in the edit table (the product's humidity comes from it).
+* **Liftoff wind units by customer:** SpaceX mph, Blue Origin ft/s (fps), everyone else knots (kts).
+  The wind constraint is "Liftoff Winds" for SpaceX, Blue Origin and Stoke and "Ground Winds" for ULA and
+  NASA, on the product and in the concern list.
+* **Fixed lists** in the product editor: weather (None, Isol/Sct/Num Showers, Showers, Isold/Sct/Num
+  Tstorms, Tstorms, Fog, Mist), visibility (7+ mi ... M1/4 mi), cloud types (None, Stratus, Stratocumulus,
+  Cumulus, Cumulonimbus, Nimbostratus, Altostratus, Cirrostratus, Cirrus), risk levels (Low, Low-Mod,
+  Moderate, Mod-High, High) and primary concerns (up to three). The automatic values use the same words.
+* **CSV** downloads the 45 WS database format (`LMEF_Forecast_output.csv`): one row per window with
+  `mission, vehicle, pad_id, issued_utc, forecaster, window_index, window_open_utc, window_close_utc,
+  pov_pct, primary_concern_1-3, weather, visibility_mi, temperature_f, relative_humidity_pct,
+  wind_dir_deg, wind_min_kt, wind_max_kt, cloud1-3 type/coverage/base/tops, risktype/risklevel 1-4,
+  next_forecast, discussion`; values quoted, empty fields bare, times MM/DD/YYYY h:mm AM in UTC, cloud
+  heights with thousands separators, a missing second or third cloud group as 0, winds in knots, UTF-8 with BOM.
+
+## Fire Weather Forecast (burn product)
+Haines is gone; the burn page adds **Inversion base** (the lowest level where temperature rises with height,
+surface to 700 hPa, 0 ft = surface-based) and the **chance of an inversion below 1,000 ft** (share of model
+profiles with one). The **Fire Weather Forecast** panel under the table shows the finished one-page product:
+header, burn unit and valid time, an editable discussion written from the forecast, the prescription and
+when the forecast meets it, and an hourly table (sky, temperature, RH, 20 ft wind, mixing height, transport
+wind, LDSI, LVORI, inversion base and chance, rain, chance in prescription). **Save and publish** downloads
+it as the PDF.
 
 ## LMEF customers, vehicles and pads
 Choosing a **Provider** (customer) limits the **Vehicle** and **Pad** lists to what that customer flies

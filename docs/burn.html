@@ -361,6 +361,17 @@ document.addEventListener("DOMContentLoaded", function(){
   mark();
 });
 </script>
+<style>
+.fwfpanel{display:grid;gap:10px;padding:16px 18px}.fwfpanel .psh{display:flex;gap:10px;align-items:center}.fwfpanel .psh h3{margin:0}
+.fwfpanel .col{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:600}.fwfpanel textarea{border:1px solid var(--rule);border-radius:8px;padding:7px 9px;background:var(--panel);color:var(--ink);font:inherit;font-weight:400;line-height:1.45}
+.fwf{background:#fff;color:#000;max-width:820px;margin:6px auto 0;padding:14px;border:1px solid #ccc;font-family:Arial,Helvetica,sans-serif;font-size:11px}
+.fwh{display:grid;grid-template-columns:60px 1fr 60px;align-items:center;background:#10284A;color:#fff;padding:6px 8px;text-align:center}.fwh img{height:52px}.fwh h2{margin:0;font-size:19px;letter-spacing:.5px}.fwh p{margin:2px 0 0;font-size:10.5px;color:#DCE4EE}
+.fwi{width:100%;border-collapse:collapse;margin:8px 0}.fwi th,.fwi td{border:1px solid #000;padding:3px 6px;text-align:left}.fwi th{background:#E2E6E9;width:13%}
+.fwbox{border:1px solid #000;padding:6px 8px;margin:0 0 6px}.fwbox p{margin:3px 0 0;line-height:1.4}
+.fwt{width:100%;border-collapse:collapse}.fwt th,.fwt td{border:1px solid #999;padding:3px 4px;text-align:center;font-size:10.5px}.fwt th{background:#E2E6E9}
+.fwt tr.fwd td{background:#F4F6F7;text-align:left;font-weight:700}.fwt td.ok{background:#D2ECD8}.fwt td.mid{background:#FDECBA}.fwt td.no{background:#FBD7D4}
+.fwn{color:#50606C;font-size:9.5px;margin:6px 0 0}.mut{color:var(--ink-3);font-size:12.5px;font-weight:400}
+</style>
 </head>
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="taf.html" data-page="taf">TAF generator</a><a href="mwp.html" data-page="mwp">Mission weather (MWP)</a><a href="burn.html" data-page="burn">Burn forecasts</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="verify.html" data-page="verify">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
@@ -536,7 +547,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </dialog>
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "burn";</script>
-<script src="guidance.js?v=58143842f2"></script>
-<script src="planning-app.js?v=81fb537d0b"></script>
+<script src="guidance.js?v=6cd68893f4"></script>
+<script src="planning-app.js?v=b9bc9672c5"></script>
 </body>
 </html>

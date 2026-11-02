@@ -26,11 +26,24 @@ const PROVIDER_ASSETS = {
   "OTHER": { vehicles:[], pads:[] },
 };
 const LMK = "lmef:v1";
-const RISK = ["Low","Moderate","High"];
+/* risk levels offered on the product; the automatic levels use Low, Moderate and High */
+const RISK = ["Low", "Low-Mod", "Moderate", "Mod-High", "High"];
+const RISK_AUTO = ["Low", "Moderate", "High"];
+/* the product's fixed wording (from the legacy LMEF builder) */
+const WX_OPTS = ["None", "Isol Showers", "Sct Showers", "Num Showers", "Showers", "Isold Tstorms", "Sct Tstorms", "Num Tstorms", "Tstorms", "Fog", "Mist"];
+const VIS_OPTS = ["7+ mi", "6 mi", "5 mi", "4 mi", "3 mi", "2 mi", "1 mi", "3/4 mi", "1/2 mi", "1/4 mi", "M1/4 mi"];
+const CLOUD_TYPES = ["None", "Stratus", "Stratocumulus", "Cumulus", "Cumulonimbus", "Nimbostratus", "Altostratus", "Cirrostratus", "Cirrus"];
+const CLOUD_COVS = ["Few", "Scattered", "Broken", "Overcast"];
+/* launch commit criteria offered as primary concerns; the wind constraint is "Liftoff Winds" for SpaceX,
+   Blue Origin and Stoke, "Ground Winds" for ULA and NASA */
+const LLCC_OPTS = ["Surface Electric Fields Rule", "Lightning Rule", "Cumulus Cloud Rule", "Anvil Cloud Rules", "Debris Cloud Rules", "Thick Cloud Layers Rule", "Disturbed Weather Rule", "Smoke Plume Rule", "Triboelectrification Rule", "Flight Through Precip"];
+const windsName = () => /ULA|UNITED LAUNCH|NASA/i.test(L.provider || "") ? "Ground Winds" : "Liftoff Winds";
+const concernOpts = () => ["None", ...LLCC_OPTS, windsName()];
+/* liftoff wind units on the product: SpaceX mph, Blue Origin ft/s, everyone else knots */
+const windUnitLSP = () => /SPACEX/i.test(L.provider || "") ? "mph" : /BLUE ORIGIN/i.test(L.provider || "") ? "ft/s" : "kt";
 /* vehicle constraint values are entered by the forecaster and kept on this computer only */
 const VEHICLE_LIMITS = {};
 const BUILTIN_RISKS = [
-  { id:"shear",    name:"Upper-Level Wind Shear",   auto:"GFS 300-200 hPa winds" },
   { id:"recovery", name:"Booster Recovery Weather", auto:"recovery site winds and seas" },
   { id:"proton",   name:"Solar Activity",           auto:"GOES ≥10 MeV protons and the SWPC 3-day forecast" },
   /* set by the forecaster (no automatic value); turned on by the mission profiles that use them */
@@ -88,6 +101,8 @@ if (!L.risks) L.risks = BUILTIN_RISKS.map(r => ({ id:r.id, name:r.name, on:true,
 L.risks.forEach(r => { if (r.id === "solar") r.id = "proton"; if (r.id === "proton" && (!r.name || r.name === "Proton Flux")) r.name = "Solar Activity"; });
 /* criteria added since this computer last saved: present but off */
 BUILTIN_RISKS.forEach(b => { if (!L.risks.some(r => r.id === b.id)) L.risks.push({ id:b.id, name:b.name, on:false, builtin:true }); });
+/* upper-level wind shear is no longer an additional risk criterion for any customer */
+L.risks = L.risks.filter(r => r.id !== "shear");
 if (L.nextAuto === undefined) L.nextAuto = true;
 const saveL = () => LS2.set(L);
 const winLabel = i => i === 0 ? "Launch day" : `${i*24}-hour delay`;
@@ -153,7 +168,7 @@ EH.config = () => {
     ...RULES.map(rule),
     ...(L.ftp ? [{ ...rule({ k:"rftp", name:"Flight Through Precip", title:"Flight through precipitation (vehicle constraint for this mission)" }), g:"Constraints (%)" }] : []),
     { k:"xlw", g:"Constraints (%)", l:"Liftoff winds", s:liftoffText(), kind:"prob", unit:"%", step:1, lo:0, hi:100, ex:lk, dep:[lk], op:L.liftoff.op === ">=" ? ">=" : ">", v:kt, title:`Liftoff winds: ${liftoffText()}`, chip:"Liftoff winds" },
-    base("sky"), base("t"), base("td"),
+    base("sky"), base("t"), { k:"rh", g:"Pad weather", l:"Humidity", s:"%", kind:"num", unit:"%", step:1, lo:1, hi:100, title:"Relative humidity", csv:"rh_pct" },
     { ...base("pp1"), g:"Precip / lightning (%)", l:"Precip", s:"1 hr" }, { ...base("lt1"), g:"Precip / lightning (%)", l:"Lightning", s:"1 hr" },
     ...winds, { ...base("dir"), s:"sfc" },
   ];

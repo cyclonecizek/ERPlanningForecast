@@ -5,9 +5,11 @@
 const PAGE = (typeof window !== "undefined" && window.PAGE) || "planning";
 /* the burn page is an exposure-style page with fire-weather parameters and a burn prescription */
 const BURN = PAGE === "burn";
-const EXPO = PAGE === "exposure" || BURN;
+/* the personal forecast: any point, a title, waves when asked, and a written summary */
+const PERSONAL = PAGE === "personal";
+const EXPO = PAGE === "exposure" || BURN || PERSONAL;
 const LMEF = PAGE === "lmef";
-const LS = BURN ? { edits:"burnfx:v1:edits", prefs:"burnfx:v1:prefs", pub:"burnfx:v1:published" } : EXPO ? { edits:"expfx:v1:edits", prefs:"expfx:v1:prefs", pub:"expfx:v1:published" } : LMEF ? { edits:"lmfx:v1:edits", prefs:"lmfx:v1:prefs", pub:"lmfx:v1:published" } : { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
+const LS = PERSONAL ? { edits:"persfx:v1:edits", prefs:"persfx:v1:prefs", pub:"persfx:v1:published" } : BURN ? { edits:"burnfx:v1:edits", prefs:"burnfx:v1:prefs", pub:"burnfx:v1:published" } : EXPO ? { edits:"expfx:v1:edits", prefs:"expfx:v1:prefs", pub:"expfx:v1:published" } : LMEF ? { edits:"lmfx:v1:edits", prefs:"lmfx:v1:prefs", pub:"lmfx:v1:published" } : { edits:"planfx:v1:edits", prefs:"planfx:v1:prefs", pub:"planfx:v1:published" };
 /* the LMEF page supplies its own points, parameters, rows and rule guidance through these hooks */
 const HOOKS = (typeof window !== "undefined" && (window.EDITOR_HOOKS = window.EDITOR_HOOKS || {})) || {};
 const PLANNING_PARAMS = PARAMS.map(p => ({ ...p }));
@@ -39,7 +41,7 @@ const wfac = () => WIND_DISP[prefs.wu] || 1;
 const wuLabel = () => prefs.wu || "kt";
 const toDispW = v => v == null ? v : v*wfac();
 /* "Winds (kt)" group labels follow the display unit */
-const grpLabel = g => g.replace("Winds (kt)", `Winds (${wuLabel()})`);
+const grpLabel = g => g.replace("Winds (kt)", `Winds (${wuLabel()})`).replace("Wind (kt)", `Wind (${wuLabel()})`);
 /* burn page: RH follows edited temperature and dew point; LDSI follows edited sky, 20 ft wind,
    transport wind and mixing height; LVORI follows RH and LDSI. Each shifts the guidance value by the
    change the office formula gives for the edit, so an unedited row keeps the guidance; a row edited
@@ -83,7 +85,7 @@ const RXF = {
   mixh:  { l:"Mixing height", short:"Mixing ht", unit:"ft", key:"mixh" },
   di:    { l:"Dispersion index (LDSI)", short:"LDSI", unit:"", key:"di" },
   lvori: { l:"LVORI", short:"LVORI", unit:"", key:"lvori" },
-  haines:{ l:"Haines index", short:"Haines", unit:"", key:"haines" },
+  invh:  { l:"Inversion base", short:"Inversion", unit:"ft", key:"invh" },
 };
 function burnDefaults(){
   const d = new Date(), st = capeToUTC(d.getFullYear(), d.getMonth() + 1, d.getDate() + 1, 8, 0);
@@ -92,7 +94,12 @@ function burnDefaults(){
     constraints:[ { id:"r1", type:"rx", f:"rh", op:">=", v:30 }, { id:"r2", type:"rx", f:"rh", op:"<=", v:55 }, { id:"r3", type:"rx", f:"s20", op:">=", v:4, unit:"mph" }, { id:"r4", type:"rx", f:"s20", op:"<=", v:15, unit:"mph" },
       { id:"r5", type:"rx", f:"mixh", op:">=", v:1700 }, { id:"r6", type:"rx", f:"tw", op:">=", v:9, unit:"mph" }, { id:"r7", type:"rx", f:"di", op:">=", v:21 }, { id:"r8", type:"rx", f:"lvori", op:"<=", v:4 } ] };
 }
+function persDefaults(){
+  const st = Math.ceil(Date.now()/H)*H;
+  return { op:"", title:"My Forecast", place:{ name:"Melbourne, FL", lat:28.0836, lon:-80.6081 }, tz:"America/New_York", start:st, end:st + 3*24*H, hourly:"all", marine:false, summary:null, concerns:null, gusts:[20, 25, 30], constraints:[] };
+}
 function expDefaults(){
+  if (PERSONAL) return persDefaults();
   if (BURN) return burnDefaults();
   const st = Math.ceil(Date.now()/H)*H;
   return { op:"", start:st, end:st + 48*H, hourly:24, custom:{ name:"Custom point", lat:28.5, lon:-80.6 },
@@ -100,6 +107,7 @@ function expDefaults(){
 }
 const expStored = EXPO ? (store.get(LS.prefs, {}).exp || expDefaults()) : null;
 function expPoints(exp){
+  if (PERSONAL){ const p = exp.place || {}; return [{ id:"custom", name: p.name || "Forecast point", point: p.name || "Forecast point", tag:"P", off:[6,3,"start"], stn:null, lat:+p.lat || 28.08, lon:+p.lon || -80.61, custom:true }]; }
   const c = exp.custom || {}; let stn = null, best = 30;
   for (const k in MOS_STATIONS){ const d = kmBetween(+c.lat, +c.lon, MOS_STATIONS[k][0], MOS_STATIONS[k][1]); if (d < best){ best = d; stn = k; } }
   const cust = { id:"custom", name: c.name || (BURN ? "Burn unit" : "Custom point"), point: c.name || (BURN ? "Burn unit" : "Custom"), tag:"C", off:[6,3,"start"], stn, lat:+c.lat || 28.5, lon:+c.lon || -80.6, custom:true };
@@ -143,6 +151,30 @@ function constraintParams(exp){
       title:`Temperature ${below ? "below" : "above"} ${fmtNum(+c.v)}°${c.unit}`, csv:`p_temp_${below ? "lt" : "gt"}${fmtNum(+c.v)}${c.unit}_pct`, cons:c };
   });
 }
+/* the personal page: 10 m winds, gust chances, humidity, and waves when asked */
+function applyPersonalConfig(exp){
+  SITES.splice(0, SITES.length, ...expPoints(exp));
+  HEIGHTS.splice(0, HEIGHTS.length, 33);
+  const base = k => ({ ...PLANNING_PARAMS.find(p => p.k === k) });
+  const gust = (exp.gusts || [20, 25, 30]).map(v => ({ k:`xg${v}`, g:"Gust chances (%)", l:`>${v} mph`, s:"gusts", chip:`Gusts >${v}`, kind:"prob", ex:"g33", dep:["g33"], op:">", v: v*0.868976, unit:"%", step:1, lo:0, hi:100, title:`Chance of gusts over ${v} mph`, csv:`p_gust_gt${v}mph_pct` }));
+  const list = [...["sky","t","td"].map(base),
+    { k:"rh", g:"Temperature (°F)", l:"Humidity", s:"%", kind:"num", unit:"%", step:1, lo:1, hi:100, title:"Relative humidity", csv:"rh_pct" },
+    ...["pp1","pp3","pp6","lt1","lt3","lt6"].map(base),
+    { k:"s33", g:"Wind (kt)", l:"Wind", s:"10 m", kind:"num", unit:"kt", step:1, lo:0, title:"Wind speed (10 m)", csv:"wind_kt" },
+    { k:"g33", g:"Wind (kt)", l:"Gusts", s:"10 m", kind:"num", unit:"kt", step:1, lo:0, title:"Wind gusts (10 m)", peakOf:"s33", csv:"gust_kt" },
+    { ...base("dir"), g:"Wind (kt)", s:"10 m" }, ...gust,
+    ...(exp.marine ? [
+      { k:"wvh", g:"Waves and sea state", l:"Waves", s:"ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Significant wave height", csv:"wave_ft" },
+      { k:"swh", g:"Waves and sea state", l:"Swell", s:"ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Swell height", csv:"swell_ft" },
+      { k:"wvp", g:"Waves and sea state", l:"Period", s:"s", kind:"num", unit:"s", step:1, lo:0, title:"Wave period", csv:"wave_period_s" },
+      { k:"wvd", g:"Waves and sea state", l:"From", s:"°", kind:"num", unit:"°", step:10, lo:0, hi:360, title:"Wave direction (from)", csv:"wave_dir_deg" },
+      { k:"sst", g:"Waves and sea state", l:"Water", s:"°F", kind:"num", unit:"°F", step:1, title:"Water temperature", csv:"water_temp_f" }] : [])];
+  const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg" };
+  list.forEach(p => { if (CSVN[p.k]) p.csv = CSVN[p.k]; });
+  PARAMS.splice(0, PARAMS.length, ...list);
+  for (const k of Object.keys(P)) delete P[k];
+  PARAMS.forEach(p => P[p.k] = p);
+}
 /* the burn page: 20 ft winds, fire-weather rows and the prescription */
 function applyBurnConfig(exp){
   SITES.splice(0, SITES.length, ...expPoints(exp));
@@ -162,7 +194,8 @@ function applyBurnConfig(exp){
     { k:"vr", g:"Smoke and dispersion", l:"Ventilation", s:"m²/s", kind:"num", unit:"m²/s", step:100, lo:0, title:"Ventilation rate (mixing height × transport wind)", csv:"ventilation_m2s" },
     { k:"di", g:"Smoke and dispersion", l:"LDSI", s:"dispersion", kind:"num", unit:"", step:1, lo:0, title:"Lavdas dispersion index (stability class from net radiation and the 20 ft wind; mixing height and transport wind)", thr:thrOf("di"), csv:"ldsi" },
     { k:"lvori", g:"Smoke and dispersion", l:"LVORI", s:"", kind:"num", unit:"", step:1, lo:1, hi:10, title:"Low visibility occurrence risk index (MFL table from RH and LDSI)", thr:thrOf("lvori"), csv:"lvori" },
-    { k:"haines", g:"Smoke and dispersion", l:"Haines", s:"low elev.", kind:"num", unit:"", step:1, lo:2, hi:6, title:"Haines index (low elevation, 950-850 hPa)", csv:"haines" },
+    { k:"invh", g:"Smoke and dispersion", l:"Inversion", s:"base ft", kind:"num", unit:"ft", step:100, lo:0, title:"Inversion base (ft above ground; 0 = surface-based); blank when there is none below 700 hPa", thr:thrOf("invh"), csv:"inversion_base_ft" },
+    { k:"xinv", g:"Smoke and dispersion", l:"Inversion", s:"<1,000 ft %", kind:"prob", ex:"invlow", op:">=", v:1, noShift:true, unit:"%", step:1, lo:0, hi:100, title:"Chance of an inversion based below 1,000 ft", csv:"p_inversion_lt1000ft_pct" },
     ...rx.map(p => ({ ...p, unit:"%", step:1, lo:0, hi:100 })), base("sev")];
   const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg", sev:"spc_category" };
   list.forEach(p => { if (CSVN[p.k]) p.csv = CSVN[p.k]; });
@@ -172,6 +205,7 @@ function applyBurnConfig(exp){
 }
 /* swap in the exposure points, wind heights and parameters */
 function applyExposureConfig(exp){
+  if (PERSONAL) return applyPersonalConfig(exp);
   if (BURN) return applyBurnConfig(exp);
   SITES.splice(0, SITES.length, ...expPoints(exp));
   const cons = constraintParams(exp);
@@ -193,13 +227,14 @@ function applyExposureConfig(exp){
 }
 function constraintSummary(){
   if (!EXPO) return "";
+  if (PERSONAL) return "";
   if (BURN) return burnSummary();
   const cons = constraintParams(prefs.exp || expStored);
   return cons.length ? "Constraints: " + cons.map((p, j) => j ? p.title.charAt(0).toLowerCase() + p.title.slice(1) : p.title).join("; ") + "." : "No constraints set.";
 }
 if (EXPO) applyExposureConfig(expStored);
 if (LMEF && HOOKS.config) HOOKS.config();
-const prefs = Object.assign({ wu: BURN ? "mph" : undefined, enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param: BURN ? "rh" : "t" }, store.get(LS.prefs, {}));
+const prefs = Object.assign({ wu: BURN || PERSONAL ? "mph" : undefined, enabled:{}, weight:{}, orient:"across", tz:"L", initials:"", link:true, clamp:true, hot:{}, site:SITES[0].id, param: BURN ? "rh" : "t" }, store.get(LS.prefs, {}));
 let edits = store.get(LS.edits, {});
 if (["s54","g54"].includes(prefs.param)) prefs.param = "w54";
 if (/^(pp|lt)\d$/.test(prefs.param)) prefs.param = prefs.param.slice(0, 2);
@@ -375,7 +410,7 @@ function officialFor(sid, fast){
   /* burn: the chance of meeting every criterion can't exceed the chance of meeting any one of them,
      so edits that move a single criterion carry into "All criteria" */
   if (BURN && o.xall){
-    const crit = PARAMS.filter(p => p.k.startsWith("x") && p.k !== "xall");
+    const crit = PARAMS.filter(p => p.k.startsWith("x") && p.k !== "xall" && p.k !== "xinv");
     rows.forEach((r, i) => { if (ed("xall", r) !== undefined || o.xall[i] == null) return; const lo = Math.min(...crit.map(p => o[p.k][i]).filter(v => v != null)); if (isFinite(lo)) o.xall[i] = Math.min(o.xall[i], lo); });
   }
   const out = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
@@ -388,10 +423,10 @@ function qcIssues(sid, OF){
   const { o } = OF, out = [], bad = {};
   const flag = (k, i, msg) => { (bad[k] = bad[k] || {})[i] = msg; out.push({ i, k, msg }); };
   S.rows.forEach((r, i) => {
-    if (o.t[i] != null && o.td[i] != null && o.td[i] > o.t[i]) flag("td", i, "Dew point above temperature");
+    if (o.t && o.td && o.t[i] != null && o.td[i] != null && o.td[i] > o.t[i]) flag("td", i, "Dew point above temperature");
     for (const p of PARAMS.filter(p => p.peakOf)){ const sv = o[p.peakOf] && o[p.peakOf][i], gv = o[p.k] && o[p.k][i]; if (sv != null && gv != null && gv < sv) flag(p.k, i, `${p.l} peak below sustained`); }
     for (const ev of ["pp","lt"].filter(ev => o[ev + "3"] && o[ev + "6"])){
-      const a = o[ev+"1"][i], b = o[ev+"3"][i], c = o[ev+"6"][i];
+      const a = o[ev+"1"] ? o[ev+"1"][i] : null, b = o[ev+"3"][i], c = o[ev+"6"][i];
       if (r.len === 1 && a != null && b != null && a > b) flag(ev+"3", i, (ev === "pp" ? "Precip" : "Lightning") + " 3 hr below 1 hr");
       if (b != null && c != null && b > c) flag(ev+"6", i, (ev === "pp" ? "Precip" : "Lightning") + " 6 hr below 3 hr");
     }
@@ -437,6 +472,7 @@ function renderSites(){
   const s = site();
   if (EXPO){
     const e = prefs.exp, z = zulu(), r0 = S.rows && S.rows[0], r1 = S.rows && S.rows[S.rows.length - 1];
+    if (PERSONAL){ $("where").innerHTML = `<b>${hesc(s.name)}</b> (${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}) · times ${zulu() ? "UTC" : tzAbbr(r0 ? r0.a : Date.now())}`; renderLocator(); return; }
     $("where").innerHTML = `<b>${e.op ? e.op.replace(/</g, "&lt;") : BURN ? "Burn forecast" : "Exposure forecast"}</b> at ${s.name} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)})${s.stn ? `, MOS from ${s.stn}` : ""}${r0 ? `, ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)}${z ? "Z" : " " + tzAbbr(r0.a)}` : ""}`;
   } else $("where").innerHTML = `<b>${s.name}</b>, forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}), MOS from ${s.stn}`;
   renderLocator();
@@ -448,10 +484,12 @@ function dtParse(v){
   const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); if (!m) return null;
   const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
   if (zulu()) return base;
-  for (const off of [4, 5]){ const t = base + off*H, p = lp(t); if (p.h === +m[4] && p.d === +m[3]) return t; }
-  return base + 5*H;
+  /* wall time in the page's time zone to UTC, for any zone */
+  let t = base; for (let k = 0; k < 3; k++){ const p = lp(t); t += base - Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi); }
+  return t;
 }
 function renderExpSetup(){
+  if (PERSONAL){ renderPersSetup(); return; }
   if (!EXPO) return;
   const e = prefs.exp, el = document.activeElement;
   if (el !== $("expOp")) $("expOp").value = e.op || "";
@@ -482,7 +520,7 @@ function renderExpSetup(){
 let expT = null;
 function expChanged(full){
   savePrefs(); applyExposureConfig(prefs.exp); rebuildViews();
-  clearTimeout(expT); expT = setTimeout(() => { if (full) loadAll(); else rebuildGuidance(); renderExpSetup(); }, full ? 50 : 250);
+  clearTimeout(expT); expT = setTimeout(() => { if (full) loadAll(); else rebuildGuidance(); renderExpSetup(); if (PERSONAL && $("pRangeNote")) $("pRangeNote").textContent = `${S.rows.length} rows · forecast available to ${dtShow(persLimits().hi)}`; }, full ? 50 : 250);
 }
 /* ---------- official schedule (uploaded CSV, kept on this computer) ----------
    One file serves both pages: "ground" rows appear on the exposure page, "launch" rows in the LMEF
@@ -571,7 +609,7 @@ function parseAllOpsRow(r, col, rowNo, errors){
   const name = (col(r, "mission_name", "op_name", "name") || "").trim();
   const win = (date, w) => {
     /* "1223Z - 1322Z" (a window) or "1200" (a start time); a close earlier than the open is the next day */
-    const m = String(w || "").match(/(\d{3,4})\s*Z?\s*(?:-|–|to)\s*(\d{3,4})\s*Z?/i), one = String(w || "").match(/^\s*(\d{3,4})\s*Z?\s*$/i);
+    const m = String(w || "").match(/(\d{3,4})\s*Z?\s*(?:-|–|to)\s*(\d{3,4})\s*Z?/i), one = String(w || "").match(/^\s*(\d{1,4})\s*Z?\s*$/i);
     if (!date || (!m && !one)) return null;
     const a = parseWhen(`${date} ${(m ? m[1] : one[1]).padStart(4, "0")}`, "Z"); if (a == null) return null;
     if (!m) return { a, b:null };
@@ -683,8 +721,181 @@ function bindTpls(){
     } catch (err) { toast("That isn't a templates file"); }
   };
 }
+/* ---------- personal page: setup, place search, map, summary ---------- */
+const mph = kt => kt == null ? null : kt*1.150779;
+function persSetupHTML(){
+  return `<section class="panel persset" id="persSetup" aria-label="Forecast setup">
+    <div class="psrow"><label class="grow">Title <input id="pTitle" maxlength="80" placeholder="e.g. Paul's Fishing Forecast" autocomplete="off"></label></div>
+    <div class="psrow">
+      <label class="grow">Find a place <span class="pfind"><input id="pFind" placeholder="Town, city, park, marina…" autocomplete="off"><button class="btn" type="button" id="pFindGo">Search</button></span></label>
+      <label>Latitude <input id="pLat" inputmode="decimal" style="width:110px"></label><label>Longitude <input id="pLon" inputmode="decimal" style="width:110px"></label>
+      <button class="btn" type="button" id="pUseLL">Use these</button><button class="btn" type="button" id="pMapBtn">Pick on a map</button>
+    </div>
+    <div id="pResults" class="presults" hidden></div>
+    <div id="pMapWrap" hidden><div id="pMap"></div><p class="mut">Click the map to set the forecast point.</p></div>
+    <div class="psrow"><label class="grow">Place name <input id="pName" maxlength="60" autocomplete="off"></label><span class="mut" id="pTz"></span></div>
+    <div class="psrow">
+      <label>Start <input id="pStart" type="datetime-local"></label><label>End <input id="pEnd" type="datetime-local"></label>
+      <span class="seg" id="pQuick" role="group" aria-label="Quick range"><button type="button" data-h="24">24 h</button><button type="button" data-h="72">3 days</button><button type="button" data-h="120">5 days</button><button type="button" data-h="168">7 days</button></span>
+      <span class="seg" id="pStep" role="group" aria-label="Rows"><button type="button" data-step="all">Hourly</button><button type="button" data-step="0">3-hourly</button></span>
+      <label class="chk"><input type="checkbox" id="pMarine"> Waves and sea state (on the water)</label>
+    </div>
+    <p class="mut" id="pRangeNote"></p>
+  </section>
+  <section class="panel perssum" id="persSum" aria-label="Summary">
+    <div class="psh"><h3>Summary</h3><span class="mut" id="pSumState"></span><span class="sp"></span><button class="btn ghost" type="button" id="pSumReset">Rewrite from the forecast</button></div>
+    <label class="col">Main concerns <span class="mut">one per line</span><textarea id="pConc" rows="3"></textarea></label>
+    <label class="col">Discussion<textarea id="pDisc" rows="5"></textarea></label>
+  </section>`;
+}
+/* a written summary from the official forecast: highs and lows, rain and thunder, wind and gusts, waves */
+function persSummaryAuto(){
+  const s = site(); if (!s || !S.rows || !S.G[s.id]) return { concerns:[], text:"" };
+  const OFs = officialFor(s.id), o = OFs.o, rows = S.rows, e = prefs.exp, z = zulu();
+  const when = i => { const r = rows[i], d = dayLabel(r.a, z); return `${d.wd} ${hhmm(r.a, z).slice(0, 2) === "00" ? "midnight" : fmtHour(r.a)}`; };
+  const fmtHour = t => { const p = lp(t), h = p.h % 12 || 12; return `${h}${p.h < 12 ? " am" : " pm"}`; };
+  const idxMax = a => { let k = -1; (a || []).forEach((v, i) => { if (v != null && (k < 0 || v > a[k])) k = i; }); return k; };
+  const idxMin = a => { let k = -1; (a || []).forEach((v, i) => { if (v != null && (k < 0 || v < a[k])) k = i; }); return k; };
+  const pk = o.pp1 && o.pp1.some(v => v != null) ? "pp1" : "pp3", lk = o.lt1 && o.lt1.some(v => v != null) ? "lt1" : "lt3";
+  const hi = idxMax(o.t), lo = idxMin(o.t), ppi = idxMax(o[pk]), lti = idxMax(o[lk]), gi = idxMax(o.g33), si = idxMax(o.s33);
+  const sky = (o.sky || []).filter(v => v != null), skyAvg = sky.length ? sky.reduce((a, b) => a + b, 0)/sky.length : null;
+  const conc = [], parts = [];
+  if (skyAvg != null) parts.push(skyAvg < 25 ? "Mostly sunny to clear" : skyAvg < 55 ? "A mix of sun and clouds" : skyAvg < 80 ? "Mostly cloudy at times" : "Cloudy");
+  if (hi >= 0 && lo >= 0) parts.push(`temperatures from about ${Math.round(o.t[lo])}°F (${when(lo)}) to ${Math.round(o.t[hi])}°F (${when(hi)})`);
+  let text = parts.length ? parts.join(", ") + "." : "";
+  const pp = ppi >= 0 ? o[pk][ppi] : null;
+  if (pp != null){
+    if (pp >= 60){ text += ` Rain is likely, with the best chance (${Math.round(pp)}%) around ${when(ppi)}.`; conc.push(`Rain likely around ${when(ppi)} (${Math.round(pp)}%)`); }
+    else if (pp >= 30){ text += ` There's a chance of rain, highest (${Math.round(pp)}%) around ${when(ppi)}.`; conc.push(`Chance of rain around ${when(ppi)} (${Math.round(pp)}%)`); }
+    else text += " Rain chances stay low.";
+  }
+  const lt = lti >= 0 ? o[lk][lti] : null;
+  if (lt != null && lt >= 15){ const w = lt >= 60 ? "likely" : "possible"; text += ` Thunderstorms are ${w} (${Math.round(lt)}% around ${when(lti)}); head indoors at the first rumble.`; conc.push(`Thunderstorms ${w} around ${when(lti)} (${Math.round(lt)}%)`); }
+  if (si >= 0){
+    const sm = Math.round(mph(o.s33[si])), gm = gi >= 0 ? Math.round(mph(o.g33[gi])) : null, d = o.dir && o.dir[si] != null ? compassWord(o.dir[si]) : "";
+    text += ` Winds peak around ${sm} mph${d ? ` from the ${d}` : ""}${gm ? ` with gusts near ${gm} mph` : ""} around ${when(si)}.`;
+    const g = (e.gusts || [20, 25, 30]).slice().sort((a, b) => b - a);
+    for (const v of g){ const a = o[`xg${v}`]; const k = idxMax(a); if (k >= 0 && a[k] >= 40){ conc.push(`Gusts over ${v} mph likely around ${when(k)} (${Math.round(a[k])}%)`); break; } if (k >= 0 && a[k] >= 20 && v <= 25){ conc.push(`Some chance of gusts over ${v} mph around ${when(k)} (${Math.round(a[k])}%)`); break; } }
+  }
+  if (e.marine && o.wvh){
+    const wi = idxMax(o.wvh), wl = idxMin(o.wvh);
+    if (wi >= 0){ const per = o.wvp && o.wvp[wi] != null ? `, ${Math.round(o.wvp[wi])} s` : ""; { const lo2 = Math.round(o.wvh[wl]*2)/2, hi2 = Math.round(o.wvh[wi]*2)/2; text += hi2 - lo2 < 1 ? ` Seas around ${hi2} ft${per}.` : ` Seas run ${lo2}–${hi2} ft${per}, highest around ${when(wi)}.`; }
+      if (o.wvh[wi] >= 4) conc.push(`Seas up to ${Math.round(o.wvh[wi])} ft around ${when(wi)}`); }
+    const st = (o.sst || []).filter(v => v != null); if (st.length) text += ` Water temperature near ${Math.round(st[0])}°F.`;
+  }
+  if (hi >= 0 && o.t[hi] >= 95) conc.push(`Heat: highs near ${Math.round(o.t[hi])}°F`);
+  if (lo >= 0 && o.t[lo] <= 32) conc.push(`Freezing temperatures (${Math.round(o.t[lo])}°F) around ${when(lo)}`);
+  if (!conc.length) conc.push("No significant weather concerns");
+  return { concerns:conc, text:text.trim() };
+}
+const compassWord = d => ["north","north-northeast","northeast","east-northeast","east","east-southeast","southeast","south-southeast","south","south-southwest","southwest","west-southwest","west","west-northwest","northwest","north-northwest"][Math.round(((d % 360) + 360) % 360/22.5) % 16];
+/* what the products carry: the forecaster's text once edited, otherwise the automatic one */
+function persSummary(){ const a = persSummaryAuto(), e = prefs.exp; return { concerns: e.concerns != null ? e.concerns : a.concerns, text: e.summary != null ? e.summary : a.text, edited: e.summary != null || e.concerns != null }; }
+function renderPersSummary(){
+  if (!PERSONAL || !$("pDisc")) return;
+  const sm = persSummary(), ae = document.activeElement;
+  if (ae !== $("pConc")) $("pConc").value = sm.concerns.join("\n");
+  if (ae !== $("pDisc")) $("pDisc").value = sm.text;
+  $("pSumState").textContent = sm.edited ? "edited by you" : "written from the forecast; edit it as you like";
+  $("pSumReset").hidden = !sm.edited;
+}
+/* the time the forecast covers: from a few hours ago to about 7½ days out */
+function persLimits(){ const lo = Math.floor(Date.now()/H)*H - 3*H, hi = S.TL ? Math.min(S.TL.t0 + (S.TL.n - 2)*H, Math.floor((Date.now() + 7.5*24*H)/H)*H) : Math.floor((Date.now() + 7.5*24*H)/H)*H; return { lo, hi }; }
+const dtShow = t => { const p = lp(t), h = p.h % 12 || 12; return `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date(Date.UTC(p.y, p.mo - 1, p.d)).getUTCDay()]} ${p.mo}/${p.d} ${h}${p.mi ? ":" + pad2(p.mi) : ""} ${p.h < 12 ? "am" : "pm"}`; };
+function renderPersSetup(force){
+  const e = prefs.exp, ae = document.activeElement, set = (id, v) => { if (force || $(id) !== ae) $(id).value = v ?? ""; };
+  /* the calendar only offers times the forecast covers */
+  const lim = persLimits(); ["pStart", "pEnd"].forEach(id => { $(id).min = dtInput(lim.lo); $(id).max = dtInput(lim.hi); $(id).step = 3600; });
+  if ($("pRangeNote")) $("pRangeNote").textContent = `${S.rows ? S.rows.length : 0} rows · forecast available to ${dtShow(lim.hi)}`;
+  set("pTitle", e.title); set("pName", e.place && e.place.name); set("pLat", e.place && (+e.place.lat).toFixed(4)); set("pLon", e.place && (+e.place.lon).toFixed(4));
+  set("pStart", dtInput(e.start)); set("pEnd", dtInput(e.end)); $("pMarine").checked = !!e.marine;
+  document.querySelectorAll("#pStep button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.step) === String(e.hourly === "all" ? "all" : "0")));
+  $("pTz").textContent = `Time zone: ${e.tz || TZ}`;
+}
+/* the point's time zone (Open-Meteo answers with it for any coordinates) */
+async function tzAt(lat, lon){ try { const js = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&timezone=auto&forecast_days=1&hourly=temperature_2m`, 10000); return js.timezone || null; } catch (e) { return null; } }
+async function setPlace(lat, lon, name, tz){
+  const e = prefs.exp; lat = +lat; lon = +lon;
+  if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180){ toast("Latitude and longitude don't look right"); return; }
+  e.place = { name: name || `${lat.toFixed(3)}, ${lon.toFixed(3)}`, lat, lon };
+  const zone = tz || (DEMO ? e.tz : await tzAt(lat, lon)) || e.tz;
+  const moved = zone && zone !== (e.tz || TZ); e.tz = zone; e.summary = null; e.concerns = null;
+  if (moved){ savePrefs(); toast(`Switching to ${zone} time`); setTimeout(() => location.reload(), 600); return; }
+  expChanged(true); renderPersSetup();
+}
+let PMAP = null;
+function loadLeaflet(){
+  if (window.L && window.L.map) return Promise.resolve();
+  return new Promise((ok, bad) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"; document.head.appendChild(css);
+    const js = document.createElement("script"); js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; js.onload = ok; js.onerror = bad; document.head.appendChild(js);
+  });
+}
+async function openMap(){
+  $("pMapWrap").hidden = false;
+  try { await loadLeaflet(); } catch (e) { $("pMapWrap").innerHTML = '<p class="mut">The map couldn\'t load (offline?). Enter latitude and longitude instead.</p>'; return; }
+  const p = prefs.exp.place;
+  if (!PMAP){
+    PMAP = window.L.map("pMap").setView([p.lat, p.lon], 9);
+    window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, attribution:"© OpenStreetMap contributors" }).addTo(PMAP);
+    PMAP._mk = window.L.marker([p.lat, p.lon]).addTo(PMAP);
+    PMAP.on("click", ev => { PMAP._mk.setLatLng(ev.latlng); setPlace(ev.latlng.lat, ev.latlng.lng, `Point at ${ev.latlng.lat.toFixed(3)}, ${ev.latlng.lng.toFixed(3)}`); });
+  } else { PMAP.invalidateSize(); PMAP.setView([p.lat, p.lon]); PMAP._mk.setLatLng([p.lat, p.lon]); }
+}
+function bindPersonal(){
+  const host = $("expSetup"); host.insertAdjacentHTML("beforebegin", persSetupHTML()); host.hidden = true;
+  ["sites", "linkBar", "recentPanel", "locator"].forEach(id => { if ($(id)){ $(id).hidden = true; $(id).style.display = "none"; } });
+  $("pageTitle").textContent = prefs.exp.title || "Forecast"; document.title = `${prefs.exp.title || "Forecast"} | Weather`;
+  $("pTitle").oninput = ev => { prefs.exp.title = ev.target.value; savePrefs(); $("pageTitle").textContent = ev.target.value || "Forecast"; document.title = `${ev.target.value || "Forecast"} | Weather`; renderSites(); };
+  $("pName").oninput = ev => { prefs.exp.place.name = ev.target.value; savePrefs(); SITES[0].name = SITES[0].point = ev.target.value || "Forecast point"; renderSites(); };
+  const find = async () => {
+    const q = $("pFind").value.trim(); if (!q) return;
+    const box = $("pResults"); box.hidden = false; box.innerHTML = '<p class="mut">Searching…</p>';
+    try {
+      const res = DEMO ? [{ name:q, area:"Demo", lat:28.0836, lon:-80.6081 }] : await geocode(q);
+      box.innerHTML = res.length ? res.map((r, i) => `<button type="button" class="pres" data-i="${i}"><b>${hesc(r.name)}</b> <span class="mut">${hesc(r.area)} · ${r.lat.toFixed(3)}, ${r.lon.toFixed(3)}</span></button>`).join("") : '<p class="mut">No places found. Try a nearby town, or enter latitude and longitude.</p>';
+      box.onclick = ev => { const b = ev.target.closest("[data-i]"); if (!b) return; const r = res[+b.dataset.i]; box.hidden = true; setPlace(r.lat, r.lon, r.area ? `${r.name}, ${r.area.split(", ")[0]}` : r.name, r.tz); };
+    } catch (err) { box.innerHTML = '<p class="mut">Place search isn\'t reachable right now. Enter latitude and longitude instead.</p>'; }
+  };
+  $("pFindGo").onclick = find; $("pFind").onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); find(); } };
+  $("pUseLL").onclick = () => setPlace($("pLat").value, $("pLon").value, $("pName").value && $("pName").value !== prefs.exp.place.name ? $("pName").value : null);
+  $("pMapBtn").onclick = () => { if ($("pMapWrap").hidden) openMap(); else $("pMapWrap").hidden = true; };
+  /* dates: applied a moment after you stop typing, kept inside the forecast, and the end moves with
+     the start so the length of the window is kept; the fields always show what the forecast uses */
+  let rangeT = null;
+  const range = which => {
+    clearTimeout(rangeT);
+    rangeT = setTimeout(() => {
+      const e = prefs.exp, lim = persLimits();
+      let a = dtParse($("pStart").value), b = dtParse($("pEnd").value);
+      if (a == null || b == null) return;
+      const len = Math.max(H, (e.end - e.start) || 24*H), notes = [];
+      a = Math.round(a/H)*H; b = Math.round(b/H)*H;
+      if (a < lim.lo){ a = lim.lo; notes.push("the start was moved up to now"); }
+      if (a > lim.hi - H){ a = lim.hi - H; notes.push("the start was moved back inside the forecast"); }
+      if (which === "start" && b <= a) b = a + len;
+      if (b <= a){ a = b - len; if (a < lim.lo){ a = lim.lo; } if (b <= a) b = a + H; notes.push("the start was moved before the end"); }
+      if (b > lim.hi){ b = lim.hi; notes.push(`the forecast only reaches ${dtShow(lim.hi)}, so the end was moved in`); }
+      if (b <= a) b = Math.min(lim.hi, a + H);
+      e.start = a; e.end = b;
+      $("pStart").value = dtInput(a); $("pEnd").value = dtInput(b);
+      if (notes.length) toast(notes[0].charAt(0).toUpperCase() + notes.join("; ").slice(1));
+      expChanged(false);
+    }, which === "blur" ? 0 : 700);
+  };
+  $("pStart").addEventListener("input", () => range("start")); $("pEnd").addEventListener("input", () => range("end"));
+  $("pStart").addEventListener("change", () => range("start")); $("pEnd").addEventListener("change", () => range("end"));
+  $("pQuick").onclick = ev => { const b = ev.target.closest("[data-h]"); if (!b) return; const lim = persLimits(), st = Math.max(lim.lo, Math.ceil(Date.now()/H)*H); prefs.exp.start = st; prefs.exp.end = Math.min(lim.hi, st + (+b.dataset.h)*H); expChanged(false); renderPersSetup(true); };
+  $("pStep").onclick = ev => { const b = ev.target.closest("[data-step]"); if (!b) return; prefs.exp.hourly = b.dataset.step === "all" ? "all" : "0"; expChanged(false); renderPersSetup(); };
+  $("pMarine").onchange = ev => { prefs.exp.marine = ev.target.checked; prefs.exp.summary = null; prefs.exp.concerns = null; expChanged(true); };
+  $("pConc").oninput = ev => { prefs.exp.concerns = ev.target.value.split("\n").map(x => x.trim()).filter(Boolean); savePrefs(); renderPersSummary(); };
+  $("pDisc").oninput = ev => { prefs.exp.summary = ev.target.value; savePrefs(); renderPersSummary(); };
+  $("pSumReset").onclick = () => { prefs.exp.summary = null; prefs.exp.concerns = null; savePrefs(); renderPersSummary(); };
+  renderPersSetup();
+}
 function bindExp(){
   if (!EXPO) return;
+  if (PERSONAL){ document.querySelectorAll(".plan-only").forEach(x => x.hidden = true); bindPersonal(); return; }
   $("expSetup").hidden = false;
   document.querySelectorAll(".plan-only").forEach(x => x.hidden = true);
   $("pageTitle").textContent = BURN ? "Burn forecast" : "Exposure forecast";
@@ -713,12 +924,19 @@ function bindExp(){
     const row = ev.target.closest("[data-id]"), f = ev.target.dataset.f; if (!row || !f) return;
     const c = prefs.exp.constraints.find(x => x.id === row.dataset.id); if (!c) return;
     c[f] = ev.target.type === "number" ? +ev.target.value : ev.target.value;
-    if (BURN && f === "f"){ const d = { rh:[">=",30], t:["<=",90], s20:["<=",15], g20:["<=",20], dir:[null,0], tw:[">=",9], mixh:[">=",1700], di:[">=",21], lvori:["<=",4], haines:["<=",4] }[c.f]; if (d){ c.op = d[0] || c.op; c.v = d[1]; if (c.f === "dir"){ c.v = 0; c.v2 = 90; } if (RXF[c.f].wind) c.unit = c.unit || "mph"; } renderExpSetup(); }
+    if (BURN && f === "f"){ const d = { rh:[">=",30], t:["<=",90], s20:["<=",15], g20:["<=",20], dir:[null,0], tw:[">=",9], mixh:[">=",1700], di:[">=",21], lvori:["<=",4], invh:[">=",1000] }[c.f]; if (d){ c.op = d[0] || c.op; c.v = d[1]; if (c.f === "dir"){ c.v = 0; c.v2 = 90; } if (RXF[c.f].wind) c.unit = c.unit || "mph"; } renderExpSetup(); }
     expChanged(false);
   };
   $("expCons").onclick = ev => { const d = ev.target.closest("[data-del]"); if (!d) return; prefs.exp.constraints = prefs.exp.constraints.filter(x => x.id !== d.dataset.del); expChanged(false); };
   const newId = () => "c" + Date.now().toString(36);
   if (BURN){
+    if (!$("fwfPanel")){
+      $("matrix").insertAdjacentHTML("afterend", `<section class="panel fwfpanel" id="fwfPanel" aria-label="Fire Weather Forecast"><div class="psh"><h3>Fire Weather Forecast</h3><span class="mut">the finished product: Save and publish downloads it as the PDF</span></div>
+        <label class="col">Discussion <span class="mut" id="fwfDiscState">written from the forecast; edit it as you like</span><textarea id="fwfDisc" rows="4"></textarea></label><button type="button" class="btn ghost" id="fwfDiscReset" hidden>Rewrite from the forecast</button>
+        <div id="fwfPrev"></div></section>`);
+      $("fwfDisc").oninput = ev => { prefs.exp.fwfDisc = ev.target.value; savePrefs(); $("fwfDiscReset").hidden = false; $("fwfPrev").innerHTML = fwfHTML(); };
+      $("fwfDiscReset").onclick = () => { prefs.exp.fwfDisc = null; savePrefs(); renderFWF(); };
+    }
     $("expOpLab").textContent = "Burn unit"; $("expOp").placeholder = "e.g. KSC Unit 12, Happy Creek block";
     $("expConsTitle").textContent = "Prescription"; $("addWind").hidden = true; $("addTemp").hidden = true; $("addRx").hidden = false;
     $("addRx").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"rx", f:"rh", op:">=", v:30 }); expChanged(false); };
@@ -736,11 +954,12 @@ function bindExp(){
   const f2 = $("foot1").nextElementSibling; if (f2) f2.textContent = "Winds at each constraint height are interpolated from each model's 10 m and 80 m winds (power law where 80 m is missing), and peaks scale the 10 m gust factor with height. The custom point uses the nearest MOS station within 30 km and the nearest high-res pipeline point within 15 km. Lightning comes only from guidance with explicit thunder probabilities.";
   if (BURN){
     $("foot1").textContent = "Rows are hourly for the period you choose, then 3-hour blocks. Prescription rows give the chance each criterion, and all of them together, is met through the hour, from all the guidance members; individual criteria move with your edits, \"All criteria\" follows the guidance. Press Enter to edit a cell, Delete to return it to guidance.";
-    if (f2) f2.textContent = "Mixing height is the models' boundary-layer height (ft above ground). Transport wind is the mean wind through the mixed layer from the pressure levels. Ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index (the TBW/MLB/MFL GFE tool): stability class from net radiation (sky cover, ceiling, sun) and the 20 ft wind, then the day or night equations with mixing height and transport wind. LVORI is the MFL table from RH and LDSI. Haines uses the low-elevation 950–850 hPa form. 20 ft winds are scaled from the 10 m winds; ceilings come from MOS or the model cloud layers.";
+    if (f2) f2.textContent = "Mixing height is the models' boundary-layer height (ft above ground). Transport wind is the mean wind through the mixed layer from the pressure levels. Ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index (the TBW/MLB/MFL GFE tool): stability class from net radiation (sky cover, ceiling, sun) and the 20 ft wind, then the day or night equations with mixing height and transport wind. LVORI is the MFL table from RH and LDSI. The inversion base is the lowest level where temperature rises with height (surface to 700 hPa, 0 ft = surface-based), and its chance below 1,000 ft is the share of model profiles with one there. 20 ft winds are scaled from the 10 m winds; ceilings come from MOS or the model cloud layers.";
   }
   renderExpSetup();
 }
 function renderLocator(){
+  if (PERSONAL){ const el = document.getElementById("locator"); if (el) el.hidden = true; return; }
   const X = lon => (lon + 80.78)/0.28*80, Y = lat => (28.80 - lat)/0.64*118;
   const coast = [[28.85,-80.73],[28.76,-80.68],[28.70,-80.655],[28.64,-80.60],[28.59,-80.575],[28.53,-80.555],[28.48,-80.535],[28.455,-80.526],[28.435,-80.56],[28.40,-80.598],[28.32,-80.604],[28.24,-80.594],[28.10,-80.575]];
   const pts = coast.map(([la, lo]) => `${X(lo).toFixed(1)},${Y(la).toFixed(1)}`).join(" ");
@@ -807,7 +1026,8 @@ function renderStatus(){
   if (DEMO){ b.className = "banner show demo"; b.textContent = "Demo mode: every value on this page is synthetic. Remove ?demo=1 from the address to load real guidance."; }
   else if (!S.loading && ok === 0){ b.className = "banner show"; b.textContent = "Couldn't reach any guidance source from this browser. Check the network connection, then press Refresh guidance. You can still type a forecast into the table."; }
   else if (!S.loading && ![...OM_DET, ...OM_ENS].some(d => (S.status[d.id] || {}).ok)){ b.className = "banner show"; b.textContent = "Model guidance from Open-Meteo didn't load, so only MOS and LAMP are showing. Press Refresh guidance to try again."; }
-  else if (!S.loading && !["lav","mav","nbs","met","mex","nbe","hrefct","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
+  else if (PERSONAL && !S.loading && OF && OF.o && ["lt1","lt3","lt6"].every(k => !OF.o[k] || OF.o[k].every(v => v == null))){ b.className = "banner show"; b.textContent = "No thunder guidance for this place, so the thunder rows are blank. Fill them in by hand if needed."; }
+  else if (!PERSONAL && !S.loading && !["lav","mav","nbs","met","mex","nbe","hrefct","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
   else b.className = "banner";
 }
 
@@ -857,7 +1077,7 @@ function renderTable(){
     const dk = dayKey(r.a, z), ds = dk !== lastDay, bs = r.len !== lastBlk && !ds; lastDay = dk; lastBlk = r.len;
     let cls = (ds ? "dstart " : "") + (bs ? "sect " : "") + (S.hoverRow === i ? "hov" : "");
     h += `<tr data-r="${i}" class="${cls}">`;
-    if (ds){ const L = dayLabel(r.a, z); const today = i === 0 ? "Today" : (dayKey(r.a, z) === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<td class="stick day" rowspan="${dayRuns[dk]}"><b>${today}</b>${today === L.wd ? "" : L.wd + "<br>"}${L.dt}</td>`; }
+    if (ds){ const L = dayLabel(r.a, z); const today = dayKey(r.a, z) === dayKey(Date.now(), z) ? "Today" : (dayKey(r.a, z) === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<td class="stick day" rowspan="${dayRuns[dk]}"><b>${today}</b>${today === L.wd ? "" : L.wd + "<br>"}${L.dt}</td>`; }
     h += `<td class="stick2 tm">${rowTime(r)}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</td>`;
     lastG = null;
     for (const p of PARAMS){
@@ -881,7 +1101,7 @@ function renderTableAcross(){
   const dstart = new Set(days.map(d => d.i));
   const tlab = r => { const a = hhmm(r.a, z).slice(0, 2); return r.len === 1 ? a : `${a}–${hhmm(r.b, z).slice(0, 2)}`; };
   let h = `<table class="mx across"><thead><tr class="g"><th class="stick" colspan="2">${tzLabel()}</th>`;
-  days.forEach((d, j) => { const L = dayLabel(rows[d.i].a, z); const nm = j === 0 ? "Today" : (d.dk === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<th colspan="${d.n}" class="dcol">${d.n >= 3 ? `${nm}, ${L.dt}` : L.dt}</th>`; });
+  days.forEach((d, j) => { const L = dayLabel(rows[d.i].a, z); const nm = d.dk === dayKey(Date.now(), z) ? "Today" : (d.dk === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<th colspan="${d.n}" class="dcol">${d.n >= 3 ? `${nm}, ${L.dt}` : L.dt}</th>`; });
   h += `</tr><tr class="c"><th class="stick">Parameter</th><th class="stick2"></th>`;
   rows.forEach((r, i) => { h += `<th data-i="${i}" class="tcol ${dstart.has(i) ? "dcol" : ""} ${S.hoverRow === i ? "hov" : ""}">${tlab(r)}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</th>`; });
   h += `</tr></thead><tbody>`;
@@ -918,7 +1138,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN) renderFWF(); if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
@@ -1802,9 +2022,109 @@ function workbook(sheets, logo){
 }
 const xcols = () => ["Day","Time","Period", ...PARAMS.map(p => p.k)];
 /* product name for titles, sheets and files */
-const FILE_BASE = () => EXPO ? ((prefs.exp && prefs.exp.op ? prefs.exp.op.replace(/[^A-Za-z0-9]+/g, "_") + "_" : "") + (BURN ? "Burn_Forecast" : "Exposure_Forecast")) : "Planning_Forecast";
-const productName = s => EXPO ? `${(prefs.exp && prefs.exp.op) ? prefs.exp.op + " " : ""}${BURN ? "Burn Forecast" : "Exposure Forecast"}` : "Daily Planning Forecast";
+const FILE_BASE = () => PERSONAL ? ((prefs.exp && prefs.exp.title || "Forecast").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "") || "Forecast") : EXPO ? ((prefs.exp && prefs.exp.op ? prefs.exp.op.replace(/[^A-Za-z0-9]+/g, "_") + "_" : "") + (BURN ? "Burn_Forecast" : "Exposure_Forecast")) : "Planning_Forecast";
+const productName = s => PERSONAL ? ((prefs.exp && prefs.exp.title) || "Forecast") : EXPO ? `${(prefs.exp && prefs.exp.op) ? prefs.exp.op + " " : ""}${BURN ? "Burn Forecast" : "Exposure Forecast"}` : "Daily Planning Forecast";
 /* prescription in words, plus the hours the official forecast meets every criterion */
+/* ---------- the Fire Weather Forecast (burn product) ---------- */
+const wuShort = () => wuLabel();
+function fwfRows(){
+  /* the forecast rows inside the burn window, at most 24 (hourly windows longer than that take every other hour) */
+  const s = site(); if (!s || !S.rows || !S.G[s.id]) return null;
+  const OFs = officialFor(s.id), o = OFs.o, z = zulu(), e = prefs.exp;
+  let idx = S.rows.map((r, i) => i).filter(i => S.rows[i].b > e.start && S.rows[i].a < e.end);
+  if (idx.length > 24) idx = idx.filter((_, k) => k % 2 === 0);
+  const w = v => v == null ? null : Math.round(v*wfac());
+  const dir = v => v == null ? "" : compass(v);
+  return idx.map(i => { const r = S.rows[i], g = (k, f) => o[k] && o[k][i] != null ? (f ? f(o[k][i]) : o[k][i]) : null;
+    return { r, time: `${hhmm(r.a, z)}${z ? "Z" : "L"}`, day: dayLabel(r.a, z), sky: g("sky", v => skyCat(v)), t: g("t", Math.round), rh: g("rh", Math.round),
+      wind: g("s20") == null ? "" : `${dir(g("dir"))} ${w(g("s20"))}${g("g20") != null && w(g("g20")) > w(g("s20")) + 2 ? "G" + w(g("g20")) : ""}`,
+      mixh: g("mixh", v => Math.round(v/100)*100), trans: g("tw") == null ? "" : `${dir(g("tdir"))} ${w(g("tw"))}`, di: g("di", Math.round), lvori: g("lvori", Math.round),
+      inv: o.invh ? (o.invh[i] == null ? "None" : o.invh[i] < 50 ? "SFC" : Math.round(o.invh[i]/100)*100) : "", pinv: g("xinv", Math.round), pp: g("pp1", Math.round) ?? g("pp3", Math.round), rx: g("xall", Math.round) };
+  });
+}
+/* a discussion written from the forecast: sky, temperature and humidity, winds, dispersion, inversion, rain, prescription */
+function fwfDiscAuto(){
+  const rows = fwfRows(); if (!rows || !rows.length) return "";
+  const nums = k => rows.map(x => x[k]).filter(v => typeof v === "number");
+  const at = (k, f) => { let best = null; rows.forEach(x => { if (typeof x[k] === "number" && (best == null || f(x[k], best[k]))) best = x; }); return best; };
+  const hiT = at("t", (a, b) => a > b), loRH = at("rh", (a, b) => a < b), hiMix = at("mixh", (a, b) => a > b), hiDI = at("di", (a, b) => a > b), loDI = at("di", (a, b) => a < b);
+  const cat = v => v <= 6 ? "very poor" : v <= 12 ? "poor" : v <= 20 ? "fair" : v <= 40 ? "generally good" : v <= 60 ? "good" : v <= 100 ? "very good" : "very good to unstable";
+  const t = x => `${x.time.replace(/L$/, "")} ${zulu() ? "UTC" : "local"}`;
+  const parts = [];
+  const skies = rows.map(x => x.sky).filter(Boolean); if (skies.length) parts.push(`Skies ${({ CLR:"clear", FEW:"mostly clear", SCT:"partly cloudy", BKN:"mostly cloudy", OVC:"cloudy" })[skies[Math.floor(skies.length/2)]] || "variable"} during the burn window`);
+  if (hiT && loRH) parts.push(`with temperatures to ${hiT.t}°F and humidity bottoming out near ${loRH.rh}% around ${t(loRH)}`);
+  let txt = parts.join(" ") + (parts.length ? "." : "");
+  const winds = rows.map(x => x.wind).filter(Boolean); if (winds.length) txt += ` 20 ft winds ${winds[0]} ${wuShort()} early, ${winds[winds.length - 1]} ${wuShort()} late.`;
+  if (hiMix) txt += ` Mixing heights rise to about ${hiMix.mixh.toLocaleString("en-US")} ft around ${t(hiMix)}${rows.find(x => x.trans) ? `, with transport winds ${rows.filter(x => x.trans).slice(-1)[0].trans} ${wuShort()}` : ""}.`;
+  if (hiDI && loDI) txt += ` Dispersion (LDSI) ${loDI.di === hiDI.di ? `near ${hiDI.di}, ${cat(hiDI.di)}` : `from ${loDI.di} (${cat(loDI.di)}) to ${hiDI.di} (${cat(hiDI.di)})`}.`;
+  const lv = nums("lvori"); if (lv.length && Math.max(...lv) >= 4) txt += ` LVORI reaches ${Math.max(...lv)}: watch for smoke and fog reducing visibility on nearby roads.`;
+  const pin = rows.filter(x => typeof x.pinv === "number"); if (pin.length){ const first = pin[0], gone = pin.find(x => x.pinv < 30); txt += first.pinv >= 50 ? ` A low inversion (below 1,000 ft) is likely at the start${gone ? `, mixing out by about ${t(gone)}` : " and may persist through the window"}.` : first.pinv >= 20 ? ` A low inversion is possible early.` : ""; }
+  const pp = nums("pp"); if (pp.length && Math.max(...pp) >= 20) txt += ` Rain chances reach ${Math.max(...pp)}%.`;
+  return txt.trim();
+}
+const fwfDisc = () => prefs.exp.fwfDisc != null ? prefs.exp.fwfDisc : fwfDiscAuto();
+const FWF_COLS = [["time","Time"],["sky","Sky"],["t","Temp °F"],["rh","RH %"],["wind","20 ft wind"],["mixh","Mix ht ft"],["trans","Transport"],["di","LDSI"],["lvori","LVORI"],["inv","Inv base ft"],["pinv","Inv <1k %"],["pp","Rain %"],["rx","In Rx %"]];
+function fwfHTML(){
+  const rows = fwfRows(), s = site(), e = prefs.exp; if (!rows) return '<p class="mut">Waiting for guidance…</p>';
+  const iss = Date.now(), valid = `${dayLabel(e.start, zulu()).wd} ${hhmm(e.start, zulu())} – ${dayLabel(e.end, zulu()).wd} ${hhmm(e.end, zulu())}${zulu() ? "Z" : "L"}`;
+  let lastDay = "";
+  return `<div class="fwf"><div class="fwh"><img src="${hesc(LOGO_SRC)}" alt="" onerror="this.style.visibility='hidden'"><div><h2>Fire Weather Forecast</h2><p>45th Weather Squadron · prescribed burn support</p></div><img src="${hesc(SEAL_SRC)}" alt="" onerror="this.style.visibility='hidden'"></div>
+    <table class="fwi"><tr><th>Burn unit</th><td>${hesc(e.op || s.name)}</td><th>Issued</th><td>${hesc(`${dayLabel(iss, zulu()).dt} ${hhmm(iss, zulu())}${zulu() ? "Z" : "L"}`)}</td></tr><tr><th>Location</th><td>${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}</td><th>Valid</th><td>${hesc(valid)}</td></tr><tr><th>Forecaster</th><td>${hesc((prefs.initials || "").toUpperCase())}</td><th>Winds</th><td>${hesc(wuShort())}</td></tr></table>
+    <div class="fwbox"><b>Discussion</b><p>${hesc(fwfDisc())}</p></div>
+    <div class="fwbox"><b>Prescription</b><p>${hesc(burnSummary())}</p></div>
+    <table class="fwt"><tr>${FWF_COLS.map(([, h]) => `<th>${h}</th>`).join("")}</tr>${rows.map(x => { const dl = x.day.dt; const dayRow = dl !== lastDay ? `<tr class="fwd"><td colspan="${FWF_COLS.length}">${hesc(x.day.wd)}, ${hesc(dl)}</td></tr>` : ""; lastDay = dl; return dayRow + `<tr>${FWF_COLS.map(([k]) => `<td class="${k === "rx" && typeof x.rx === "number" ? (x.rx >= 70 ? "ok" : x.rx >= 30 ? "mid" : "no") : ""}">${x[k] == null || x[k] === "" ? "–" : hesc(typeof x[k] === "number" && k === "mixh" ? x[k].toLocaleString("en-US") : x[k])}</td>`).join("")}</tr>`; }).join("")}</table>
+    <p class="fwn">LDSI (Lavdas dispersion): 1–6 very poor, 7–12 poor, 13–20 fair, 21–40 generally good, 41–60 good, 61–100 very good. LVORI: 1 (lowest) to 10 (highest) risk of low visibility in smoke or fog. Inversion base: lowest level where temperature rises with height (SFC = surface-based); Inv &lt;1k: chance of an inversion below 1,000 ft. In Rx: chance every prescription criterion is met.</p></div>`;
+}
+let SEAL_IMG_APP;
+async function loadSealApp(){ if (SEAL_IMG_APP !== undefined) return SEAL_IMG_APP; try { const r = await fetch(SEAL_SRC); if (!r.ok) throw 0; SEAL_IMG_APP = await decodeImage(new Uint8Array(await r.arrayBuffer()), "image/png"); } catch (e) { SEAL_IMG_APP = null; } return SEAL_IMG_APP; }
+async function fwfPDF(logo){
+  const rows = fwfRows() || [], s = site(), e = prefs.exp, seal = await loadSealApp();
+  const W = 612, Hp = 792, X0 = 30, X1 = 582, pages = []; let cs = [];
+  const f = n => (+n).toFixed(2), rgbf = c => c.map(v => f(v/255)).join(" ");
+  const rect = (x, y, w, h, c) => cs.push(`${rgbf(c)} rg ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re f`);
+  const box = (x, y, w, h, lw) => cs.push(`0 0 0 RG ${f(lw || .6)} w ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re S`);
+  const fit = (t, mw, size, b) => { let z = size; while (z > 5 && textW(t, z, b) > mw) z -= .25; return z; };
+  const text = (t, x, y, size, o2 = {}) => { t = String(t ?? ""); const z = o2.max ? fit(t, o2.max, size, o2.bold) : size, w = textW(t, z, o2.bold); const tx = o2.align === "c" ? x - w/2 : o2.align === "r" ? x - w : x; cs.push(`BT ${rgbf(o2.color || [0,0,0])} rg /${o2.bold ? "F2" : "F1"} ${f(z)} Tf ${f(tx)} ${f(Hp - y)} Td ${pdfStr(t)} Tj ET`); };
+  const wrap = (t, size, mw) => { const out = []; let ln = ""; for (const w of String(t || "").split(/\s+/).filter(Boolean)){ const t2 = ln ? ln + " " + w : w; if (textW(t2, size, false) > mw && ln){ out.push(ln); ln = w; } else ln = t2; } if (ln) out.push(ln); return out; };
+  const NAVY = [16,40,72], GREY = [226,230,233];
+  /* header */
+  rect(X0, 24, X1 - X0, 56, NAVY);
+  if (logo){ const lh = 48, lw = lh*logo.rw/logo.rh; cs.push(`q ${f(lw)} 0 0 ${f(lh)} ${f(X0 + 6)} ${f(Hp - 28 - lh)} cm /Im1 Do Q`); }
+  if (seal){ const lh = 48, lw = lh*seal.rw/seal.rh; cs.push(`q ${f(lw)} 0 0 ${f(lh)} ${f(X1 - 6 - lw)} ${f(Hp - 28 - lh)} cm /Im2 Do Q`); }
+  text("FIRE WEATHER FORECAST", (X0 + X1)/2, 50, 17, { bold:true, color:[255,255,255], align:"c" });
+  text("45th Weather Squadron  ·  Prescribed Burn Support", (X0 + X1)/2, 68, 9, { color:[220,228,238], align:"c" });
+  let y = 88;
+  const iss = Date.now(), z = zulu(), valid = `${dayLabel(e.start, z).wd} ${dayLabel(e.start, z).dt} ${hhmm(e.start, z)} – ${dayLabel(e.end, z).wd} ${hhmm(e.end, z)}${z ? "Z" : "L"}`;
+  const info = [["Burn unit", e.op || s.name, "Issued", `${dayLabel(iss, z).dt} ${hhmm(iss, z)}${z ? "Z" : "L"}`], ["Location", `${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}`, "Valid", valid], ["Forecaster", (prefs.initials || "").toUpperCase(), "Winds", wuShort()]];
+  const cw = [(X1 - X0)*0.14, (X1 - X0)*0.36, (X1 - X0)*0.12, (X1 - X0)*0.38];
+  for (const row of info){ let x = X0; row.forEach((v, k) => { if (k % 2 === 0) rect(x, y, cw[k], 15, GREY); box(x, y, cw[k], 15, .5); text(v, x + 4, y + 10.5, 8, { bold: k % 2 === 0, max: cw[k] - 8 }); x += cw[k]; }); y += 15; }
+  y += 8;
+  const para = (title, body) => { const lines = wrap(String(body || "").replace(/≥/g, ">=").replace(/≤/g, "<="), 8.5, X1 - X0 - 14).slice(0, 12); const h = 16 + lines.length*11 + 4; box(X0, y, X1 - X0, h, .6); text(title, X0 + 6, y + 12, 9, { bold:true }); lines.forEach((l2, k) => text(l2, X0 + 6, y + 25 + k*11, 8.5)); y += h + 6; };
+  para("Discussion", fwfDisc());
+  para("Prescription", burnSummary());
+  /* the hourly table */
+  const wts = [0.8, 0.6, 0.65, 0.6, 1.15, 0.85, 1.05, 0.6, 0.65, 0.85, 0.75, 0.7, 0.75], tot = wts.reduce((a, b) => a + b, 0), cws = wts.map(v => (X1 - X0)*v/tot);
+  const head = () => { let x = X0; FWF_COLS.forEach(([, h], k) => { rect(x, y, cws[k], 16, GREY); box(x, y, cws[k], 16, .4); text(h, x + cws[k]/2, y + 10.5, 6.6, { bold:true, align:"c", max:cws[k] - 2 }); x += cws[k]; }); y += 16; };
+  head(); let lastDay = "";
+  for (const r of rows){
+    if (y > Hp - 70){ pages.push(cs); cs = []; y = 40; head(); }
+    if (r.day.dt !== lastDay){ rect(X0, y, X1 - X0, 12, [244,246,247]); box(X0, y, X1 - X0, 12, .4); text(`${r.day.wd}, ${r.day.dt}`, X0 + 4, y + 9, 7.2, { bold:true }); y += 12; lastDay = r.day.dt; }
+    let x = X0;
+    FWF_COLS.forEach(([k], j) => {
+      const v = r[k], fill = k === "rx" && typeof v === "number" ? (v >= 70 ? [210,236,216] : v >= 30 ? [253,236,186] : [251,215,212]) : null;
+      if (fill) rect(x, y, cws[j], 13, fill); box(x, y, cws[j], 13, .3);
+      text(v == null || v === "" ? "-" : typeof v === "number" && k === "mixh" ? v.toLocaleString("en-US") : v, x + cws[j]/2, y + 9.3, 7.6, { align:"c", max:cws[j] - 3, bold: k === "time" });
+      x += cws[j];
+    });
+    y += 13;
+  }
+  const notes = wrap("LDSI (Lavdas dispersion): 1-6 very poor, 7-12 poor, 13-20 fair, 21-40 generally good, 41-60 good, 61-100 very good. LVORI: 1 (lowest) to 10 (highest) risk of low visibility in smoke or fog. Inversion base: lowest level where temperature rises with height (SFC = surface-based); Inv <1k: chance of an inversion below 1,000 ft. In Rx: chance every prescription criterion is met. Forecast from model guidance and the NWS forecast, edited by the forecaster.", 6.8, X1 - X0);
+  if (y + 10 + notes.length*8.5 > Hp - 20){ pages.push(cs); cs = []; y = 40; }
+  notes.forEach((l2, k) => text(l2, X0, y + 12 + k*8.5, 6.8, { color:[80,90,100] }));
+  pages.push(cs);
+  return pdfAssemble(pages.map(p => p.join("\n")), logo, W, Hp, { image2: seal });
+}
+function renderFWF(){ if (!BURN || !$("fwfPrev")) return; $("fwfPrev").innerHTML = fwfHTML(); const ae = document.activeElement; if (ae !== $("fwfDisc")) $("fwfDisc").value = fwfDisc(); $("fwfDiscReset").hidden = prefs.exp.fwfDisc == null; }
 function burnSummary(){
   const exp = prefs.exp || expStored, cons = (exp.constraints || []).filter(c => RXF[c.f]);
   if (!cons.length) return "No prescription set.";
@@ -1938,7 +2258,7 @@ async function doPublish(){
   const wantP = $("fmtP").checked, wantH = $("fmtH").checked;
   if (wantP || wantH){
     const models = reportModel(list, issued, by);
-    if (wantP){ setTimeout(() => download(pdfReport(models, logo), `${FILE_BASE()}${tag}_${stamp}.pdf`), 600); nfiles++; }
+    if (wantP){ if (BURN) fwfPDF(logo).then(pdf => download(pdf, `${FILE_BASE()}${tag}_${stamp}.pdf`)); else setTimeout(() => download(pdfReport(models, logo), `${FILE_BASE()}${tag}_${stamp}.pdf`), 600); nfiles++; }
     if (wantH){ setTimeout(() => download(new Blob([interactiveReport(list, issued, by, logo)], { type:"text/html" }), `${FILE_BASE()}${tag}_${stamp}.html`), 900); nfiles++; }
   }
   keepForVerification(list, issued, by);
@@ -1974,8 +2294,9 @@ function reportModel(list, issued, by){
   return list.map(([s, OFs]) => {
     const o = OFs.o;
     return {
-      site:s, title:`${EXPO ? s.point : s.name} ${productName(s)}`,
-      sub:`Issued ${iss} by ${by}. Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times ${tz}.${EXPO ? " " + constraintSummary() : ""}`,
+      site:s, title: PERSONAL ? productName(s) : `${EXPO ? s.point : s.name} ${productName(s)}`,
+      sub: PERSONAL ? `${s.name} (${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}). Issued ${iss}${by ? " by " + by : ""}. Times ${tz}.` : `Issued ${iss} by ${by}. Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times ${tz}.${EXPO ? " " + constraintSummary() : ""}`,
+      summary: PERSONAL ? persSummary() : null,
       pages: pages.map(pg => {
         const set = new Set(pg.cols);
         const dayHdr = pg.days.map((d, j) => { const L = dayLabel(rows[d.cols[0]].a, z); const nm = d.dk === dayKey(issued, z) ? "Today" : d.dk === dayKey(issued + 24*H, z) ? "Tomorrow" : L.wd; return { label: d.cols.length >= 3 ? `${nm}, ${L.dt}` : L.dt, n:d.cols.length }; });
@@ -2062,7 +2383,8 @@ function tintA(p, v){
 }
 /* the customer-facing explanation of the table (the editor's footnote is for forecasters) */
 function productNote(){
-  if (BURN) return "Rows are hourly. Prescription rows give the chance each criterion, and all of them together, is met through the hour. Mixing height is above ground; transport wind is the mean wind through the mixed layer; ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index and LVORI the MFL table from humidity and LDSI; Haines is the low-elevation form. Winds are in the selected unit; temperatures in °F.";
+  if (PERSONAL) return "Times are local to the forecast point. Chances are the chance of the event at any time in the row. Winds and gusts are at the standard 10 m height.";
+  if (BURN) return "Rows are hourly. Prescription rows give the chance each criterion, and all of them together, is met through the hour. Mixing height is above ground; transport wind is the mean wind through the mixed layer; ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index and LVORI the MFL table from humidity and LDSI; the inversion base is where temperature first rises with height (0 ft = surface-based). Winds are in the selected unit; temperatures in °F.";
   const blocks = EXPO ? `Rows are hourly for the first ${prefs.exp && prefs.exp.hourly != null ? prefs.exp.hourly : 24} hours, then 3-hour blocks to the end of the period.` : "Rows are hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7.";
   return `${blocks} In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the period shown. 3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time.${EXPO ? " Constraint probabilities are the chance that the constraint is met at any time in the row." : ""} Winds are in the selected unit; temperatures in °F.`;
 }
@@ -2071,7 +2393,7 @@ function interactiveReport(list, issued, by, logo){
   const r2 = v => v == null ? null : Math.round(v*10)/10;
   const data = {
     product: productName(list[0] && list[0][0]), issued, by, tz:TZ, units:wuLabel(), expo:!!EXPO,
-    constraints: EXPO ? constraintSummary() : "", note: productNote(),
+    constraints: EXPO ? constraintSummary() : "", note: productNote(), summary: PERSONAL ? persSummary() : null,
     logo: logo ? `data:image/png;base64,${logo.b64}` : null, rows,
     sites: list.map(([st, OFs]) => ({
       id:st.id, name: EXPO ? st.point : st.name, point:st.point, lat:st.lat, lon:st.lon,
@@ -2101,7 +2423,7 @@ select,.btn{border:1px solid var(--rule);border-radius:8px;background:var(--pane
 .sp{flex:1}.lab{font-size:12px;color:var(--ink3)}
 .tabs{display:flex;gap:4px;padding:12px 22px 0;flex-wrap:wrap}.tabs button{border:1px solid var(--rule);border-bottom:0;border-radius:10px 10px 0 0;background:var(--rule2);color:var(--ink2);padding:8px 14px;font:600 14px inherit;cursor:pointer}.tabs button[aria-selected=true]{background:var(--panel);color:var(--ink)}
 main{padding:0 22px 30px}.card{background:var(--panel);border:1px solid var(--rule);border-radius:0 12px 12px 12px;padding:14px}
-.meta{color:var(--ink2);font-size:13px;margin:0 0 10px}.cons{background:rgba(181,134,43,.12);border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:13px}
+.meta{color:var(--ink2);font-size:13px;margin:0 0 10px}.psum{border:1px solid var(--rule,#ddd);border-radius:10px;padding:10px 14px;margin:0 0 12px}.psum h3{margin:4px 0;font-size:14px}.psum ul{margin:2px 0 6px 18px;padding:0}.psum p{margin:2px 0 4px;line-height:1.45}.cons{background:rgba(181,134,43,.12);border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:13px}
 .days{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .tw{overflow:auto;max-height:calc(100vh - 210px);border:1px solid var(--rule);border-radius:10px}
 table{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;font-size:12.5px}
@@ -2234,7 +2556,7 @@ function reportViewer(){
     head();
     const s = site(), days = dayStarts();
     const body = st.view === "graphs" ? graphs() : `<div class="tw" id="tw">${st.orient === "down" ? tableDown() : tableAcross()}</div>`;
-    $("card").innerHTML = `<p class="meta">${esc(s.name)}${s.point && s.point !== s.name ? " (" + esc(s.point) + ")" : ""} · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} · times ${tzName()}</p>${D.constraints ? `<p class="cons">${esc(D.constraints)}</p>` : ""}${st.view === "table" ? `<div class="days">${days.map((d, j) => `<button class="btn" data-day="${j}">${esc(d.label)}</button>`).join("")}</div>` : ""}${body}`;
+    $("card").innerHTML = `<p class="meta">${esc(s.name)}${s.point && s.point !== s.name ? " (" + esc(s.point) + ")" : ""} · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} · times ${tzName()}</p>${D.constraints ? `<p class="cons">${esc(D.constraints)}</p>` : ""}${D.summary ? `<div class="psum">${(D.summary.concerns || []).length ? `<h3>Main concerns</h3><ul>${D.summary.concerns.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}${D.summary.text ? `<h3>Discussion</h3><p>${esc(D.summary.text)}</p>` : ""}</div>` : ""}${st.view === "table" ? `<div class="days">${days.map((d, j) => `<button class="btn" data-day="${j}">${esc(d.label)}</button>`).join("")}</div>` : ""}${body}`;
     save();
   }
   /* hover readout */
@@ -2323,7 +2645,19 @@ function pdfReport(models, logo){
         keep.forEach((l2, k) => text(l2, TX, ty + 13 + k*9, k === 2 ? fitText(l2, W - M - TX, 7.5, false) : 7.5, { color:[75,90,104] })); }
       if (m.pages.length > 1) text(`Page ${pi + 1} of ${m.pages.length}`, W - M, M + 12, 7.5, { align:"r", color:[125,139,151] });
       const { gw, lw } = m._hw || (m._hw = headerWidths(m)), x0 = M + gw + lw, ncol = pg.times.length;
-      const cw = Math.min(24, (W - M - x0)/ncol), top = M + Math.max(38, LH + 4), dh = 12, th = 18, rh = 13.2;
+      let top = M + Math.max(38, LH + 4);
+      /* personal page: main concerns and discussion above the table on the first page */
+      if (m.summary && pi === 0){
+        const bw = W - 2*M, wrapT = (t, size, bold, wmax) => { const out = []; let ln = ""; for (const w of String(t || "").split(/\s+/).filter(Boolean)){ const t2 = ln ? ln + " " + w : w; if (tw(t2, size, bold) > wmax && ln){ out.push(ln); ln = w; } else ln = t2; } if (ln) out.push(ln); return out; };
+        const cl = (m.summary.concerns || []).slice(0, 6), dl = wrapT(m.summary.text, 8, false, bw - 16).slice(0, 8);
+        const bh = 16 + (cl.length ? 11 + cl.length*10 : 0) + (dl.length ? 6 + dl.length*10 : 0) + 4;
+        rect(M, top, bw, bh, [244,247,247]);
+        let yy = top + 12;
+        if (cl.length){ text("Main concerns", M + 8, yy, 8.5, { bold:true }); yy += 11; cl.forEach(c2 => { text("•  " + c2, M + 12, yy, 8); yy += 10; }); yy += 4; }
+        if (dl.length){ text("Discussion", M + 8, yy, 8.5, { bold:true }); yy += 11; dl.forEach(l2 => { text(l2, M + 8, yy, 8); yy += 10; }); }
+        top += bh + 8;
+      }
+      const cw = Math.min(24, (W - M - x0)/ncol), dh = 12, th = 18, rh = 13.2;
       const xcol = ci => x0 + ci*cw;
       /* day header */
       rect(M, top, gw + lw + ncol*cw, dh + th, [244,247,247]);
@@ -2658,7 +2992,9 @@ async function loadAll(){
   }).catch(e => { S.status[d.id] = { err: e.name === "AbortError" ? "timed out" : "not available" }; }).finally(scheduleRender);
   OM_DET.forEach(d => tasks.push(det(d, false)));
   OM_ENS.forEach(d => tasks.push(det(d, true)));
-  MOS.forEach(d => tasks.push((DEMO ? demoMOS(d, S.TL) : fetchMOS(d, S.TL)).then(per => {
+  /* waves and sea state, when asked */
+  if (PERSONAL && prefs.exp.marine){ S.status.marine = { loading:true }; tasks.push((DEMO ? demoMarine(S.TL) : fetchMarine(SITES, S.TL)).then(per => { const x = per[SITES[0].id]; if (x){ addSrc(SITES[0].id, MARINE, x.members); S.status.marine = { ok:true, note:"loaded" }; } else S.status.marine = { err:"no wave data here (inland?)" }; }).catch(() => { S.status.marine = { err:"not reachable" }; }).finally(scheduleRender)); }
+  if (!PERSONAL) MOS.forEach(d => tasks.push((DEMO ? demoMOS(d, S.TL) : fetchMOS(d, S.TL)).then(per => {
     let n = 0, run = null, from = "";
     SITES.forEach(s => { const x = per[s.stn]; if (x && x.members[0].t.some(v => v != null)){ addSrc(s.id, d, x.members, { iv:x.iv, run:x.run }); n++; run = x.run; from = x.from; } });
     S.status[d.id] = n ? { ok:true, note: run ? `${pad2(new Date(run).getUTCHours())}Z run${from === "mirror" ? ", mirror" : ""}` : "loaded" } : { err:"no stations" };
@@ -2669,8 +3005,8 @@ async function loadAll(){
     let n = 0; SITES.forEach(s => { const x = per[s.id]; if (x && x.members[0].t.some(v => v != null)){ addSrc(s.id, NDFD, x.members, { iv:x.iv, run:x.run }); n++; } });
     S.status.ndfd = n ? { ok:true, note: per[SITES[0].id] && per[SITES[0].id].run ? `issued ${pad2(new Date(per[SITES[0].id].run).getUTCHours())}${pad2(new Date(per[SITES[0].id].run).getUTCMinutes())}Z` : "loaded" } : { err:"not reachable" };
   }).catch(() => { S.status.ndfd = { err:"not reachable" }; }).finally(scheduleRender));
-  PIPE.forEach(d => S.status[d.id] = { loading:true });
-  tasks.push((DEMO ? demoPipeline(S.TL) : fetchPipeline(S.TL)).then(res => {
+  if (!PERSONAL) PIPE.forEach(d => S.status[d.id] = { loading:true });
+  if (!PERSONAL) tasks.push((DEMO ? demoPipeline(S.TL) : fetchPipeline(S.TL)).then(res => {
     for (const d of PIPE){
       const x = res[d.id];
       const why = (res._status || {})[d.id];
@@ -2680,13 +3016,18 @@ async function loadAll(){
       S.status[d.id] = { ok:true, note: `${pad2(new Date(x.run).getUTCHours())}Z run${x.n > 1 ? `, ${x.n} members` : ""}${d.id === "refsm" && x.n && x.n < 5 ? " (some members missing)" : ""}${ageH > 13 ? ` · ${Math.round(ageH)} h old` : ""}` };
     }
   }).catch(e => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleRender));
-  tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
+  if (!PERSONAL) tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
   await Promise.allSettled(tasks);
   S.loading = false; S.fetchedAt = Date.now(); scheduleRender();
   if (!EXPO && (S.wantBrief || location.hash === "#brief")){ S.wantBrief = false; setTimeout(wantBrief, 400); }
 }
 
 /* ---------- demo data (only with ?demo=1) ---------- */
+async function demoMarine(TL){
+  const m = {}; MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
+  for (let i = 0; i < TL.n; i++){ m.wvh[i] = 2.5 + 1.2*Math.sin(i/14); m.swh[i] = 1.8 + 0.6*Math.sin(i/20); m.wvp[i] = 8 + 2*Math.sin(i/30); m.wvd[i] = 80; m.sst[i] = 79; }
+  return { [SITES[0].id]: { members:[marineMember(m, TL.n)] } };
+}
 async function demoNDFD(TL){
   const out = {}, r = rng(7);
   SITES.forEach(s => { const m = demoSeries(TL, r, 0.5); m.gap = 3; deriveMember(m, TL.n); out[s.id] = { members:[m], iv:{ pop:[], tst:[] }, run: Date.now() - 3*H }; });
@@ -2718,6 +3059,10 @@ function demoSeries(TL, r, bias){
       (m.blh = m.blh || [])[i] = 180 + 1300*day + (r() - 0.5)*150;
       [[975,300],[950,550],[925,800],[900,1050],[850,1550],[800,2050]].forEach(([p, z], k) => { (m["z" + p] = m["z" + p] || [])[i] = z; (m["ws" + p] = m["ws" + p] || [])[i] = m.s80[i]*(1.05 + 0.12*k); (m["wd" + p] = m["wd" + p] || [])[i] = (m.d10[i] + 8*k) % 360; });
       (m.t950 = m.t950 || [])[i] = m.t[i] - 5 - 3*day; (m.t850 = m.t850 || [])[i] = m.t[i] - 16 - 2*day; (m.rh950 = m.rh950 || [])[i] = 75; (m.rh850 = m.rh850 || [])[i] = 45 + 25*r();
+      /* a surface inversion at night that mixes out by late morning */
+      const night = 1 - day; (m.z1000 = m.z1000 || [])[i] = 110; (m.z700 = m.z700 || [])[i] = 3150;
+      (m.t1000 = m.t1000 || [])[i] = m.t[i] + 4*night - 1.5*day + (r() - 0.5); (m.t975 = m.t975 || [])[i] = m.t[i] + 2.5*night - 3*day; (m.t925 = m.t925 || [])[i] = m.t[i] - 6 - 2*day;
+      (m.t900 = m.t900 || [])[i] = m.t[i] - 8 - 2*day; (m.t800 = m.t800 || [])[i] = m.t[i] - 20; (m.t700 = m.t700 || [])[i] = m.t[i] - 32;
     }
   }
   return m;

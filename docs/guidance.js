@@ -8,7 +8,8 @@ const SEAL_SRC = (typeof window !== "undefined" && window.SEAL_SRC) || "ussf-sea
    Guidance: Open-Meteo deterministic + ensemble models, IEM MOS
    (LAMP, GFS, NAM, GFS-X, NBM text). Everything runs in the page.
    ============================================================ */
-const TZ = "America/New_York";
+/* local time: Eastern for the Cape tools; the personal page uses its location's time zone */
+const TZ = (() => { try { if (typeof window !== "undefined" && window.PAGE === "personal"){ const p = JSON.parse(localStorage.getItem("persfx:v1:prefs") || "{}"); return (p.exp && p.exp.tz) || "America/New_York"; } } catch (e) { /* fall back */ } return "America/New_York"; })();
 const H = 3600e3;
 const SITES = [
   { id:"ksc-inland", name:"KSC Inland",      point:"SLF",    stn:"KTTS", lat:28.6150, lon:-80.6945, hot:86 },
@@ -224,6 +225,7 @@ function deriveMember(m, n){
   for (let i = 0; i < n; i++) m.wbgt[i] = wbgtF(m.t[i], m.td[i], m.sw[i], m.s10[i]);
   deriveHeights(m, n, true);
   if (FIRE) deriveFire(m, n);
+  else if (RHROW){ m.rh = new Array(n).fill(null); for (let i = 0; i < n; i++) if (m.t[i] != null && m.td[i] != null) m.rh[i] = rhFrom(m.t[i], m.td[i]); }
   return m;
 }
 /* sustained and peak wind at every height in HEIGHTS (ft) */
@@ -248,16 +250,24 @@ const VMAP = { cloud_cover_low:"cl", cloud_cover_mid:"cm", cloud_cover_high:"ch"
    mixed layer from the pressure levels; Haines (low elevation, 950-850 hPa); ventilation, a
    dispersion index and LVORI as estimates from those. */
 const FIRE = typeof window !== "undefined" && window.PAGE === "burn";
+/* the personal forecast page (any point): relative humidity and, when asked, waves and sea state */
+const PERS = typeof window !== "undefined" && window.PAGE === "personal";
+const MARINE_KEYS = ["wvh", "swh", "wvp", "wvd", "sst"];
+/* pages that carry relative humidity as its own row: personal, and the LMEF (RH in its edit table) */
+const RHROW = PERS || (typeof window !== "undefined" && window.PAGE === "lmef");
 const PLEV = [975, 950, 925, 900, 850, 800];
-const FIRE_VARS = ["boundary_layer_height", "temperature_950hPa", "temperature_850hPa", "relative_humidity_950hPa", "relative_humidity_850hPa",
+/* the inversion uses the temperature profile from the surface through 700 hPa */
+const INV_LEV = [1000, 975, 950, 925, 900, 850, 800, 700];
+const FIRE_VARS = ["boundary_layer_height", ...INV_LEV.map(l => `temperature_${l}hPa`), "geopotential_height_1000hPa", "geopotential_height_700hPa", "relative_humidity_950hPa", "relative_humidity_850hPa",
   ...PLEV.flatMap(p => [`wind_speed_${p}hPa`, `wind_direction_${p}hPa`, `geopotential_height_${p}hPa`])].join(",");
-Object.assign(VMAP, { boundary_layer_height:"blh", temperature_950hPa:"t950", temperature_850hPa:"t850", relative_humidity_950hPa:"rh950", relative_humidity_850hPa:"rh850" },
+Object.assign(VMAP, { boundary_layer_height:"blh", relative_humidity_950hPa:"rh950", relative_humidity_850hPa:"rh850", geopotential_height_1000hPa:"z1000", geopotential_height_700hPa:"z700" },
+  ...INV_LEV.map(l => ({ [`temperature_${l}hPa`]: "t" + l })),
   ...PLEV.map(p => ({ [`wind_speed_${p}hPa`]: "ws" + p, [`wind_direction_${p}hPa`]: "wd" + p, [`geopotential_height_${p}hPa`]: "z" + p })));
-const FIRE_KEYS = ["rh","mixh","tw","vr","di","haines","lvori"];
+const FIRE_KEYS = ["rh","mixh","tw","vr","di","lvori","invh","invlow"];
 const fToC = f => (f - 32)*5/9;
 function deriveFire(m, n){
   const z = () => new Array(n).fill(null);
-  FIRE_KEYS.forEach(k => m[k] = z()); m.twd = z();
+  FIRE_KEYS.forEach(k => m[k] = z()); m.twd = z(); m.haines = z();
   for (let i = 0; i < n; i++){
     const T = m.t[i], Td = m.td[i];
     if (T != null && Td != null) m.rh[i] = rhFrom(T, Td);
@@ -278,6 +288,16 @@ function deriveFire(m, n){
     if (t95 != null && t85 != null && rh85 != null){
       const A = fToC(t95) - fToC(t85), tc = fToC(t85), g = Math.log(Math.max(1, rh85)/100) + 17.625*tc/(243.04 + tc), td85 = 243.04*g/(17.625 - g), B = tc - td85;
       m.haines[i] = (A < 4 ? 1 : A < 8 ? 2 : 3) + (B < 6 ? 1 : B < 10 ? 2 : 3);
+    }
+    /* inversion: the lowest level where temperature rises with height (surface to 700 hPa), as its base
+       in ft above ground (0 = surface-based); invlow = 1 when that base is under 1,000 ft */
+    { const pts = T != null ? [{ h:0, T }] : [];
+      for (const l of INV_LEV){ const tl = m["t" + l] ? m["t" + l][i] : null, zl = m["z" + l] ? m["z" + l][i] : null; if (tl == null || zl == null || zl <= 10) continue; pts.push({ h: zl*3.28084, T: tl }); }
+      pts.sort((a, b) => a.h - b.h);
+      if (pts.length >= 3){
+        let base = null; for (let k = 0; k + 1 < pts.length; k++) if (pts[k + 1].T > pts[k].T + 0.1){ base = pts[k].h; break; }
+        m.invh[i] = base == null ? null : Math.round(base/100)*100; m.invlow[i] = base != null && base < 1000 ? 1 : 0;
+      }
     }
     /* LVORI from humidity and LDSI (MFL table) */
     if (m.rh[i] != null && m.di[i] != null) m.lvori[i] = lvori(m.rh[i], m.di[i]);
@@ -340,6 +360,7 @@ function lvori(rh, di){
   let k = 0; LVORI_COLS.forEach((c, j) => { if (di <= c) k = j + 1; });
   return row[k];
 }
+if (typeof window !== "undefined" && window.PAGE === "personal") VMAP.weather_code = "wc";
 const VKEYS = Object.keys(VMAP).sort((a, b) => b.length - a.length);
 async function getJSON(url, ms){
   const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), ms || 30000);
@@ -355,7 +376,8 @@ async function fetchOM(src, ens, TL){
   const base = ens ? "https://ensemble-api.open-meteo.com/v1/ensemble" : "https://api.open-meteo.com/v1/forecast";
   let js;
   const vars = ens ? OM_VARS_ENS : OM_VARS;
-  try { js = await getJSON(omURL(base, src.model, FIRE ? vars + "," + FIRE_VARS : vars), 45000); }
+  /* extra fields: fire weather on the burn page; the weather code (thunder) on the personal page */
+  try { js = await getJSON(omURL(base, src.model, FIRE ? vars + "," + FIRE_VARS : PERS ? vars + ",weather_code" : vars), 45000); }
   catch (e){
     if (e.status !== 400) throw e;
     /* a model without some fire-weather fields: try without them, then the minimum set */
@@ -464,6 +486,31 @@ function parseMOS(rs, src, TL){
   return { members:[m], iv, run };
 }
 
+/* ---------- waves and sea state (Open-Meteo marine) as one member ----------
+   significant wave height and swell in ft, period in s, direction in degrees, water temperature in F */
+const MARINE = { id:"marine", name:"Open-Meteo marine", fam:"global" };
+async function fetchMarine(sites, TL){
+  const out = {};
+  for (const s of sites){
+    try {
+      const js = await getJSON(`https://marine-api.open-meteo.com/v1/marine?latitude=${s.lat}&longitude=${s.lon}&hourly=wave_height,swell_wave_height,wave_period,wave_direction,sea_surface_temperature&timezone=GMT&timeformat=unixtime&forecast_days=10&past_days=2`, 25000);
+      const hr = js.hourly || {}, m = {}; MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
+      (hr.time || []).forEach((t, j) => { const i = TL.idx(t*1000); if (i < 0 || i >= TL.n) return;
+        const g = k => hr[k] ? hr[k][j] : null;
+        if (g("wave_height") != null) m.wvh[i] = g("wave_height")*3.28084; if (g("swell_wave_height") != null) m.swh[i] = g("swell_wave_height")*3.28084;
+        m.wvp[i] = g("wave_period"); m.wvd[i] = g("wave_direction"); if (g("sea_surface_temperature") != null) m.sst[i] = g("sea_surface_temperature")*9/5 + 32; });
+      if (m.wvh.some(v => v != null)) out[s.id] = { members:[marineMember(m, TL.n)] };
+    } catch (e) { /* inland, or the marine model isn't reachable */ }
+  }
+  return out;
+}
+/* a marine member carries only sea-state fields; give it the standard ones (empty) so blocks and blends work */
+function marineMember(m, n){ for (const k of new Set(Object.values(VMAP))) if (!m[k]) m[k] = new Array(n).fill(null); m.gap = 3; const keep = {}; MARINE_KEYS.forEach(k => keep[k] = m[k]); deriveMember(m, n); Object.assign(m, keep); return m; }
+/* place search (Open-Meteo geocoding): towns, cities and places by name */
+async function geocode(q){
+  const js = await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=8&language=en&format=json`, 12000);
+  return (js.results || []).map(r => ({ name: r.name, area: [r.admin1, r.country_code].filter(Boolean).join(", "), lat: r.latitude, lon: r.longitude, tz: r.timezone }));
+}
 /* ---------- NWS forecast (NDFD) ----------
    api.weather.gov: /points/{lat},{lon} gives the forecast grid; its gridData holds every NDFD element as
    time series ("2026-10-28T12:00:00+00:00/PT3H"). Each value fills the hours it covers. */
@@ -494,6 +541,15 @@ async function fetchNDFD(sites, TL){
       /* probabilities as intervals, like MOS */
       const ivs = (name, kind) => { const prop = P[name]; if (!prop || !prop.values) return; for (const it of prop.values){ const [st, d] = String(it.validTime).split("/"); const a = Date.parse(st); if (it.value == null) continue; iv[kind].push({ a, b: a + dur(d)*H, p: Math.max(0, Math.min(1, it.value/100)) }); } };
       ivs("probabilityOfPrecipitation", "pop"); ivs("probabilityOfThunder", "tst");
+      if (!iv.tst.length && P.weather && P.weather.values){
+        /* the NWS weather grid's thunderstorm coverage words, as chances */
+        const COV = { slight_chance:15, isolated:15, chance:35, scattered:35, occasional:35, likely:65, numerous:65, frequent:65, periods:65, definite:85, widespread:85 };
+        for (const it of P.weather.values){
+          const [st, d] = String(it.validTime).split("/"), a = Date.parse(st); let p = 0;
+          for (const w of it.value || []) if (w && /thunder/.test(w.weather || "")) p = Math.max(p, COV[w.coverage] || 25);
+          iv.tst.push({ a, b: a + dur(d)*H, p: p/100 });
+        }
+      }
       /* NDFD gusts are only given when they exceed the wind; keep gust >= sustained */
       for (let i = 0; i < TL.n; i++){ if (m.s10[i] != null && (m.g10[i] == null || m.g10[i] < m.s10[i])) m.g10[i] = m.s10[i]; }
       /* fire weather: NDFD mixing height and transport wind stand in for the model fields */
@@ -580,8 +636,13 @@ function blockOf(m, row, TL){
   o.du = nn ? u/nn : null; o.dv = nn ? v/nn : null;
   const mx = ks => { const v = ks.map(k => o[k]).filter(x => x != null); return v.length ? Math.max(...v) : null; };
   o.smax = mx(HEIGHTS.map(f => "s" + f)); o.gmax = mx(HEIGHTS.map(f => "g" + f));
+  if (RHROW){
+    /* RH like temperature; waves: highest in a block, period and water temperature averaged, direction from the first hour */
+    const how = { rh:"min", wvh:"max", swh:"max", wvp:"mean", sst:"mean" };
+    for (const k of ["rh", ...MARINE_KEYS]){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 || k === "wvd" ? a[rng[0]] : agg(a, how[k]); }
+  }
   if (FIRE){
-    const how = { rh:"min", mixh:"max", tw:"mean", vr:"max", di:"max", haines:"max", lvori:"max" };
+    const how = { rh:"min", mixh:"max", tw:"mean", vr:"max", di:"max", lvori:"max", invh:"min", invlow:"max" };
     for (const k of FIRE_KEYS){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 ? a[rng[0]] : agg(a, how[k]); o[k + "Lo"] = agg(a, "min"); o[k + "Hi"] = agg(a, "max"); }
     for (const k of [...hk, "t"]){ if (!m[k]) continue; o[k + "Lo"] = agg(m[k], "min"); o[k + "Hi"] = agg(m[k], "max"); }
     let tu = 0, tv = 0, tn = 0; for (const i of (row.len === 1 ? [rng[0]] : rng)){ const d = m.twd[i], s = m.tw[i]; if (d == null || s == null) continue; tu += -Math.sin(d*Math.PI/180)*s; tv += -Math.cos(d*Math.PI/180)*s; tn++; }
@@ -645,6 +706,11 @@ class SiteGuidance {
       if (ev === "tst" && s.iv.tst4 && s.iv.tst4.length && B - A >= 3*H) p = tiledProb(s.iv.tst4, A, B, 4*H);
       if (p == null) p = intervalProb(s.iv[ev], A, B);
     }
+    else if (ev === "tst" && PERS && s.members.some(m => m.wc && m.wc.some(v => v != null))){
+      let h = 0, n = 0;
+      for (const m of s.members){ if (!m.wc) continue; let hit = null; for (let t = A; t < B; t += H){ const i = this.TL.idx(t); if (i < 0 || i >= this.TL.n) continue; const v = m.wc[i]; if (v == null) continue; hit = hit || v >= 95; } if (hit == null) continue; h += hit ? 1 : 0; n++; }
+      p = n ? h/n : null;
+    }
     else if (ev === "pop"){
       if (s.def.id === "nbm" && s.members[0] && s.members[0].pp.some(v => v != null)) p = nbmPop(s.members[0], A, B, this.TL);
       else { let h = 0, n = 0; for (const m of s.members){ const o = memberPrecip(m, A, B, this.TL); if (o == null) continue; h += o; n++; } p = n ? h/n : null; }
@@ -686,7 +752,7 @@ function aggregate(G, prefs){
   const share = (s, k, ri) => NBM_FAMILY.has(s.def.id) && !/^lt|tst/.test(k) ? 1/Math.max(1, famN(ri)) : 1;
   const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now())*share(s, k, ri);
   const val = {}, srcv = {}, band = {}, mem = {};
-  const scal = ["t","td","wbgt","sky", ...hkeys(), ...(FIRE ? FIRE_KEYS : [])];
+  const scal = ["t","td","wbgt","sky", ...hkeys(), ...(FIRE ? FIRE_KEYS : []), ...(PERS ? ["rh", ...MARINE_KEYS] : RHROW ? ["rh"] : [])];
   for (const k of [...scal, "dir", ...(FIRE ? ["tdir"] : [])]){ val[k] = []; srcv[k] = {}; band[k] = []; }
   for (const k of new Set(["tmax","tmin","smax","gmax","vmin", ...PARAMS.filter(p => p.ex).map(p => p.ex)])) mem[k] = [];
   rows.forEach((r, ri) => {
@@ -784,7 +850,7 @@ function exceed(G, pk, ri, delta, hot){
 /* ---------- shared PDF helpers (planning, exposure, burn, LMEF and MWP pages) ---------- */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 const textW = (s, size, bold) => { let w = 0; for (const ch of String(s)){ const c = ch.charCodeAt(0); w += c >= 32 && c <= 126 ? HW[c - 32] : ch === "–" ? 556 : ch === "°" ? 400 : 556; } return w*size/1000*(bold ? 1.06 : 1); };
-const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "•") return "\\225"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; if (ch === "’") return "\\222"; if (ch === "‘") return "\\221"; if (ch === "“") return "\\223"; if (ch === "”") return "\\224"; if (ch === "¹") return "\\271"; if (ch === "²") return "\\262"; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
+const pdfStr = s => "(" + [...String(s)].map(ch => { if (ch === "(" || ch === ")" || ch === "\\") return "\\" + ch; if (ch === "–") return "\\226"; if (ch === "—") return "\\227"; if (ch === "°") return "\\260"; if (ch === "•") return "\\225"; if (ch === "·") return "\\267"; if (ch === "≥") return ">="; if (ch === "≤") return "<="; if (ch === "’") return "\\222"; if (ch === "‘") return "\\221"; if (ch === "“") return "\\223"; if (ch === "”") return "\\224"; if (ch === "¹") return "\\271"; if (ch === "²") return "\\262"; const c = ch.charCodeAt(0); return c < 32 || c > 126 ? "?" : ch; }).join("") + ")";
 async function decodeImage(bytes, type){
   const img = await createImageBitmap(new Blob([bytes], { type: type || "image/png" }));
   const rh = 200, rw = Math.round(img.width*rh/img.height);
