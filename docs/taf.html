@@ -228,7 +228,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=d4ff415d47"></script>
+<script src="guidance.js?v=58143842f2"></script>
 <script>
 "use strict";
 /* ============================================================
@@ -300,13 +300,15 @@ const mean = a => a.length ? a.reduce((x, y) => x + y, 0)/a.length : null;
 const median = a => { if (!a.length) return null; const b = [...a].sort((x, y) => x - y); const k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k])/2; };
 function blendHour(t){
   const i = S.TL.idx(t), on = onSources();
+  /* the NBM family splits one weight for the shared elements; ceiling, visibility, cloud base and thunder (text only) keep full weight */
+  const famN = Math.max(1, on.filter(s => NBM_FAMILY.has(s.def.id) && s.members.length && i >= 0 && i < S.TL.n && s.members[0].t[i] != null).length);
   const acc = {}, push = (k, v, w) => { if (v != null && isFinite(v)) (acc[k] = acc[k] || []).push([v, w]); };
   let U = 0, V = 0, UW = 0, R = 0, RN = 0;
   for (const s of on){
-    const w = Wt(s), ms = s.members;
+    const wFull = Wt(s), w = NBM_FAMILY.has(s.def.id) ? wFull/famN : wFull, ms = s.members;
     if (ms.length && i >= 0 && i < S.TL.n){
       for (const k of ["t","td","s10","g10","cl","cm","ch","sky","slp"]) push(k, mean(ms.map(m => m[k] ? m[k][i] : null).filter(v => v != null)), w);
-      for (const k of ["vis","cig","lcb"]) push(k, median(ms.map(m => m[k] ? m[k][i] : null).filter(v => v != null)), w);
+      for (const k of ["vis","cig","lcb"]) push(k, median(ms.map(m => m[k] ? m[k][i] : null).filter(v => v != null)), wFull);
       let u = 0, v = 0, n = 0;
       for (const m of ms){ const d = m.d10[i], sp = m.s10[i]; if (d == null || sp == null) continue; u += -Math.sin(d*Math.PI/180)*Math.max(.5, sp); v += -Math.cos(d*Math.PI/180)*Math.max(.5, sp); n++; }
       if (n){ U += u/n*w; V += v/n*w; UW += w; const L = Math.hypot(u/n, v/n); const S2 = mean(ms.map(m => m.s10[i]).filter(x => x != null)); if (S2) { R += Math.min(1, L/Math.max(.5, S2)); RN++; } }
@@ -315,7 +317,7 @@ function blendHour(t){
       push("qpf", mean(q), w);
     }
     const pp = S.G.srcWin(s, "pop", t, t + H); if (pp != null) push("pop", pp, w);
-    const lt = S.G.srcWin(s, "tst", t, t + H); if (lt != null) push("ltg", lt, w);
+    const lt = S.G.srcWin(s, "tst", t, t + H); if (lt != null) push("ltg", lt, wFull);
   }
   const b = {};
   for (const k of ["t","td","s10","g10","cl","cm","ch","sky","slp","qpf","pop","ltg"]) b[k] = acc[k] ? wmean(acc[k]) : null;
@@ -621,7 +623,7 @@ async function loadAll(){
   /* the NWS forecast (NDFD) at the station */
   if (!DEMO){ S.status.ndfd = { loading:true }; tasks.push(fetchNDFD([{ id:"taf", lat:SITE.lat, lon:SITE.lon }], S.TL).then(per => { const x = per.taf; if (x && x.members[0].t.some(v => v != null)){ (tok === S.tok) && S.G.addSource(NDFD, x.members, { iv:x.iv, run:x.run }); S.status.ndfd = { ok:true, note:"loaded" }; } else S.status.ndfd = { err:"not reachable" }; }).catch(() => { S.status.ndfd = { err:"not reachable" }; })); }
   MOS.forEach(d => tasks.push((DEMO ? demoMOS(d) : fetchMOS(d, S.TL)).then(per => { const x = per[SITE.stn]; if (x && x.members[0].t.some(v => v != null)){ (tok === S.tok) && S.G.addSource(d, x.members, { iv:x.iv, run:x.run }); S.status[d.id] = { ok:true, note: x.run ? `${p2(new Date(x.run).getUTCHours())}Z run` : "loaded" }; } else S.status[d.id] = { err:"no data" }; }).catch(() => { S.status[d.id] = { err:"not reachable" }; }).finally(scheduleBuild)));
-  tasks.push((DEMO ? demoPipe() : fetchPipeline(S.TL)).then(res => { for (const d of PIPE){ const x = res[d.id], p = x && x.per[SITE.id]; if (!p){ S.status[d.id] = { err:"not in this run" }; continue; } (tok === S.tok) && S.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); S.status[d.id] = { ok:true, note:`${p2(new Date(x.run).getUTCHours())}Z run${p.members.length > 1 ? `, ${p.members.length} members` : ""}` }; } }).catch(() => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleBuild));
+  tasks.push((DEMO ? demoPipe() : fetchPipeline(S.TL)).then(res => { for (const d of PIPE){ const x = res[d.id], p = x && x.per[SITE.id]; if (!p){ S.status[d.id] = { err: (res._status || {})[d.id] || "not in this run" }; continue; } (tok === S.tok) && S.G.addSource(d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); S.status[d.id] = { ok:true, note:`${p2(new Date(x.run).getUTCHours())}Z run${p.members.length > 1 ? `, ${p.members.length} members` : ""}` }; } }).catch(() => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleBuild));
   await Promise.allSettled(tasks);
   if (tok !== S.tok) return;
   S.loading = false; S.fetchedAt = Date.now(); scheduleBuild();

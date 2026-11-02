@@ -4,7 +4,10 @@
 Sources
   rrfs    RRFS deterministic, 3 km CONUS 2dfld, hourly to 24 h then 3-hourly to 84 h
   refsm   RRFS ensemble members m001-m005 (the REFS membership), 3 km CONUS 2dfldnomads,
-          hourly to 24 h then 3-hourly to 60 h
+          hourly to 24 h then 3-hourly to 60 h. Fetched first, all five in parallel, with only the
+          fields the members feed (no ceilings or cloud layers), so they finish inside the time
+          budget; each member is labelled (m001-m005) and the reason for a short or missing run is
+          written to "status" in hires.json and shown on the pages.
   hrefct  SPC HREF calibrated thunder, 1 h and 4 h periods (retires with HREF on Nov 3, 2026)
   refsct  SPC REFS calibrated thunder, 1 h and 4 h periods (para until Nov 3, then prod)
 
@@ -220,6 +223,9 @@ FIELDS = [  # key, GRIB var, level prefix
     ("lcc", "LCDC", "low cloud layer"), ("mcc", "MCDC", "middle cloud layer"), ("hcc", "HCDC", "high cloud layer"),
     ("slp", "PRMSL", "mean sea level"), ("slp2", "MSLMA", "mean sea level"),
 ]
+# the members feed winds, temperatures, sky and precipitation; ceilings and cloud layers for the TAF
+# page come from the deterministic run, which keeps the downloads per member cycle down by about half
+MEMBER_FIELDS = [f for f in FIELDS if f[0] in ("t", "td", "u10", "v10", "gust", "u80", "v80", "tcc", "vis", "apcp")]
 FT = 3.28084
 KT = 1.943844
 k2f = lambda k: (k - 273.15) * 9 / 5 + 32  # noqa: E731
@@ -252,23 +258,27 @@ def find_cycle(fx, now, maxh, member=None):
     return None, None
 
 
-def run_member(fx, cyc, maxh, member=None):
+def run_member(fx, cyc, maxh, member=None, fields=None, stop_at=60):
     """One RRFS run (deterministic or member) at every forecast point."""
     hours = hours_for(maxh)
     raw = {h: {} for h in hours}
     jobs = []
+    missing = 0
     for h in hours:
-        if time_left() < 60:
-            LOG("  time budget reached, keeping what we have")
+        if time_left() < stop_at:
+            LOG(f"  time budget reached at f{h:03d}{'' if member is None else f' (m{member:03d})'}, keeping what we have")
             break
         suffix = rrfs_suffix(cyc, h, member)
         recs, url, _ = fx.inventory(suffix, RRFS_BASES)
         if not recs:
+            missing += 1
             continue
-        for key, var, lev in FIELDS:
+        for key, var, lev in (fields or FIELDS):
             r = pick(recs, var, lev, fh=h)
             if r:
                 jobs.append((h, key, r, url, suffix))
+    if missing:
+        LOG(f"  {missing} forecast hour(s) not found{'' if member is None else f' for m{member:03d}'}")
 
     def work(j):
         h, key, r, url, suffix = j
@@ -422,7 +432,54 @@ def main():
     def same_run(sid, cyc):
         return sid in old and cyc and old[sid].get("run") == cyc.isoformat()
 
+    # RRFS ensemble members (the REFS membership), first: they need the most downloads
+    status = {}
+    fx.aws_ok = True
+    cyc, where = None, None
+    for mem_probe in (5, 1):   # newest cycle with the last member out (or at least the first)
+        cyc, where = find_cycle(fx, now, 60, member=mem_probe)
+        if cyc:
+            break
+    prev_n = len(next(iter((old.get("refsm") or {}).get("sites", {}).values()), {}).get("members", [])) if old.get("refsm") else 0
+    if cyc and same_run("refsm", cyc) and prev_n >= 5:
+        LOG(f"refsm: {cyc:%HZ %Y%m%d} already in hires.json")
+        out.append(old["refsm"]); status["refsm"] = f"{cyc:%HZ} run, 5 members (already mirrored)"
+    elif cyc:
+        LOG(f"refsm: {cyc:%HZ %Y%m%d} from {where}")
+        sites = {s[0]: {"members": []} for s in SITES}
+        got = {}
+        # all five members at once; each keeps a share of the budget for the deterministic run
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            futs = {ex.submit(run_member, fx, cyc, 60, m, MEMBER_FIELDS, 0.45 * BUDGET_S): m for m in range(1, 6)}
+            for fu, m in futs.items():
+                try:
+                    got[m] = fu.result()
+                except Exception as e:  # noqa: BLE001
+                    LOG(f"  m{m:03d}: {e}")
+        t0, n_ok = None, 0
+        for m in sorted(got):
+            t0m, per_site = got[m]
+            if any(v is not None for v in per_site[0]["t"]):
+                n_ok += 1; t0 = t0m
+                for i2, s2 in enumerate(SITES):
+                    if any(v is not None for v in per_site[i2]["t"]):
+                        mm = dict(per_site[i2]); mm["mem"] = f"m{m:03d}"
+                        sites[s2[0]]["members"].append(mm)
+        LOG(f"refsm: {n_ok} of 5 members")
+        if t0 is not None:
+            out.append({"id": "refsm", "name": "REFS members", "fam": "hires", "run": cyc.isoformat(),
+                        "t0": t0, "gap": 3, "sites": sites})
+            status["refsm"] = f"{cyc:%HZ} run, {n_ok} of 5 members"
+        else:
+            s3 = keep_or_drop(old, "refsm", now); out += [s3] if s3 else []
+            status["refsm"] = "members found but none could be read" + ("; showing the previous run" if s3 else "")
+    else:
+        s3 = keep_or_drop(old, "refsm", now)
+        out += [s3] if s3 else []
+        status["refsm"] = ("no member run found on AWS or NOMADS in the last 30 h" + ("; showing the previous run" if s3 else ""))
+
     # RRFS deterministic
+    fx.aws_ok = True
     cyc, where = find_cycle(fx, now, 84)
     if cyc and same_run("rrfs", cyc):
         LOG(f"rrfs: {cyc:%HZ %Y%m%d} already in hires.json")
@@ -434,30 +491,6 @@ def main():
                     "gap": 3, "sites": {SITES[i][0]: {"members": [per_site[i]]} for i in range(len(SITES))}})
     else:
         s = keep_or_drop(old, "rrfs", now)
-        out += [s] if s else []
-
-    # RRFS ensemble members (REFS membership)
-    cyc, where = find_cycle(fx, now, 60, member=5)
-    if cyc and same_run("refsm", cyc):
-        LOG(f"refsm: {cyc:%HZ %Y%m%d} already in hires.json")
-        out.append(old["refsm"])
-    elif cyc:
-        LOG(f"refsm: {cyc:%HZ %Y%m%d} from {where}")
-        sites = {s[0]: {"members": []} for s in SITES}
-        t0 = None
-        for mem in range(1, 6):
-            if time_left() < 120:
-                LOG("  time budget reached before all members")
-                break
-            t0, per_site = run_member(fx, cyc, 60, member=mem)
-            for i, s in enumerate(SITES):
-                if any(v is not None for v in per_site[i]["t"]):
-                    sites[s[0]]["members"].append(per_site[i])
-        if t0 is not None:
-            out.append({"id": "refsm", "name": "REFS members", "fam": "hires", "run": cyc.isoformat(),
-                        "t0": t0, "gap": 3, "sites": sites})
-    else:
-        s = keep_or_drop(old, "refsm", now)
         out += [s] if s else []
 
     # SPC calibrated thunder
@@ -478,7 +511,7 @@ def main():
             s = keep_or_drop(old, sid, now)
             out += [s] if s else []
 
-    doc = {"generated": now.isoformat(), "sources": out}
+    doc = {"generated": now.isoformat(), "sources": out, "status": status}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT + ".tmp", "w") as f:
         json.dump(doc, f, separators=(",", ":"))

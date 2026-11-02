@@ -517,7 +517,7 @@ async function fetchPipeline(TL){
       if (!st) continue;
       const members = (st.members || []).map(mm => {
         const m = {};
-        for (const k in mm){ const arr = new Array(TL.n).fill(null); mm[k].forEach((v, j) => { const i = TL.idx(src.t0 + j*H); if (i >= 0 && i < TL.n && v != null) arr[i] = v; }); m[k] = arr; }
+        for (const k in mm){ if (!Array.isArray(mm[k])){ m[k] = mm[k]; continue; } const arr = new Array(TL.n).fill(null); mm[k].forEach((v, j) => { const i = TL.idx(src.t0 + j*H); if (i >= 0 && i < TL.n && v != null) arr[i] = v; }); m[k] = arr; }
         m.gap = src.gap || 3; return deriveMember(m, TL.n);
       }).filter(m => m.t.some(v => v != null));
       const iv = st.iv ? { tst: st.iv.tst || [], tst4: st.iv.tst4 || [] } : null;
@@ -525,6 +525,9 @@ async function fetchPipeline(TL){
     }
     out[src.id] = { run: Date.parse(src.run), per, n: Math.max(0, ...Object.values(per).map(x => x.members.length)) };
   }
+  /* why a source is missing or short, as the pipeline recorded it */
+  out._status = js.status || {};
+  out._generated = js.generated ? Date.parse(js.generated) : null;
   return out;
 }
 
@@ -672,10 +675,16 @@ function autoFactor(G, prefs, sid, key, startMs){
   const w = (((AUTO_W.weights || {})[pt] || {})[grp] || {})[band];
   return w && w[sid] != null ? w[sid] : 1;
 }
+/* the NBM family (gridded NBM, NBM text, NBM text extended) shares one weight: the sources with data at
+   a time split it, except for thunder, which only the text products carry */
+const NBM_FAMILY = new Set(["nbm", "nbs", "nbe"]);
 function aggregate(G, prefs){
   const rows = G.rows, on = G.src.filter(s => prefs.enabled[s.def.id] !== false && (prefs.weight[s.def.id] ?? s.def.w ?? 1) > 0);
   const W0 = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
-  const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now());
+  const famAt = new Map(), fam = on.filter(s => NBM_FAMILY.has(s.def.id));
+  const famN = ri => { if (famAt.has(ri)) return famAt.get(ri); const n = fam.filter(s => s.blocks.some(b => b[ri] && b[ri].t != null)).length; famAt.set(ri, n); return n; };
+  const share = (s, k, ri) => NBM_FAMILY.has(s.def.id) && !/^lt|tst/.test(k) ? 1/Math.max(1, famN(ri)) : 1;
+  const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now())*share(s, k, ri);
   const val = {}, srcv = {}, band = {}, mem = {};
   const scal = ["t","td","wbgt","sky", ...hkeys(), ...(FIRE ? FIRE_KEYS : [])];
   for (const k of [...scal, "dir", ...(FIRE ? ["tdir"] : [])]){ val[k] = []; srcv[k] = {}; band[k] = []; }
@@ -717,7 +726,10 @@ function aggregate(G, prefs){
   /* window probabilities */
   const winP = (ev, A, B, per) => {
     const pairs = [];
-    for (const s of on){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W0(s)*autoFactor(G, prefs, s.def.id, ev, A)]); if (per) per[s.def.id] = p; }
+    const fams = [];
+    for (const s of on){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W0(s)*autoFactor(G, prefs, s.def.id, ev, A)]); if (NBM_FAMILY.has(s.def.id)) fams.push(pairs.length - 1); if (per) per[s.def.id] = p; }
+    /* precipitation: the NBM sources with a value split one weight (thunder keeps full weight) */
+    if (ev !== "tst" && fams.length > 1) fams.forEach(i => pairs[i][1] /= fams.length);
     return wmean(pairs);
   };
   for (const pk of ["pp1","pp3","pp6","lt1","lt3","lt6"].filter(k => P[k])){

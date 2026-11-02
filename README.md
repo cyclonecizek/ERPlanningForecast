@@ -13,6 +13,22 @@ published as Excel or CSV. Static page on GitHub Pages; everything runs in the b
 
 Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days 6 and 7.
 
+## REFS members
+The high-resolution job fetches the five RRFS ensemble members (the REFS membership, `rrfsens.YYYYMMDD/CC/m00N/`
+on AWS and NOMADS) **first, in parallel**, with only the fields they feed (temperature, dew point, 10 and
+80 m winds, gusts, sky, visibility, precipitation), then the deterministic RRFS. AWS is retried for each
+run. Every member is kept and labelled (m001-m005); the blend and the probabilities use each member. If
+a run is short or missing, the reason is written to `status` in `hires.json` and shown in the sources
+panel (for example "18Z run, 4 of 5 members" or "no member run found on AWS or NOMADS in the last 30 h").
+
+## NBM family
+The gridded NBM (Open-Meteo), NBM text (NBS) and NBM text extended (NBE) are one product delivered three
+ways, so in every blend (planning, exposure, burn, LMEF, TAF and the verification blends) they **share one
+weight**: the NBM sources with data at a time split it, so the NBM counts once. Thunder chances, and on the
+TAF page ceiling, visibility and cloud base, which only the text products carry, keep full weight. Each is
+still scored separately, so the automatic weights can shift the NBM's share toward whichever verifies
+better.
+
 ## NWS Forecast source
 Every forecast page (planning, exposure, burn, LMEF and TAF) adds the NWS forecast as a guidance source
 labelled **NWS Forecast**: the NDFD grids for each point from api.weather.gov (the `/points` lookup gives

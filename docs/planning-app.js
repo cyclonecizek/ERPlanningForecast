@@ -782,7 +782,7 @@ function renderSources(){
       const on = prefs.enabled[s.id] !== false, w = prefs.weight[s.id] ?? s.w ?? 1;
       const txt = st.loading ? "loading" : st.ok ? st.note : (st.err || "not available");
       const af = autoNow(s.id);
-      return `<div class="srow ${st.ok ? "" : "na"}"><input type="checkbox" data-src="${s.id}" ${on ? "checked" : ""} aria-label="Use ${s.name}"><span>${s.name} <span class="st">${txt}</span>${af != null && Math.abs(af - 1) >= 0.05 ? ` <span class="auto ${af > 1 ? "up" : "dn"}" title="Automatic weight from verification for ${autoLabel()} at this point, day 1">auto ×${af.toFixed(2)}</span>` : ""}</span><select data-w="${s.id}" aria-label="${s.name} weight">${[0.5,1,2,3].map(x => `<option value="${x}" ${x == w ? "selected" : ""}>×${x}</option>`).join("")}</select></div>`;
+      return `<div class="srow ${st.ok ? "" : "na"}"><input type="checkbox" data-src="${s.id}" ${on ? "checked" : ""} aria-label="Use ${s.name}"><span>${s.name} <span class="st">${txt}</span>${NBM_FAMILY.has(s.id) ? ' <span class="st" title="The gridded NBM and the NBM text products split one weight, so the NBM counts once (thunder, ceiling and visibility from the text keep full weight)">· shares the NBM weight</span>' : ""}${af != null && Math.abs(af - 1) >= 0.05 ? ` <span class="auto ${af > 1 ? "up" : "dn"}" title="Automatic weight from verification for ${autoLabel()} at this point, day 1">auto ×${af.toFixed(2)}</span>` : ""}</span><select data-w="${s.id}" aria-label="${s.name} weight">${[0.5,1,2,3].map(x => `<option value="${x}" ${x == w ? "selected" : ""}>×${x}</option>`).join("")}</select></div>`;
     }).join("") + `</div>`;
   }).join("");
   const used = ALL_SOURCES.filter(s => (S.status[s.id] || {}).ok && prefs.enabled[s.id] !== false).length;
@@ -2673,9 +2673,11 @@ async function loadAll(){
   tasks.push((DEMO ? demoPipeline(S.TL) : fetchPipeline(S.TL)).then(res => {
     for (const d of PIPE){
       const x = res[d.id];
-      if (!x || !Object.keys(x.per).length){ S.status[d.id] = { err:"not in this run" }; continue; }
+      const why = (res._status || {})[d.id];
+      if (!x || !Object.keys(x.per).length){ S.status[d.id] = { err: why || "not in this run" }; continue; }
       SITES.forEach(s => { const p = x.per[s.id]; if (p) addSrc(s.id, d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); });
-      S.status[d.id] = { ok:true, note: `${pad2(new Date(x.run).getUTCHours())}Z run${x.n > 1 ? `, ${x.n} members` : ""}` };
+      const ageH = (Date.now() - x.run)/H;
+      S.status[d.id] = { ok:true, note: `${pad2(new Date(x.run).getUTCHours())}Z run${x.n > 1 ? `, ${x.n} members` : ""}${d.id === "refsm" && x.n && x.n < 5 ? " (some members missing)" : ""}${ageH > 13 ? ` · ${Math.round(ageH)} h old` : ""}` };
     }
   }).catch(e => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleRender));
   tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));

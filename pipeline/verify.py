@@ -742,6 +742,9 @@ def hires_sources(issue):
     return out
 
 
+NBM_FAMILY = {"nbm", "nbs", "nbe"}
+
+
 def blend(sources, weights=None, issue=None):
     """equal-weight (or auto-weighted) mean of the sources, like the forecast page's default blend"""
     out = {}
@@ -752,6 +755,7 @@ def blend(sources, weights=None, issue=None):
             for k in range(LEAD_H + 1):
                 band = band_of(k)
                 pairs = []
+                fam = []
                 for sid, per in sources.items():
                     v = (per.get(pid) or {}).get(f)
                     v = v[k] if v else None
@@ -760,7 +764,12 @@ def blend(sources, weights=None, issue=None):
                     w = 2.0 if sid in ("hrefct", "refsct") else 1.0
                     if weights:
                         w *= weight_of(weights, pid, grp, band, sid)
+                    if sid in NBM_FAMILY:
+                        fam.append(len(pairs))
                     pairs.append((v, w))
+                # the NBM family (gridded NBM and the NBM text products) shares one weight, as on the pages
+                if len(fam) > 1:
+                    pairs = [(v, w / len(fam)) if i in fam else (v, w) for i, (v, w) in enumerate(pairs)]
                 if pairs:
                     if f == "d":
                         u = sum(-math.sin(math.radians(v)) * w for v, w in pairs); vv = sum(-math.cos(math.radians(v)) * w for v, w in pairs)
