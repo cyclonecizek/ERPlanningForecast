@@ -297,7 +297,8 @@ function productHTML(logo){
     </footer>
   </div>`;
 }
-const LM_CSS = `.wrng{display:flex;flex-direction:column;gap:3px;font-size:12.5px;font-weight:600;margin:6px 0}.wrng select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}
+const LM_CSS = `.vehw{display:flex;gap:6px}.vehw select,.vehw input{flex:1;min-width:0}
+.wrng{display:flex;flex-direction:column;gap:3px;font-size:12.5px;font-weight:600;margin:6px 0}.wrng select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}
 .trend{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:end}.trend .arr{font-size:18px;padding-bottom:6px}.lm-gauge b.tr{font-size:22px;white-space:nowrap}
 .proflin{margin:-2px 0 6px;font-size:12px}.nxt{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.nxt input[type=date]:disabled{opacity:.45}
 .lg{background:#fff;color:#000;max-width:780px;margin:0 auto;padding:18px;border-radius:10px;font-family:Helvetica,Arial,sans-serif}
@@ -309,7 +310,7 @@ const LM_CSS = `.wrng{display:flex;flex-direction:column;gap:3px;font-size:12.5p
 .lg-side{width:30px;padding:0!important;text-align:center;vertical-align:middle!important}.lg-side span{display:inline-block;writing-mode:vertical-rl;transform:rotate(180deg);font:700 17px Helvetica,Arial,sans-serif;white-space:nowrap}
 .lg-notes{background:#fff}.lg-band{text-align:center;font-weight:700;font-size:13.5px}.lg-band sup{font-size:8px}
 .lg-pov{display:table-cell}.lg-pov .lg-pct{display:inline-block;width:62px;font-size:21px;border-right:1px solid #000;margin:-4px 10px -4px -7px;padding:7px 0 7px 8px}
-.lg-wx{width:36%}.lg-wx p b{min-width:128px}.lg-cl{border-left:1px dotted #000!important}.lg-clh{text-align:center;font-weight:700;margin-bottom:2px}.lg-cl table{width:100%;border-collapse:collapse}.lg-cl th,.lg-cl td{border:0!important;padding:1px 3px!important;text-align:left;font-size:12px}.lg-cl th{font-weight:400;font-size:10px}
+.lg-wx{width:36%}.lg-wx p b{min-width:128px;white-space:nowrap}.lg-wx p span.one{white-space:nowrap}.lg-wx p span.sm{font-size:11px}.lg-wx p span.xs{font-size:9.5px}.lg-cl{border-left:1px dotted #000!important}.lg-clh{text-align:center;font-weight:700;margin-bottom:2px}.lg-cl table{width:100%;border-collapse:collapse}.lg-cl th,.lg-cl td{border:0!important;padding:1px 3px!important;text-align:left;font-size:12px}.lg-cl th{font-weight:400;font-size:10px;white-space:nowrap}
 .lg-rk{width:30%}.lg-pov .lg-pct.tr{width:auto;min-width:98px;padding-right:10px;font-size:18px;white-space:nowrap}.lg-rk.many p{margin:0;font-size:11.5px}.lg-rk p{justify-content:space-between}.lg-fn p{margin:2px 0;font-style:italic;font-size:10.5px}.lg-faq{text-align:center}.lg-faq a{color:#0645C4}.lg-next{font-size:13px}
 .schline{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:2px 0 8px}.schline .mut{font-size:12px;flex-basis:100%}.fileb{position:relative;overflow:hidden;cursor:pointer}.fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}.pdffmt{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink-2)}.pdffmt select{border:1px solid var(--rule);border-radius:7px;padding:5px 7px;background:var(--panel);color:var(--ink)}.sealrow{margin:6px 0 0;text-align:right}.sealrow .fileb{position:relative;overflow:hidden;padding:2px 8px;font-size:12px}.sealrow .fileb input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .lm{font-family:"Barlow","Segoe UI",Arial,sans-serif;color:#13202E;background:#fff;max-width:900px;margin:0 auto;border-radius:14px;overflow:hidden;box-shadow:0 1px 0 #D4DBDF}
@@ -636,7 +637,7 @@ const SETUP_HTML = `
         <p class="wide mut proflin" id="lmProfNote"></p>
         <div class="wide schline"><span class="btn fileb">Upload official launch schedule (CSV)<input type="file" id="lmSchFile" accept=".csv,text/csv"></span> <button type="button" class="btn ghost" id="lmSchTpl">CSV template</button> <button type="button" class="btn ghost" id="lmSchClear" hidden>Clear schedule</button><span class="mut" id="lmSchNote">Uploaded launches appear first in the list. Kept on this computer only.</span></div>
         <label class="wide">Mission name <input id="lmName" autocomplete="off"></label>
-        <label>Vehicle <input id="lmVeh" list="lmVehList" autocomplete="off"></label>
+        <label>Vehicle <span class="vehw"><select id="lmVehSel"></select><input id="lmVeh" autocomplete="off" placeholder="Vehicle" hidden></span></label>
         <label>Pad <select id="lmPad"></select></label>
         <label class="wide">Issued <input id="lmIss" type="datetime-local"></label>
       </div>
@@ -657,7 +658,7 @@ const SETUP_HTML = `
       <p class="mut lmnote">The table and graphs below hold the hourly forecast for every window: one row per NASA-STD-4010B lightning launch commit criterion, the liftoff wind constraint, and the hourly probability of violation built from them. Edit any hour; the product updates as you go.</p>
     </div>
   </div>
-  <datalist id="lmVehList"><option value="Falcon 9"><option value="Falcon Heavy"><option value="Vulcan"><option value="Atlas V"><option value="New Glenn"><option value="SLS"><option value="Starship"></datalist>
+
 </section>`;
 const PRODUCT_HTML = `
 <section class="panel lmprod" id="lmProduct" aria-label="LMEF product">
@@ -717,7 +718,7 @@ function renderSetup(){
   const profs = PROVIDERS[L.provider] || ["Default"]; if (!profs.includes(L.profile)) L.profile = profs[0];
   if ($("lmProf") !== ae) $("lmProf").innerHTML = profs.map(p => `<option ${p === L.profile ? "selected" : ""}>${p}</option>`).join("");
   $("lmProfNote").textContent = `${PROFILE_DAYS[L.profile] || 2} forecast days; additional risk: ${(PROFILE_RISKS[L.profile] || []).map(id => (BUILTIN_RISKS.find(b => b.id === id) || {}).name).join(", ") || "none"} (plus upper-level wind shear if ticked). Changing the profile resets these; you can still tick criteria below.`;
-  set("lmName", L.mission); set("lmVeh", L.vehicle); $("lmPad").value = L.pad; set("lmIss", toInput(L.issued || Date.now()));
+  set("lmName", L.mission); set("lmVeh", L.vehicle); renderAssets(); set("lmIss", toInput(L.issued || Date.now()));
   if (!$("lmLift").contains(ae)) $("lmLift").innerHTML = `<label>Height <span class="u"><input data-l="h" type="number" min="10" max="600" value="${L.liftoff.h}"> ft</span></label><label>Wind <select data-l="kind">${[["peak","Peak"],["sust","Sustained"]].map(([v, l]) => `<option value="${v}" ${L.liftoff.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Limit <span class="u"><select data-l="op"><option value=">" ${L.liftoff.op === ">" ? "selected" : ""}>&gt;</option><option value=">=" ${L.liftoff.op === ">=" ? "selected" : ""}>≥</option></select><input data-l="v" type="number" min="0" value="${L.liftoff.v}"></span></label><label>Units <select data-l="unit">${Object.keys(LIFT_UNITS).map(u => `<option ${u === L.liftoff.unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>`;
   $("lmFtp").checked = !!L.ftp; if ($("lmWindRange") !== ae) $("lmWindRange").value = L.windRange || "avg";
   if (!$("lmWins").contains(ae)) $("lmWins").innerHTML = (L.windows || []).map((w, i) => `<div class="wrow" data-w="${i}"><span>${winLabel(i)}</span><input type="datetime-local" data-wa="a" value="${toInput(w.a)}"><input type="datetime-local" data-wa="b" value="${toInput(w.b)}">${i ? `<button type="button" class="x" data-delw="${i}" aria-label="Remove ${winLabel(i)}">×</button>` : "<i></i>"}</div>`).join("") + `<button type="button" class="lnk" id="lmAddWin">+ add delay day</button>`;
@@ -783,7 +784,7 @@ function productHTMLLegacy(){
       <tr><td colspan="${rk.length ? 3 : 2}" class="lg-pov"><b class="lg-pct${D.trend ? " tr" : ""}">${hesc(D.povText)}</b><span><b>Primary Concerns:</b> ${hesc(String(D.concerns || "None").split(/\s*,\s*/).join(", "))}</span></td></tr>
       <tr><td class="lg-band" colspan="2" style="background:${fill}">Weather Conditions</td>${rk.length ? `<td class="lg-band" style="background:${fill}">Additional Risk Criteria${i === 0 ? "<sup>2</sup>" : ""}</td>` : ""}</tr>
       <tr class="lg-body">
-        <td class="lg-wx"><p><b>Weather/Visibility:</b><span>${hesc(D.wx || "-")} / ${hesc(D.vis || "-")}</span></p><p><b>Temp/Humidity:</b><span>${hesc(D.temp || "-")} / ${hesc(D.rh || "-")}</span></p><p><b>${hesc(lift)}:</b><span>${hesc(D.wind || "-")}</span></p></td>
+        <td class="lg-wx"><p><b>Weather/Visibility:</b><span class="one${(`${D.wx || "-"} / ${D.vis || "-"}`).length > 26 ? " xs" : (`${D.wx || "-"} / ${D.vis || "-"}`).length > 18 ? " sm" : ""}">${hesc(D.wx || "-")} / ${hesc(D.vis || "-")}</span></p><p><b>Temp/Humidity:</b><span>${hesc(D.temp || "-")} / ${hesc(D.rh || "-")}</span></p><p><b>${hesc(lift)}:</b><span>${hesc(D.wind || "-")}</span></p></td>
         <td class="lg-cl"><div class="lg-clh">Clouds</div><table><tr><th>Type</th><th>Coverage</th><th>Base (ft)</th><th>Tops (ft)</th></tr>${clouds.map(c => `<tr><td>${hesc(c.type)}</td><td>${hesc(c.cov || "")}</td><td>${c.base ? Number(c.base).toLocaleString("en-US") : ""}</td><td>${c.tops ? Number(c.tops).toLocaleString("en-US") : ""}</td></tr>`).join("")}</table></td>
         ${rk.length ? `<td class="lg-rk${rk.length > 3 ? " many" : ""}">${rk.map(r => `<p><b>${hesc(r.name)}:</b><span>${hesc((D.risk || {})[r.id] || "Low")}</span></p>`).join("")}</td>` : ""}
       </tr>`;
@@ -812,6 +813,28 @@ function reconfigure(full){
   refreshProduct();
 }
 /* apply a mission profile: number of forecast days and the additional risk criteria shown */
+/* the vehicles and pads the chosen customer uses; the current mission's own pad and vehicle stay
+   available even if they aren't on the customer's list */
+function customerAssets(){
+  const A = PROVIDER_ASSETS[L.provider] || PROVIDER_ASSETS.OTHER;
+  const pads = A.pads.length ? PADS.filter(p => A.pads.includes(p.id) || p.id === L.pad) : PADS;
+  const vehs = A.vehicles.length ? [...A.vehicles] : [...new Set(Object.values(PROVIDER_ASSETS).flatMap(x => x.vehicles))];
+  return { pads, vehs };
+}
+function renderAssets(){
+  const { pads, vehs } = customerAssets(), ae = document.activeElement;
+  if ($("lmPad") !== ae){ $("lmPad").innerHTML = pads.map(p => `<option value="${p.id}">${p.name} (${p.full})</option>`).join(""); $("lmPad").value = L.pad; }
+  const known = vehs.includes(L.vehicle), other = !!L.vehicle && !known;
+  if ($("lmVehSel") !== ae){ $("lmVehSel").innerHTML = vehs.map(v => `<option ${v === L.vehicle ? "selected" : ""}>${hesc(v)}</option>`).join("") + `<option value="__other" ${other ? "selected" : ""}>Other…</option>`; }
+  $("lmVeh").hidden = !other && $("lmVehSel").value !== "__other";
+}
+/* a customer change keeps the pad and vehicle only if that customer uses them */
+function fitAssets(){
+  const A = PROVIDER_ASSETS[L.provider] || PROVIDER_ASSETS.OTHER; let padChanged = false;
+  if (A.pads.length && !A.pads.includes(L.pad)){ L.pad = A.pads[0]; padChanged = true; }
+  if (A.vehicles.length && !A.vehicles.includes(L.vehicle)) L.vehicle = A.vehicles[0];
+  return padChanged;
+}
 function applyProfile(profile, landing){
   L.profile = profile;
   const want = new Set(PROFILE_RISKS[profile] || []);
@@ -870,8 +893,9 @@ function bindLM(){
   $("lmNextMode").addEventListener("change", nextChanged);
   $("lmNextDate").addEventListener("change", () => { $("lmNextMode").value = "date"; nextChanged(); });
   $("lmNextAuto").onclick = () => { L.nextAuto = true; autoNext(); saveL(); renderProductEditor(); renderPreview(); };
-  $("lmProv").onchange = e => { L.provider = e.target.value; applyProfile((PROVIDERS[L.provider] || ["Default"])[0]); saveL(); reconfigure(false); };
-  $("lmProf").onchange = e => { applyProfile(e.target.value); saveL(); reconfigure(false); };
+  $("lmProv").onchange = e => { L.provider = e.target.value; applyProfile((PROVIDERS[L.provider] || ["Default"])[0]); const moved = fitAssets(); saveL(); reconfigure(moved); };
+  $("lmProf").onchange = e => { applyProfile(e.target.value); if (/Starship/.test(e.target.value)) L.vehicle = "Starship"; else if (/Atlas/.test(e.target.value)) L.vehicle = "Atlas V"; else if (/Vulcan/.test(e.target.value)) L.vehicle = "Vulcan"; saveL(); reconfigure(false); };
+  $("lmVehSel").onchange = e => { if (e.target.value === "__other"){ $("lmVeh").hidden = false; $("lmVeh").value = ""; $("lmVeh").focus(); return; } L.vehicle = e.target.value; $("lmVeh").hidden = true; saveL(); renderPreview(); };
   $("lmDisc").addEventListener("input", e => { L.discussion = e.target.value; L.discussionEdited = true; saveL(); renderPreview(); });
   $("lmDiscReset").onclick = () => { L.discussionEdited = false; L.discussion = draftDiscussion(); saveL(); $("lmDisc").value = L.discussion; renderPreview(); };
   $("lmLift").addEventListener("change", e => { const k = e.target.dataset.l; if (!k) return; L.liftoff[k] = e.target.type === "number" ? +e.target.value : e.target.value; reconfigure(false); });
@@ -953,7 +977,7 @@ function bindLM(){
     setTimeout(() => download(new Blob([csvLMEFHourly()], { type:"text/csv;charset=utf-8" }), base() + "_hourly.csv"), 400);
     toast("Downloaded two CSV tables: windows and hourly, joined by forecast_id");
   };
-  $("lmPad").innerHTML = PADS.map(p => `<option value="${p.id}">${p.name} (${p.full})</option>`).join("");
+  renderAssets();
   $("lmConcernList").innerHTML = [...Object.values(CONCERN_NAMES), "None"].map(c => `<option value="${c}">`).join("");
 }
 async function initLM(){

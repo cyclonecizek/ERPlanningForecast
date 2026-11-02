@@ -296,6 +296,18 @@ Dragon, Starship, otherwise Non-Dragon F9/FH; ULA: Atlas or Vulcan) and changeab
 * **Next forecast** is a choice of **As Required** or a date (date picker; printed dd Mon yyyy). It is
   automatic until changed: As Required on L-1 and L-0, otherwise tomorrow. **automatic** puts it back.
 
+## After editing a script
+Run `python3 pipeline/stamp_versions.py` so the pages load the new code (it stamps each script tag with
+the file's hash), then `python3 pipeline/build_standalone.py` to rebuild the offline file (the workflow
+also rebuilds it on push).
+
+## LMEF customers, vehicles and pads
+Choosing a **Provider** (customer) limits the **Vehicle** and **Pad** lists to what that customer flies
+(`PROVIDER_ASSETS` in `docs/lmef-config.js`): SpaceX Falcon 9, Falcon Heavy and Starship from SLC-40,
+LC-39A and SLC-37; ULA Vulcan and Atlas V from SLC-41; NASA SLS from LC-39B; Blue Origin New Glenn from
+LC-36; Range Support and US Navy any pad; Other everything. **Other…** in the vehicle list lets you type
+one. A mission opened from the schedule keeps its own pad and vehicle even if they aren't on the list.
+
 ## LMEF liftoff wind range
 The liftoff wind on the product is at the liftoff constraint height, rounded to the nearest 5 mph, built
 one of three ways (**Wind range on the product** in the setup): **Sustained to peak (window average)**,

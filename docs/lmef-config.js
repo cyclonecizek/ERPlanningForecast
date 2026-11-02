@@ -14,6 +14,17 @@ const PADS = [
   { id:"lc36",  name:"LC-36",  full:"Launch Complex 36",       lat:28.4710, lon:-80.5378, stn:"KXMR", match:/\b36\b/ },
   { id:"slc46", name:"SLC-46", full:"Space Launch Complex 46", lat:28.4585, lon:-80.5284, stn:"KXMR", match:/\b46\b/ },
 ];
+/* what each customer flies and from where: the vehicle and pad lists follow the customer chosen
+   (an empty pad list means any pad, e.g. range support) */
+const PROVIDER_ASSETS = {
+  "SPACEX": { vehicles:["Falcon 9", "Falcon Heavy", "Starship"], pads:["slc40", "lc39a", "slc37"] },
+  "UNITED LAUNCH ALLIANCE (ULA)": { vehicles:["Vulcan", "Atlas V"], pads:["slc41"] },
+  "NASA": { vehicles:["SLS"], pads:["lc39b"] },
+  "BLUE ORIGIN": { vehicles:["New Glenn"], pads:["lc36"] },
+  "RANGE SUPPORT": { vehicles:["Trident II D5", "Atlas V"], pads:[] },
+  "US NAVY": { vehicles:["Trident II D5"], pads:[] },
+  "OTHER": { vehicles:[], pads:[] },
+};
 const LMK = "lmef:v1";
 const RISK = ["Low","Moderate","High"];
 /* vehicle constraint values are entered by the forecaster and kept on this computer only */
