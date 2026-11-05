@@ -320,7 +320,7 @@ the browser with each window's PoV, rule chances and liftoff limit; LMEF databas
 Each finished window is checked against MERLIN cloud-to-ground lightning within 10 nmi of the pad, the tower
 wind at the pad and constraint height against the liftoff limit, and rain at the pad when the mission has a
 flight-through-precipitation constraint. **Your call** (weather violation or not) overrides the automatic
-check, since the cloud rules can't be observed automatically. Scores: PoV Brier score and reliability, and
+check, since the cloud rules can't be observed automatically. Scores: PoV Brier score, a reliability diagram (PoV, lightning-rule and liftoff-wind chances against what was observed, dot size by number of windows, with a count per range) and table, and
 the lightning-rule and liftoff-wind chances against what was observed.
 
 ## LMEF wording, units and database CSV (28 Oct updates)

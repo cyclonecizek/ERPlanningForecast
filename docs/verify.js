@@ -525,6 +525,38 @@ function launchObs(rec, w){
 const winId = (rec, w) => `${rec.id}|${w.i}`;
 function outcomeOf(rec, w, ob){ const c = LM.calls[winId(rec, w)]; return c === "viol" ? 1 : c === "go" ? 0 : ob.auto; }
 function brierRows(pairs){ const v = pairs.filter(([p, o]) => p != null && o != null); if (!v.length) return null; return { n:v.length, bs: v.reduce((s2, [p, o]) => s2 + (p/100 - o)**2, 0)/v.length, mp: v.reduce((s2, [p]) => s2 + p, 0)/v.length, of: v.reduce((s2, [, o]) => s2 + o, 0)/v.length }; }
+/* reliability diagram for launch forecasts: forecast chance against how often it happened, by range,
+   dot size by the number of windows, with the perfect-reliability line and a count of windows per range */
+const LM_BINS = [[0, 10], [10, 30], [30, 50], [50, 70], [70, 101]];
+function lmRelSeries(pairs){
+  return LM_BINS.map(([a, b]) => { const v = pairs.filter(([p, o]) => p != null && o != null && p >= a && p < b);
+    return { a, b, n:v.length, fx: v.length ? v.reduce((s2, [p]) => s2 + p, 0)/v.length : null, of: v.length ? v.reduce((s2, [, o]) => s2 + o, 0)/v.length*100 : null }; });
+}
+function lmRelSVG(series){
+  const W = 520, Hh = 400, L = 46, R = 14, T = 14, B = 118, pw = W - L - R, ph = Hh - T - B;
+  const X = v => L + v/100*pw, Y = v => T + ph - v/100*ph;
+  const maxN = Math.max(1, ...series.flatMap(sr => sr.bins.map(b => b.n)));
+  let g = `<svg viewBox="0 0 ${W} ${Hh}" class="lmrel" role="img" aria-label="Reliability diagram for launch forecasts">`;
+  for (const v of [0, 20, 40, 60, 80, 100]){ g += `<line x1="${X(v)}" y1="${T}" x2="${X(v)}" y2="${T + ph}" class="gr"/><line x1="${L}" y1="${Y(v)}" x2="${L + pw}" y2="${Y(v)}" class="gr"/><text x="${X(v)}" y="${T + ph + 14}" text-anchor="middle" class="tk">${v}</text><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" class="tk">${v}</text>`; }
+  g += `<line x1="${X(0)}" y1="${Y(0)}" x2="${X(100)}" y2="${Y(100)}" class="perfect"/>`;
+  g += `<text x="${L + pw/2}" y="${T + ph + 30}" text-anchor="middle" class="ax">Forecast chance (%)</text><text transform="translate(12 ${T + ph/2}) rotate(-90)" text-anchor="middle" class="ax">Observed frequency (%)</text>`;
+  for (const sr of series){
+    const pts = sr.bins.filter(b => b.n);
+    if (pts.length > 1) g += `<polyline points="${pts.map(b => `${X(b.fx)},${Y(b.of)}`).join(" ")}" fill="none" stroke="${sr.c}" stroke-width="2" opacity=".85"/>`;
+    for (const b of pts) g += `<circle cx="${X(b.fx)}" cy="${Y(b.of)}" r="${4 + 8*Math.sqrt(b.n/maxN)}" fill="${sr.c}" fill-opacity=".75" stroke="#fff" stroke-width="1"><title>${hesc(sr.name)}: ${b.a}–${Math.min(100, b.b)}% · ${b.n} window${b.n === 1 ? "" : "s"} · forecast ${Math.round(b.fx)}% · observed ${Math.round(b.of)}%</title></circle>`;
+  }
+  /* windows per range (sharpness), grouped bars per series */
+  const by = T + ph + 46, bh = 50, bw = pw/LM_BINS.length, nS = series.length;
+  g += `<text x="${L - 6}" y="${by + 10}" text-anchor="end" class="tk">n</text>`;
+  LM_BINS.forEach(([a, b], k) => {
+    series.forEach((sr, j) => { const n = sr.bins[k].n, h = n/maxN*bh, x = L + k*bw + 6 + j*(bw - 12)/nS;
+      g += `<rect x="${x}" y="${by + bh - h}" width="${(bw - 12)/nS - 2}" height="${h}" fill="${sr.c}" opacity=".7"><title>${hesc(sr.name)}: ${n} window${n === 1 ? "" : "s"} forecast ${a}–${Math.min(100, b)}%</title></rect>${n ? `<text x="${x + ((bw - 12)/nS - 2)/2}" y="${by + bh - h - 3}" text-anchor="middle" class="tk">${n}</text>` : ""}`; });
+    g += `<text x="${L + k*bw + bw/2}" y="${by + bh + 14}" text-anchor="middle" class="tk">${a}–${Math.min(100, b)}%</text>`;
+  });
+  g += `</svg>`;
+  const legend = series.map(sr => `<span><i style="background:${sr.c}"></i>${hesc(sr.name)} (${sr.bins.reduce((s2, b) => s2 + b.n, 0)})</span>`).join("");
+  return `<div class="lmrelwrap">${g}<div class="lmleg">${legend}<span><i class="dash"></i>Perfect reliability</span></div></div>`;
+}
 function renderLaunch(){
   const box = $("lmBody"); if (!box) return;
   const days = +(document.querySelector("#vWin [aria-pressed='true']") || {}).dataset?.w || 90, since = Date.now() - days*86400e3;
@@ -539,7 +571,11 @@ function renderLaunch(){
   const fmtW = (a, b) => { const d = new Date(a); return `${d.toISOString().slice(5, 10)} ${d.toISOString().slice(11, 16)}–${new Date(b).toISOString().slice(11, 16)}Z`; };
   box.innerHTML = rows.length ? `
     <div class="lmcards">${card("PoV Brier score", pov, "no finished windows yet")}${card("Lightning rule vs MERLIN CG ≤10 nmi", ltg, "needs MERLIN observations")}${card("Liftoff winds vs tower", wnd, "needs tower observations and a liftoff limit")}</div>
-    <h3>PoV reliability</h3><table class="sc"><thead><tr><th>Forecast PoV</th>${bins.map(b => `<th>${b.a}–${b.b > 100 ? 100 : b.b}%</th>`).join("")}</tr></thead><tbody>
+    <h3>Reliability</h3>${lmRelSVG([
+      { name:"PoV vs weather violation", c:"#1F5F99", bins: lmRelSeries(done.map(x => [x.w.pov, outcomeOf(x.rec, x.w, x.ob)])) },
+      { name:"Lightning rule vs MERLIN", c:"#8A4FA0", bins: lmRelSeries(done.map(x => [x.w.rules && x.w.rules.rl, x.ob.ltV])) },
+      { name:"Liftoff winds vs tower", c:"#C0702A", bins: lmRelSeries(done.map(x => [x.w.rules && x.w.rules.xlw, x.ob.wdV])) }].filter(sr => sr.bins.some(b => b.n) || sr.name.startsWith("PoV")))}
+    <table class="sc"><thead><tr><th>Forecast PoV</th>${bins.map(b => `<th>${b.a}–${b.b > 100 ? 100 : b.b}%</th>`).join("")}</tr></thead><tbody>
       <tr><th>Windows</th>${bins.map(b => `<td>${b.n}</td>`).join("")}</tr><tr><th>Weather violation observed</th>${bins.map(b => `<td>${b.of == null ? "–" : Math.round(b.of*100) + "%"}</td>`).join("")}</tr></tbody></table>
     <h3>Windows</h3><div class="scroll"><table class="sc lmt"><thead><tr><th>Mission</th><th>Pad</th><th>Window</th><th>PoV</th><th>Lightning rule</th><th>Liftoff winds</th><th>CG ≤10 nmi</th><th>Peak tower wind</th><th>Rain</th><th>Automatic</th><th>Your call</th></tr></thead><tbody>
     ${rows.map(({ rec, w, ob }) => { const c = LM.calls[winId(rec, w)] || ""; const yn = v => v == null ? "–" : v ? "violation" : "ok";
