@@ -90,6 +90,7 @@ const PARAMS = [
   { k:"pp1",  g:"Precip prob (%)",  l:"1 hr",  s:"", kind:"prob", win:1, ev:"pop", title:"Precipitation, 1 hour" },
   { k:"pp3",  g:"Precip prob (%)",  l:"3 hr",  s:"", kind:"prob", win:3, ev:"pop", title:"Precipitation, 3 hours" },
   { k:"pp6",  g:"Precip prob (%)",  l:"6 hr",  s:"", kind:"prob", win:6, ev:"pop", title:"Precipitation, 6 hours" },
+  { k:"qpf",  g:"Rainfall (in)",    l:"QPF",   s:"amount", kind:"num", unit:"in", step:0.01, lo:0, title:"Rainfall amount over the row (QPF)" },
   { k:"lt1",  g:"Lightning prob (%)", l:"1 hr", s:"", kind:"prob", win:1, ev:"tst", title:"Lightning, 1 hour" },
   { k:"lt3",  g:"Lightning prob (%)", l:"3 hr", s:"", kind:"prob", win:3, ev:"tst", title:"Lightning, 3 hours" },
   { k:"lt6",  g:"Lightning prob (%)", l:"6 hr", s:"", kind:"prob", win:6, ev:"tst", title:"Lightning, 6 hours" },
@@ -107,6 +108,7 @@ const PARAMS = [
   { k:"x32",  g:"Probability of exceeding, sfc to 200 ft (%)", l:"<32°F",  s:"",     kind:"prob", ex:"tmin", dep:["t"], op:"<", v:32, title:"Temperature below 32°F" },
   { k:"xvis", g:"Probability of exceeding, sfc to 200 ft (%)", l:"Vis <3 mi", s:"", kind:"prob", ex:"vmin", op:"<", v:4828, title:"Visibility below 3 miles" },
   { k:"sev",  g:"Severe potential", l:"Damaging wind, hail, tornado", s:"", kind:"sev", title:"Severe thunderstorm potential" },
+  { k:"ero",  g:"Excessive rainfall", l:"WPC outlook", s:"", kind:"sev", title:"WPC Excessive Rainfall Outlook (chance rain exceeds flash flood guidance within 25 mi)" },
 ];
 const P = Object.fromEntries(PARAMS.map(p => [p.k, p]));
 PARAMS.forEach(p => { if (p.kind === "prob") { p.unit = "%"; p.step = 1; p.lo = 0; p.hi = 100; } });
@@ -588,6 +590,35 @@ async function fetchPipeline(TL){
 }
 
 /* SPC Day 1-3 categorical outlook (point in polygon). Optional; fails quietly. */
+/* WPC Excessive Rainfall Outlook, Days 1-5 (NWS map service; mirrored by the MOS workflow) */
+const ERO_URL = d => `https://mapservices.weather.noaa.gov/vector/rest/services/hazards/wpc_precip_hazards/MapServer/${d - 1}/query?where=1%3D1&outFields=dn,outlook,start_time,end_time,issue_time&returnGeometry=true&outSR=4326&f=geojson`;
+function eroTime(s){
+  s = String(s || "").trim(); if (!s) return null;
+  let m = s.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):?(\d{2})/); if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):?(\d{2})/); if (m) return Date.UTC(+m[3], +m[1] - 1, +m[2], +m[4], +m[5]);
+  m = s.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})?/); if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +(m[5] || 0));
+  return null;
+}
+async function fetchERO(){
+  const out = [], CAT = { 1:"MRGL", 2:"SLGT", 3:"MDT", 4:"HIGH" };
+  /* each outlook day runs 12Z to 12Z; used when a feature carries no readable times */
+  const n = new Date(), d12 = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), 12) - (n.getUTCHours() < 12 ? 24*H : 0);
+  for (const d of [1, 2, 3, 4, 5]){
+    try {
+      let js = null;
+      try { js = await getJSON(`${DATA_BASE}data/mos/wpc_ero_day${d}.json?ts=${Date.now()}`, 8000); } catch (e) { js = null; }
+      if (!js || !js.features) js = await getJSON(ERO_URL(d), 15000);
+      for (const f of js.features || []){
+        const pr = f.properties || {}; let cat = CAT[pr.dn];
+        if (!cat){ const t = String(pr.outlook || "").toUpperCase(); cat = /HIGH/.test(t) ? "HIGH" : /MODERATE/.test(t) ? "MDT" : /SLIGHT/.test(t) ? "SLGT" : /MARGINAL/.test(t) ? "MRGL" : null; }
+        if (!cat || !f.geometry) continue;
+        const a = eroTime(pr.start_time) ?? d12 + (d - 1)*24*H, b = eroTime(pr.end_time) ?? a + 24*H;
+        out.push({ cat, a, b: b > a ? b : a + 24*H, geom: f.geometry, day:d });
+      }
+    } catch (e) { /* not reachable from this browser */ }
+  }
+  return out;
+}
 async function fetchSPC(){
   const out = [];
   for (const d of [1,2,3]){
@@ -636,6 +667,8 @@ function blockOf(m, row, TL){
   o.du = nn ? u/nn : null; o.dv = nn ? v/nn : null;
   const mx = ks => { const v = ks.map(k => o[k]).filter(x => x != null); return v.length ? Math.max(...v) : null; };
   o.smax = mx(HEIGHTS.map(f => "s" + f)); o.gmax = mx(HEIGHTS.map(f => "g" + f));
+  /* rainfall: the total over the row */
+  if (m.pr){ let s2 = 0, n2 = 0; for (const i of rng){ const v = m.pr[i]; if (v == null) continue; s2 += v; n2++; } o.qpf = n2 ? s2 : null; }
   if (RHROW){
     /* RH like temperature; waves: highest in a block, period and water temperature averaged, direction from the first hour */
     const how = { rh:"min", wvh:"max", swh:"max", wvp:"mean", sst:"mean" };
@@ -693,7 +726,7 @@ function intervalProb(list, A, B){
 }
 
 class SiteGuidance {
-  constructor(site, TL, rows){ this.site = site; this.TL = TL; this.rows = rows; this.src = []; this.sev = []; }
+  constructor(site, TL, rows){ this.site = site; this.TL = TL; this.rows = rows; this.src = []; this.sev = []; this.ero = []; }
   addSource(def, members, extra){
     const s = { def, members, iv: extra && extra.iv, run: extra && extra.run, blocks: members.map(m => this.rows.map(r => blockOf(m, r, this.TL))), win: new Map() };
     this.src.push(s); return s;
@@ -752,7 +785,7 @@ function aggregate(G, prefs){
   const share = (s, k, ri) => NBM_FAMILY.has(s.def.id) && !/^lt|tst/.test(k) ? 1/Math.max(1, famN(ri)) : 1;
   const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now())*share(s, k, ri);
   const val = {}, srcv = {}, band = {}, mem = {};
-  const scal = ["t","td","wbgt","sky", ...hkeys(), ...(FIRE ? FIRE_KEYS : []), ...(PERS ? ["rh", ...MARINE_KEYS] : RHROW ? ["rh"] : [])];
+  const scal = ["t","td","wbgt","sky","qpf", ...hkeys(), ...(FIRE ? FIRE_KEYS : []), ...(PERS ? ["rh", ...MARINE_KEYS] : RHROW ? ["rh"] : [])];
   for (const k of [...scal, "dir", ...(FIRE ? ["tdir"] : [])]){ val[k] = []; srcv[k] = {}; band[k] = []; }
   for (const k of new Set(["tmax","tmin","smax","gmax","vmin", ...PARAMS.filter(p => p.ex).map(p => p.ex)])) mem[k] = [];
   rows.forEach((r, ri) => {
@@ -820,6 +853,12 @@ function aggregate(G, prefs){
   val.sev = rows.map(r => {
     let best = "-";
     for (const o of G.sev){ if (r.a < o.b && r.b > o.a && inGeom(G.site.lon, G.site.lat, o.geom) && SEV.indexOf(o.cat) > SEV.indexOf(best)) best = o.cat; }
+    return best;
+  });
+  /* excessive rainfall: WPC outlook */
+  val.ero = rows.map(r => {
+    let best = "-";
+    for (const o of (G.ero || [])){ if (r.a < o.b && r.b > o.a && inGeom(G.site.lon, G.site.lat, o.geom) && SEV.indexOf(o.cat) > SEV.indexOf(best)) best = o.cat; }
     return best;
   });
   return { val, srcv, band };

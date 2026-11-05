@@ -223,6 +223,20 @@ function derive(i){
     wind: lo == null || dirW == null ? "" : windText(dirW, lo, hi), windKt: lo == null ? null : { dir: Math.round(dirW/10)*10 || 360, lo: Math.round(lo/KT2MPH), hi: Math.round(hi/KT2MPH) }, fallback, clouds, risk, why, ranks,
   };
 }
+/* a private verification copy of each exported LMEF (this browser only), for the Verification tab */
+function keepLMEFForVerify(){
+  try {
+    const pad = PADS.find(p => p.id === L.pad) || PADS[2], iss = L.issued || Date.now(), lim = L.liftoff || {};
+    const rec = { id:`${L.mission || "Mission"}|${iss}`, mission:L.mission || "", vehicle:L.vehicle || "", provider:L.provider || "", pad:{ id:pad.id, name:pad.name, lat:pad.lat, lon:pad.lon },
+      issued:iss, by:(prefs.initials || "").toUpperCase(), liftoff:{ h:lim.h || 200, kind:lim.kind || "peak", op:lim.op || ">", v:lim.v, unit:lim.unit || "kt" }, ftp:!!L.ftp,
+      windows:(L.windows || []).map((w, i) => { const D = dayData(i), d = derive(i) || {}; return { i, a:w.a, b:w.b, pov: D.trend && D.povB != null ? D.povB : D.pov, concerns:D.concerns || "",
+        rules:Object.fromEntries((d.ranks || []).map(([k, v]) => [k, Math.round(v)])) }; }) };
+    const q = indexedDB.open("erwx-verify", 1);
+    q.onupgradeneeded = () => q.result.createObjectStore("official");
+    q.onsuccess = () => { const os = q.result.transaction("official", "readwrite").objectStore("official"), g = os.get("lmef");
+      g.onsuccess = () => { const arr = (g.result || []).filter(x => x.id !== rec.id && Date.now() - x.issued < 400*86400e3); arr.push(rec); os.put(arr, "lmef"); }; };
+  } catch (e) { /* storage unavailable */ }
+}
 /* the liftoff wind in the customer's unit (the range is built in mph, rounded to 5) */
 function windText(dir, loMph, hiMph){
   const u = windUnitLSP(), cv = v => u === "mph" ? v : u === "ft/s" ? Math.round(v*1.466667/5)*5 : Math.round(v/KT2MPH/5)*5;
@@ -1016,7 +1030,7 @@ function bindLM(){
   $("lmSchClear").onclick = () => { if (!confirm("Remove the official launches stored on this computer?")) return; saveSched(loadSched().filter(x => x.type !== "launch")); renderMissions(); };
   $("lmPdfFmt").value = L.pdfFmt || "legacy";
   $("lmPdfFmt").onchange = e => { L.pdfFmt = e.target.value; saveL(); showSealRow(); renderPreview(); };
-  $("lmPdf").onclick = async () => { const logo = await loadLogo(); download((L.pdfFmt || "legacy") === "legacy" ? pdfLMEFLegacy(logo, await loadSeal()) : pdfLMEF(logo), base() + ".pdf"); };
+  $("lmPdf").onclick = async () => { keepLMEFForVerify(); const logo = await loadLogo(); download((L.pdfFmt || "legacy") === "legacy" ? pdfLMEFLegacy(logo, await loadSeal()) : pdfLMEF(logo), base() + ".pdf"); };
   const showSealRow = () => { $("lmSealRow").hidden = (L.pdfFmt || "legacy") !== "legacy"; const has = !!localStorage.getItem("lmef:seal"); $("lmSealState").textContent = has ? "your image" : "Space Force seal"; $("lmSealClear").hidden = !has; renderPreview(); };
   $("lmSeal").onchange = async e => {
     const f = e.target.files[0]; e.target.value = ""; if (!f) return;
@@ -1027,9 +1041,9 @@ function bindLM(){
   };
   $("lmSealClear").onclick = () => { localStorage.removeItem("lmef:seal"); showSealRow(); };
   showSealRow();
-  $("lmHtml").onclick = async () => download(new Blob([htmlLMEF(await loadLogo())], { type:"text/html" }), base() + ".html");
-  $("lmXlsx").onclick = async () => download(xlsxLMEF(await loadLogo()), base() + ".xlsx");
-  $("lmCsv").onclick = () => { download(new Blob([csvLMEFdb()], { type:"text/csv;charset=utf-8" }), base() + "_database.csv"); toast("Downloaded the database CSV, one row per window"); };
+  $("lmHtml").onclick = async () => keepLMEFForVerify() || download(new Blob([htmlLMEF(await loadLogo())], { type:"text/html" }), base() + ".html");
+  $("lmXlsx").onclick = async () => keepLMEFForVerify() || download(xlsxLMEF(await loadLogo()), base() + ".xlsx");
+  $("lmCsv").onclick = () => { keepLMEFForVerify(); download(new Blob([csvLMEFdb()], { type:"text/csv;charset=utf-8" }), base() + "_database.csv"); toast("Downloaded the database CSV, one row per window"); };
   renderAssets();
   $("lmConcernList").innerHTML = [...Object.values(CONCERN_NAMES), "None"].map(c => `<option value="${c}">`).join("");
 }

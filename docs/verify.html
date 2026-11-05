@@ -314,6 +314,12 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   .locator{ display:none; }
 }
 @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+body:not([data-vmode="launch"]) .lmmode{ display:none; }
+body[data-vmode="launch"] .planmode,body[data-vmode="launch"] .exmode,body[data-vmode="launch"] #vPoint,body[data-vmode="launch"] #vBand,body[data-vmode="launch"] label:has(#vPoint),body[data-vmode="launch"] label:has(#vBand),body[data-vmode="launch"] #vCsv{ display:none; }
+.lmcards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin:4px 0 12px; } .lmc{ border:1px solid var(--rule); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
+.lmc b{ font:700 24px var(--cond); } .lmc span{ font-weight:600; font-size:13px; } .lmc small{ color:var(--ink-3); font-size:12px; }
+.lmt td small{ display:block; color:var(--ink-3); font-size:11.5px; } .lmt td.bad{ color:#B4231A; font-weight:700; } .lmt td.good{ color:#2F7A4A; font-weight:600; } .lmt select{ border:1px solid var(--rule); border-radius:6px; padding:3px 5px; background:var(--panel); color:var(--ink); }
+.lmmode h3{ font:700 15px var(--cond); margin:14px 0 6px; } .fileb{ position:relative; overflow:hidden; cursor:pointer; } .fileb input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 body:not([data-vmode="exposure"]) .exmode{ display:none; }
 body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[data-vmode="exposure"] #vBand,body[data-vmode="exposure"] label:has(#vPoint),body[data-vmode="exposure"] label:has(#vBand),body[data-vmode="exposure"] #vCsv{ display:none; }
 .exmode .vgrid{ margin-top:4px; } .exmode h3{ font:700 15px var(--cond); margin:14px 0 6px; }
@@ -392,7 +398,7 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
 <div class="statusline"><span class="live" id="vStatus">Loading</span><span class="sp"></span><button class="btn" id="vRefresh" style="padding:4px 10px;font-size:13px">Refresh</button></div>
 <main class="vmain">
   <div class="vtop">
-    <span class="seg" id="vMode" role="group" aria-label="Forecast type"><button type="button" data-m="planning">Planning forecasts</button><button type="button" data-m="exposure">Exposure forecasts</button></span>
+    <span class="seg" id="vMode" role="group" aria-label="Forecast type"><button type="button" data-m="planning">Planning forecasts</button><button type="button" data-m="exposure">Exposure forecasts</button><button type="button" data-m="launch">Launch forecasts</button></span>
     <span class="seg" id="vWin" role="group" aria-label="Window"><button type="button" data-w="7">7 days</button><button type="button" data-w="30">30 days</button><button type="button" data-w="90">90 days</button></span>
     <label>Point <select id="vPoint"></select></label>
     <label>Lead time <select id="vBand"></select></label>
@@ -404,6 +410,9 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
       <p class="sub">Forecasts published from this computer are added here automatically, with the guidance beside them. To add others, load the CSVs the exposure page published. They're scored against the WINDS towers and kept only on this computer, so operation names and constraint values are never uploaded.</p>
       <div class="drop" id="exDrop"><b>Drop exposure CSV files here</b><span class="mut">or</span><span class="btn fileb">Choose files<input type="file" id="exFiles" accept=".csv" multiple></span><button class="btn" id="exFolder" type="button">Read a folder…</button><button class="btn ghost" id="exClear" type="button">Clear stored forecasts</button><span class="mut" id="exNote"></span></div>
     </section>
+  </div>
+  <div class="lmmode">
+    <section class="vpanel"><h2>Launch forecasts (LMEF) <span class="sp"></span><label class="btn fileb">Load LMEF database CSV<input type="file" id="lmLoad" accept=".csv,text/csv" multiple></label></h2><div id="lmBody"></div></section>
   </div>
   <div class="vgrid planmode">
     <section class="vpanel">
@@ -423,7 +432,7 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=6cd68893f4"></script>
-<script src="verify.js?v=4aadfc9328"></script>
+<script src="guidance.js?v=102f19cbd7"></script>
+<script src="verify.js?v=2d5c77d443"></script>
 </body>
 </html>

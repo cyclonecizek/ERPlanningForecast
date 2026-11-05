@@ -306,6 +306,23 @@ Run `python3 pipeline/stamp_versions.py` so the pages load the new code (it stam
 the file's hash), then `python3 pipeline/build_standalone.py` to rebuild the offline file (the workflow
 also rebuilds it on push).
 
+## Rainfall amount and WPC Excessive Rainfall Outlook (planning)
+* **QPF** (Rainfall, in): the forecast rain total over each row (hourly, 3- or 6-hour), blended from the
+  models' hourly precipitation like the other rows; editable, in the products and the CSV (`qpf_in`).
+* **WPC Excessive Rainfall Outlook**, Days 1-5, as a category row like SPC (Marginal, Slight, Moderate,
+  High: the chance rain exceeds flash flood guidance within 25 mi). The MOS workflow mirrors it from the NWS
+  map service (`docs/data/mos/wpc_ero_dayN.json`); the page falls back to the service directly. It is in the
+  products, the CSV (`wpc_ero`) and the leadership brief.
+
+## Verification: launch forecasts (LMEF)
+**Launch forecasts** on the Verification tab. Every LMEF exported (PDF, HTML, Excel or CSV) keeps a copy in
+the browser with each window's PoV, rule chances and liftoff limit; LMEF database CSVs can be loaded too.
+Each finished window is checked against MERLIN cloud-to-ground lightning within 10 nmi of the pad, the tower
+wind at the pad and constraint height against the liftoff limit, and rain at the pad when the mission has a
+flight-through-precipitation constraint. **Your call** (weather violation or not) overrides the automatic
+check, since the cloud rules can't be observed automatically. Scores: PoV Brier score and reliability, and
+the lightning-rule and liftoff-wind chances against what was observed.
+
 ## LMEF wording, units and database CSV (28 Oct updates)
 * **No upper-level wind shear** criterion for any customer; ULA defaults to Solar Activity only.
 * **Up to three cloud layers** on every product and in the editor (all three go into the database CSV).

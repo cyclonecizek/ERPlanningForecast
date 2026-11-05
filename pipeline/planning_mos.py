@@ -21,6 +21,9 @@ STATIONS = ["KTTS", "KXMR", "KCOF"]           # SLF / LC-39B, KXMR / SLC-37, Pat
 MODELS = ["LAV", "GFS", "NAM", "GFSX", "NBS", "NBE"]
 IEM = "https://mesonet.agron.iastate.edu/api/1/mos.json?{st}&model={model}"
 SPC = "https://www.spc.noaa.gov/products/outlook/day{d}otlk_cat.nolyr.geojson"
+# WPC Excessive Rainfall Outlook, Days 1-5 (NWS map service, GeoJSON in lat/lon)
+ERO = ("https://mapservices.weather.noaa.gov/vector/rest/services/hazards/wpc_precip_hazards/MapServer/{layer}/query"
+       "?where=1%3D1&outFields=dn,outlook,start_time,end_time,issue_time&returnGeometry=true&outSR=4326&f=geojson")
 LL2 = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?location__ids=12,27&limit=15"
 LL2_ALL = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40"
 KP = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json"
@@ -150,6 +153,14 @@ def main():
                 print(f"SPC day {d}: {len(js['features'])} features")
         except Exception as e:  # noqa: BLE001
             print(f"SPC day {d}: failed ({e}), keeping previous file")
+    for d in range(1, 6):
+        try:
+            js = get(ERO.format(layer=d - 1))
+            if isinstance(js, dict) and "features" in js:
+                write(f"wpc_ero_day{d}.json", js)
+                print(f"WPC ERO day {d}: {len(js['features'])} features")
+        except Exception as e:  # noqa: BLE001
+            print(f"WPC ERO day {d}: failed ({e}), keeping previous file")
     # upcoming Space Coast launches (Launch Library 2) and the planetary K-index forecast (SWPC)
     for name, url in (("launches.json", LL2), ("kp.json", KP), ("protons.json", PROTONS)):
         try:

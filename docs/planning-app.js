@@ -276,6 +276,8 @@ function guidanceFor(sid){
       if (p.kind === "prob") return v == null ? null : probRound(clampP(v));
       if (p.kind === "dir") return v == null ? null : (Math.round(v/10)*10) % 360;
       if (p.kind === "sev") return v || "-";
+      /* amounts keep two decimals (a trace under 0.005 in shows as 0) */
+      if (p.unit === "in") return v == null ? null : Math.round(v*100)/100;
       return rnd(v);
     });
   }
@@ -2192,7 +2194,7 @@ function siteSheet(s, OFs, issued, by){
 }
 function csvFor(list, issued, by, internal){
   if (EXPO) return csvGeneric(list, issued, by, internal);
-  const head = ["site","point","valid_start_utc","valid_end_utc","valid_start_local","period_h","sky","sky_pct","temp_f","dewpoint_f","wbgt_f","pop_1h_pct","pop_3h_pct","pop_6h_pct","ltg_1h_pct","ltg_3h_pct","ltg_6h_pct","wind54_sust_kt","wind54_peak_kt","wind200_sust_kt","wind200_peak_kt","wind_dir_deg","wind_dir","p_sust_gt18kt_pct","p_peak_gt25kt_pct","p_peak_gt35kt_pct","p_peak_gt50kt_pct","p_temp_gt_hot_pct","hot_threshold_f","p_temp_lt40f_pct","p_temp_lt32f_pct","p_vis_lt3mi_pct","severe","issued_utc","forecaster"];
+  const head = ["site","point","valid_start_utc","valid_end_utc","valid_start_local","period_h","sky","sky_pct","temp_f","dewpoint_f","wbgt_f","pop_1h_pct","pop_3h_pct","pop_6h_pct","qpf_in","ltg_1h_pct","ltg_3h_pct","ltg_6h_pct","wind54_sust_kt","wind54_peak_kt","wind200_sust_kt","wind200_peak_kt","wind_dir_deg","wind_dir","p_sust_gt18kt_pct","p_peak_gt25kt_pct","p_peak_gt35kt_pct","p_peak_gt50kt_pct","p_temp_gt_hot_pct","hot_threshold_f","p_temp_lt40f_pct","p_temp_lt32f_pct","p_vis_lt3mi_pct","severe","wpc_ero","issued_utc","forecaster"];
   const q = v => { if (v === undefined || v === null) return ""; const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [head.join(",")];
   for (const [s, OFs] of list){
@@ -2200,7 +2202,7 @@ function csvFor(list, issued, by, internal){
     S.rows.forEach((r, i) => {
       const p = lp(r.a), loc = `${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:00`;
       const n = k => o[k][i] == null ? "" : Math.round(o[k][i]);
-      lines.push([s.name, s.point, new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, o.sky[i] == null ? "" : skyCat(o.sky[i]), n("sky"), n("t"), n("td"), n("wbgt"), n("pp1"), n("pp3"), n("pp6"), n("lt1"), n("lt3"), n("lt6"), n("s54"), n("g54"), n("s200"), n("g200"), n("dir"), o.dir[i] == null ? "" : compass(o.dir[i]), n("x18"), n("x25"), n("x35"), n("x50"), n("xhot"), hotOf(s), n("x40"), n("x32"), n("xvis"), o.sev[i] || "-", new Date(issued).toISOString().slice(0,16) + "Z", by].map(q).join(","));
+      lines.push([s.name, s.point, new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, o.sky[i] == null ? "" : skyCat(o.sky[i]), n("sky"), n("t"), n("td"), n("wbgt"), n("pp1"), n("pp3"), n("pp6"), o.qpf && o.qpf[i] != null ? (+o.qpf[i]).toFixed(2) : "", n("lt1"), n("lt3"), n("lt6"), n("s54"), n("g54"), n("s200"), n("g200"), n("dir"), o.dir[i] == null ? "" : compass(o.dir[i]), n("x18"), n("x25"), n("x35"), n("x50"), n("xhot"), hotOf(s), n("x40"), n("x32"), n("xvis"), o.sev[i] || "-", o.ero ? (o.ero[i] || "-") : "", new Date(issued).toISOString().slice(0,16) + "Z", by].map(q).join(","));
     });
   }
   return lines.join("\r\n") + "\r\n";
@@ -2315,7 +2317,7 @@ function reportModel(list, issued, by){
             const txt = v === undefined ? "–" : p.kind === "sev" ? (v === "-" ? "-" : v) : fmt(p, v);
             cells.push({ text: txt, span:n, fill: v === undefined ? null : tintRGB(p, v), muted: v === undefined, day: times[ci].day });
           });
-          g.rows.push({ label: p.kind === "sev" ? "SPC category" : colLabel(p, s), sub: p.s, cells });
+          g.rows.push({ label: p.kind === "sev" ? (p.k === "ero" ? "WPC excessive rain" : "SPC category") : colLabel(p, s), sub: p.s, cells });
         }
         return { dayHdr, times, groups };
       }),
@@ -2399,7 +2401,7 @@ function interactiveReport(list, issued, by, logo){
       id:st.id, name: EXPO ? st.point : st.name, point:st.point, lat:st.lat, lon:st.lon,
       params: PARAMS.map(p => {
         const spm = spanMap(p.k);
-        return { k:p.k, label: p.kind === "sev" ? "SPC category" : colLabel(p, st), sub:p.s || "", group:p.g, kind:p.kind, wind:isWind(p), unit:p.unit || "", thr:p.thr || [], cons:!!p.cons, limit: p.cons ? p.v : null,
+        return { k:p.k, label: p.kind === "sev" ? (p.k === "ero" ? "WPC excessive rain" : "SPC category") : colLabel(p, st), sub:p.s || "", group:p.g, kind:p.kind, wind:isWind(p), unit:p.unit || "", thr:p.thr || [], cons:!!p.cons, limit: p.cons ? p.v : null,
           cells: rows.map((r, i) => {
             const sp = spm[i]; if (sp.cov) return 0;
             const v = OFs.o[p.k][i];
@@ -2713,10 +2715,12 @@ const HAZ = [
   { id:"frz",  label:"Freeze <32°F",       keys:["x32"], mod:10, high:30 },
   { id:"fog",  label:"Fog / vis <3 mi",    keys:["xvis"], mod:20, high:50 },
   { id:"svr",  label:"Severe storms (SPC)", keys:["sev"] },
+  { id:"ero",  label:"Excessive rain (WPC)", keys:["ero"] },
 ];
 const LV = ["Low","Moderate","High"];
 const LVC = { 0:[47,122,74], 1:[214,152,32], 2:[178,58,46] };
-const levelOf = (h, v) => h.id === "svr" ? (v >= 2 ? 2 : v >= 1 ? 1 : 0) : v >= h.high ? 2 : v >= h.mod ? 1 : 0;
+const isCatH = h => h && (h.id === "svr" || h.id === "ero");
+const levelOf = (h, v) => isCatH(h) ? (v >= 2 ? 2 : v >= 1 ? 1 : 0) : v >= h.high ? 2 : v >= h.mod ? 1 : 0;
 const BRIEF_SITES = () => SITES.map(s => s.id);
 /* every number in the brief comes from the official forecast (guidance plus forecaster edits) */
 function briefData(){
@@ -2726,18 +2730,18 @@ function briefData(){
     d.label = (() => { const L = dayLabel(d.a, z); return { wd: L.wd.slice(0, 3), dt: L.dt }; })();
     d.haz = {};
     for (const h of HAZ){
-      let mx = h.id === "svr" ? 0 : null, hits = [];
+      let mx = isCatH(h) ? 0 : null, hits = [];
       for (const [s, OFs] of sites){
         for (const i of d.rows){
           for (const k of h.keys){
             let v = OFs.o[k] ? OFs.o[k][i] : undefined; if (v === undefined || v === null) continue;
-            if (h.id === "svr") v = v === "-" ? 0 : v === "MRGL" ? 1 : 2;
+            if (isCatH(h)) v = v === "-" ? 0 : v === "MRGL" ? 1 : 2;
             if (mx == null || v > mx) mx = v;
             if (levelOf(h, v) >= 1) hits.push({ s, i, v });
           }
         }
       }
-      d.haz[h.id] = { v: mx, lv: mx == null ? 0 : levelOf(h, mx), hits, sevTxt: h.id === "svr" ? (mx >= 2 ? "Slight or higher" : mx >= 1 ? "Marginal" : "None") : null };
+      d.haz[h.id] = { v: mx, lv: mx == null ? 0 : levelOf(h, mx), hits, sevTxt: isCatH(h) ? (mx >= 2 ? "Slight or higher" : mx >= 1 ? "Marginal" : "None") : null };
     }
     /* daily summary */
     let hi = null, lo = null, gust = null, skyN = {};
@@ -2757,7 +2761,7 @@ function briefData(){
   return { days, shown, quiet, sites };
 }
 /* concern sentences, most serious first; consecutive days with the same hazard are combined */
-const HPRI = ["svr","ltg","g35","g25","frz","heat","fog","s18","cold","rain"];
+const HPRI = ["svr","ero","ltg","g35","g25","frz","heat","fog","s18","cold","rain"];
 const HNOUN = { ltg:"lightning", rain:"rain", s18:"sustained winds over 18 kt", g25:"peak winds over 25 kt", g35:"peak winds over 35 kt", heat:"heat", cold:"cold below 40°F", frz:"freezing temperatures", fog:"fog or low visibility", svr:"severe storms" };
 function hazRuns(D, id){
   const runs = []; let cur = null;
@@ -2791,7 +2795,7 @@ function wherePhrase(D, hits){
 function briefConcerns(D){
   const out = [];
   for (const h of D.shown) for (const r of hazRuns(D, h.id)){
-    const what = h.id === "svr" ? `SPC ${r.lv >= 2 ? "slight or higher" : "marginal"} risk of severe storms` : `${HNOUN[h.id]}, chance up to ${Math.round(r.v)}%`;
+    const what = h.id === "ero" ? `WPC ${r.lv >= 2 ? "slight or higher" : "marginal"} risk of excessive rainfall` : h.id === "svr" ? `SPC ${r.lv >= 2 ? "slight or higher" : "marginal"} risk of severe storms` : `${HNOUN[h.id]}, chance up to ${Math.round(r.v)}%`;
     out.push({ lv:r.lv, pri:HPRI.indexOf(h.id), a:r.days[0].a, txt:`${r.lab}: ${what} at ${wherePhrase(D, r.hits)}, ${whenPhrase(r)}.` });
   }
   out.sort((x, y) => y.lv - x.lv || x.pri - y.pri || x.a - y.a);
@@ -2827,7 +2831,7 @@ function renderBrief(regen){
 }
 function briefHTMLBody(D, logo){
   const issued = Date.now(), z = zulu(), tz = z ? "UTC" : tzAbbr(issued), by = (prefs.initials || "").toUpperCase();
-  const cell = (h, hz) => { const c = LVC[hz.lv]; const txt = h.id === "svr" ? (hz.sevTxt === "None" ? "–" : hz.sevTxt.replace(" or higher", "+")) : hz.v == null ? "–" : `${Math.round(hz.v)}%`; return `<td style="background:rgba(${c.join(",")},${hz.lv ? 0.85 : 0.16});color:${hz.lv ? "#fff" : "#2F5A3C"}">${txt}</td>`; };
+  const cell = (h, hz) => { const c = LVC[hz.lv]; const txt = isCatH(h) ? (hz.sevTxt === "None" ? "–" : hz.sevTxt.replace(" or higher", "+")) : hz.v == null ? "–" : `${Math.round(hz.v)}%`; return `<td style="background:rgba(${c.join(",")},${hz.lv ? 0.85 : 0.16});color:${hz.lv ? "#fff" : "#2F5A3C"}">${txt}</td>`; };
   const r0 = S.rows[0], r1 = S.rows[S.rows.length - 1];
   let h = `<div class="bq-head">${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="${LOGO_SRC}" alt="45th Weather Squadron" onerror="this.remove()">`}<div><h1>Leadership Quick Look</h1><p>KSC, Cape Canaveral SFS and Patrick SFB. Issued ${dayLabel(issued, z).dt} ${hhmm(issued, z)} ${tz}${by ? " by " + hesc(by) : ""}. Valid ${dayLabel(r0.a, z).dt} ${hhmm(r0.a, z)} to ${dayLabel(r1.b, z).dt} ${hhmm(r1.b, z)} ${tz}.</p></div></div>`;
   h += `<div class="bq-bl"><b>Bottom line</b>${hesc(BRIEF.bottom || "")}</div>`;
@@ -2856,7 +2860,7 @@ function briefText(){
   const D = BRIEF.D, z = zulu();
   const lines = ["LEADERSHIP QUICK LOOK: KSC, CCSFS, PATRICK SFB", `Issued ${dayLabel(Date.now(), z).dt} ${hhmm(Date.now(), z)}${z ? "Z" : " " + tzAbbr(Date.now())}`, "", "BOTTOM LINE: " + BRIEF.bottom, ""];
   for (const d of D.days){
-    const risks = D.shown.filter(h => d.haz[h.id].lv >= 1).map(h => `${h.label} ${h.id === "svr" ? d.haz[h.id].sevTxt : Math.round(d.haz[h.id].v) + "%"} (${LV[d.haz[h.id].lv].toLowerCase()})`);
+    const risks = D.shown.filter(h => d.haz[h.id].lv >= 1).map(h => `${h.label} ${isCatH(h) ? d.haz[h.id].sevTxt : Math.round(d.haz[h.id].v) + "%"} (${LV[d.haz[h.id].lv].toLowerCase()})`);
     const sc = briefCfg().sum, bits = [sc.sky ? d.sum.sky : "", sc.hilo && d.sum.hi != null ? `${Math.round(d.sum.hi)}/${Math.round(d.sum.lo)}°F` : "", sc.gust && d.sum.gust != null ? `gusts to ${Math.round(d.sum.gust)} kt` : ""].filter(Boolean);
     lines.push(`${d.label.wd} ${d.label.dt}: ${bits.length ? bits.join(", ") + ". " : ""}${risks.length ? "Concerns: " + risks.join("; ") + "." : "No concerns."}`);
   }
@@ -2893,7 +2897,7 @@ function briefPDF(logo){
       const x = M + labW + j*cw + gap/2, v = hz.id === "none" ? { lv:0, v:null } : d.haz[hz.id];
       const c = LVC[v.lv], fill = v.lv ? c : [230,240,233];
       rect(x, y + 1, cw - gap, rh - gap, fill);
-      const txt = hz.id === "none" ? "Low" : hz.id === "svr" ? (v.sevTxt === "None" ? "-" : v.sevTxt.replace(" or higher", "+")) : v.v == null ? "-" : `${Math.round(v.v)}%`;
+      const txt = hz.id === "none" ? "Low" : isCatH(hz) ? (v.sevTxt === "None" ? "-" : v.sevTxt.replace(" or higher", "+")) : v.v == null ? "-" : `${Math.round(v.v)}%`;
       text(txt, x + (cw - gap)/2, y + 14, 9.5, { bold:true, align:"c", color: v.lv ? [255,255,255] : [47,90,60] });
     });
     y += rh;
@@ -2964,7 +2968,7 @@ function addSrc(sid, d, members, extra){ (S.raw[sid] = S.raw[sid] || []).push([d
 function rebuildGuidance(){
   S.rows = rowsNow(); S.spanCache = {}; CH.layout = null;
   for (const s of SITES){
-    const old = S.G[s.id], G = new SiteGuidance(s, S.TL, S.rows); G.sev = old ? old.sev : [];
+    const old = S.G[s.id], G = new SiteGuidance(s, S.TL, S.rows); G.sev = old ? old.sev : []; G.ero = old ? old.ero : [];
     for (const [d, members, extra] of (S.raw[s.id] || [])){ members.forEach(m => deriveHeights(m, S.TL.n)); G.addSource(d, members, extra); }
     S.G[s.id] = G;
   }
@@ -3017,6 +3021,7 @@ async function loadAll(){
     }
   }).catch(e => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleRender));
   if (!PERSONAL) tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
+  if (!PERSONAL && P.ero){ S.status.ero = { loading:true }; tasks.push((DEMO ? demoERO() : fetchERO()).then(ero => { for (const s of SITES) S.G[s.id].ero = ero; S.status.ero = { ok:true, note: ero.length ? `${new Set(ero.map(x => x.day)).size} days` : "no risk areas" }; }).catch(() => { S.status.ero = { err:"not reachable" }; }).finally(scheduleRender)); }
   await Promise.allSettled(tasks);
   S.loading = false; S.fetchedAt = Date.now(); scheduleRender();
   if (!EXPO && (S.wantBrief || location.hash === "#brief")){ S.wantBrief = false; setTimeout(wantBrief, 400); }
@@ -3113,6 +3118,7 @@ async function demoPipeline(TL){
   }
   return out;
 }
+async function demoERO(){ const d = new Date(), v = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 12); return [{ cat:"SLGT", a:v, b:v + 24*H, day:2, geom:{ type:"Polygon", coordinates:[[[-81.5, 27.5], [-80.0, 27.5], [-80.0, 29.2], [-81.5, 29.2], [-81.5, 27.5]]] } }, { cat:"MRGL", a:v - 24*H, b:v, day:1, geom:{ type:"Polygon", coordinates:[[[-81.5, 27.5], [-80.0, 27.5], [-80.0, 29.2], [-81.5, 29.2], [-81.5, 27.5]]] } }]; }
 async function demoSPC(){ const t = Date.now(); const d = new Date(t); const v = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 12); return [{ cat:"MRGL", a:v, b:v + 24*H, geom:{ type:"Polygon", coordinates:[[[-81.5,27.5],[-80,27.5],[-80,29.5],[-81.5,29.5],[-81.5,27.5]]] } }]; }
 
 /* ============================================================

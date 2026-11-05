@@ -253,7 +253,7 @@ function renderStatus(){
   $("vBand").innerHTML = `<option value="all">All lead times</option>` + ((s && s.bands) || []).map(b => `<option ${b === V.band ? "selected" : ""}>${b}</option>`).join("");
   document.querySelectorAll("#vWin button").forEach(b => b.setAttribute("aria-pressed", b.dataset.w === V.win));
 }
-function renderAll(){ renderStatus(); renderScorecard(); renderLead(); renderReliability(); renderWeights(); renderCase(); if (V.mode === "exposure") renderExposure(); }
+function renderAll(){ renderStatus(); renderScorecard(); renderLead(); renderReliability(); renderWeights(); renderCase(); if (V.mode === "exposure") renderExposure(); if (V.mode === "launch") renderLaunch(); }
 function scorecardCSV(){
   if (!V.lastScore) return "";
   const { order, m } = V.lastScore, q = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
@@ -475,12 +475,105 @@ function bindExposure(){
   $("exClear").onclick = () => { if (!confirm("Remove the exposure forecasts stored on this computer?")) return; EX.ops = []; saveExposureStore(); renderExposure(); };
   $("exBody").addEventListener("click", e => { const r = e.target.closest("[data-ci]"); if (!r) return; EX.csel = +r.dataset.ci; renderExposure(); });
   $("vMode").onclick = e => { const b = e.target.closest("[data-m]"); if (!b) return; setMode(b.dataset.m); };
+  if ($("lmLoad")) $("lmLoad").onchange = async e => { let n = 0; for (const f of e.target.files) n += addLMEFdbCSV(await f.text()); e.target.value = ""; await prefetchLaunchObs(); renderLaunch(); if (typeof toast === "function") toast(n ? `Loaded ${n} launch forecast${n === 1 ? "" : "s"}` : "No LMEF database rows found"); };
 }
 function setMode(m){
   V.mode = m; document.body.dataset.vmode = m;
   document.querySelectorAll("#vMode button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === m));
   try { localStorage.setItem("erwx:verifyMode", m); } catch (e) { /* ignore */ }
   if (m === "exposure") prefetchExposureObs().then(renderExposure);
+  if (m === "launch") loadLaunchStore().then(prefetchLaunchObs).then(renderLaunch);
+}
+/* ---------- launch forecasts (LMEF) ----------
+   Each exported LMEF keeps a copy here (this browser). A window is checked against what the range
+   observed: MERLIN cloud-to-ground lightning within 10 nmi of the pad, the tower wind at the pad and
+   constraint height against the liftoff limit, and rain at the pad when the mission has a flight-
+   through-precipitation constraint. The forecaster's own call (weather violation or not) overrides
+   the automatic check, since the cloud rules can't be observed automatically. */
+const LM_PADS = { lc39a:[28.6083,-80.6041,"LC-39A"], lc39b:[28.6272,-80.6208,"LC-39B"], slc40:[28.5620,-80.5772,"SLC-40"], slc41:[28.5833,-80.5830,"SLC-41"], slc37:[28.5314,-80.5650,"SLC-37"], lc36:[28.4710,-80.5378,"LC-36"], slc46:[28.4585,-80.5284,"SLC-46"] };
+const LM = { recs:[], calls:{} };
+try { LM.calls = JSON.parse(localStorage.getItem("erwx:lmefCalls") || "{}"); } catch (e) { LM.calls = {}; }
+const saveCalls = () => { try { localStorage.setItem("erwx:lmefCalls", JSON.stringify(LM.calls)); } catch (e) { /* ignore */ } };
+async function loadLaunchStore(){ try { const db = await idb(); LM.recs = await new Promise(r => { const t = db.transaction(DB.store).objectStore(DB.store).get("lmef"); t.onsuccess = () => r(t.result || []); t.onerror = () => r([]); }); } catch (e) { LM.recs = []; } LM.recs.sort((a, b) => b.issued - a.issued); }
+async function saveLaunchStore(){ try { const db = await idb(); db.transaction(DB.store, "readwrite").objectStore(DB.store).put(LM.recs, "lmef"); } catch (e) { /* storage unavailable */ } }
+const dayKeys = (a, b) => { const out = []; for (let t = Math.floor(a/H)*H; t < b; t += H){ const k = new Date(t).toISOString().slice(0, 10).replace(/-/g, ""); if (!out.includes(k)) out.push(k); } return out; };
+async function prefetchLaunchObs(){ const need = new Set(); for (const r of LM.recs) for (const w of r.windows) if (w.b < Date.now()) dayKeys(w.a, w.b).forEach(k => need.add(k)); await Promise.all([...need].map(obsDay)); }
+const toKt = (v, u) => v == null ? null : u === "mph" ? v/1.150779 : u === "ms" || u === "m/s" ? v*1.943844 : u === "fts" || u === "ft/s" ? v*0.592484 : v;
+/* what the range observed during one window */
+function launchObs(rec, w){
+  if (w.b > Date.now()) return { pending:true };
+  const pad = rec.pad || {}, lat = pad.lat, lon = pad.lon;
+  const pt = (typeof SITES !== "undefined" ? SITES : []).map(s2 => ({ id:s2.id, d:kmBetween(lat, lon, s2.lat, s2.lon) })).sort((a, b) => a.d - b.d)[0];
+  let cg = null, rain = null, wind = null, hours = 0, have = 0;
+  for (let t = Math.floor(w.a/H)*H; t < w.b; t += H){
+    hours++;
+    const d = new Date(t), key = d.toISOString().slice(0, 10).replace(/-/g, ""), od = V.obs[key]; if (!od) continue;
+    const h = d.getUTCHours(), p = (od.points || {})[pt ? pt.id : ""] || {};
+    if (p.cg10 && p.cg10[h] != null){ cg = (cg || 0) + p.cg10[h]; have++; }
+    if (p.pr && p.pr[h] != null) rain = Math.max(rain ?? 0, p.pr[h]);
+    const lim = rec.liftoff || {}, field = lim.kind === "sust" ? "sx" : "g", ft = lim.h || 200;
+    const ch = vTowerChoice(lat, lon, ft, field, od), v = ch ? vTowerValue(od, ch, ft, field, h) : null;
+    if (v != null) wind = Math.max(wind ?? 0, v);
+  }
+  const lim = rec.liftoff || {}, limKt = toKt(lim.v, lim.unit);
+  const ltV = cg == null ? null : cg > 0 ? 1 : 0;
+  const wdV = wind == null || limKt == null ? null : (lim.op === ">=" || lim.op === "≥" ? wind >= limKt : wind > limKt) ? 1 : 0;
+  const rnV = !rec.ftp || rain == null ? null : rain >= 0.01 ? 1 : 0;
+  const known = [ltV, wdV, rnV].filter(x => x != null);
+  return { cg, rain, wind, limKt, ltV, wdV, rnV, auto: known.length ? (known.some(x => x) ? 1 : 0) : null, point: pt && pt.id, complete: have >= hours*0.75 };
+}
+const winId = (rec, w) => `${rec.id}|${w.i}`;
+function outcomeOf(rec, w, ob){ const c = LM.calls[winId(rec, w)]; return c === "viol" ? 1 : c === "go" ? 0 : ob.auto; }
+function brierRows(pairs){ const v = pairs.filter(([p, o]) => p != null && o != null); if (!v.length) return null; return { n:v.length, bs: v.reduce((s2, [p, o]) => s2 + (p/100 - o)**2, 0)/v.length, mp: v.reduce((s2, [p]) => s2 + p, 0)/v.length, of: v.reduce((s2, [, o]) => s2 + o, 0)/v.length }; }
+function renderLaunch(){
+  const box = $("lmBody"); if (!box) return;
+  const days = +(document.querySelector("#vWin [aria-pressed='true']") || {}).dataset?.w || 90, since = Date.now() - days*86400e3;
+  const rows = []; for (const rec of LM.recs) for (const w of rec.windows) if (w.a >= since) rows.push({ rec, w, ob: launchObs(rec, w) });
+  const done = rows.filter(x => !x.ob.pending);
+  const pov = brierRows(done.map(x => [x.w.pov, outcomeOf(x.rec, x.w, x.ob)]));
+  const ltg = brierRows(done.map(x => [x.w.rules && x.w.rules.rl, x.ob.ltV]));
+  const wnd = brierRows(done.map(x => [x.w.rules && x.w.rules.xlw, x.ob.wdV]));
+  const card = (t, r, note) => `<div class="lmc"><b>${r ? r.bs.toFixed(3) : "–"}</b><span>${t}</span><small>${r ? `${r.n} window${r.n === 1 ? "" : "s"} · forecast ${Math.round(r.mp)}% · observed ${Math.round(r.of*100)}%` : note}</small></div>`;
+  /* reliability of PoV: windows grouped by forecast chance */
+  const bins = [[0, 10], [10, 30], [30, 50], [50, 70], [70, 101]].map(([a, b]) => { const v = done.map(x => [x.w.pov, outcomeOf(x.rec, x.w, x.ob)]).filter(([p, o]) => p != null && o != null && p >= a && p < b); return { a, b, n:v.length, of: v.length ? v.reduce((s2, [, o]) => s2 + o, 0)/v.length : null }; });
+  const fmtW = (a, b) => { const d = new Date(a); return `${d.toISOString().slice(5, 10)} ${d.toISOString().slice(11, 16)}–${new Date(b).toISOString().slice(11, 16)}Z`; };
+  box.innerHTML = rows.length ? `
+    <div class="lmcards">${card("PoV Brier score", pov, "no finished windows yet")}${card("Lightning rule vs MERLIN CG ≤10 nmi", ltg, "needs MERLIN observations")}${card("Liftoff winds vs tower", wnd, "needs tower observations and a liftoff limit")}</div>
+    <h3>PoV reliability</h3><table class="sc"><thead><tr><th>Forecast PoV</th>${bins.map(b => `<th>${b.a}–${b.b > 100 ? 100 : b.b}%</th>`).join("")}</tr></thead><tbody>
+      <tr><th>Windows</th>${bins.map(b => `<td>${b.n}</td>`).join("")}</tr><tr><th>Weather violation observed</th>${bins.map(b => `<td>${b.of == null ? "–" : Math.round(b.of*100) + "%"}</td>`).join("")}</tr></tbody></table>
+    <h3>Windows</h3><div class="scroll"><table class="sc lmt"><thead><tr><th>Mission</th><th>Pad</th><th>Window</th><th>PoV</th><th>Lightning rule</th><th>Liftoff winds</th><th>CG ≤10 nmi</th><th>Peak tower wind</th><th>Rain</th><th>Automatic</th><th>Your call</th></tr></thead><tbody>
+    ${rows.map(({ rec, w, ob }) => { const c = LM.calls[winId(rec, w)] || ""; const yn = v => v == null ? "–" : v ? "violation" : "ok";
+      return `<tr><td>${hesc(rec.mission)}<small>${hesc(rec.vehicle)} · issued ${new Date(rec.issued).toISOString().slice(5, 16).replace("T", " ")}Z${rec.by ? " · " + hesc(rec.by) : ""}</small></td><td>${hesc(rec.pad && rec.pad.name || "")}</td><td>${w.i === 0 ? "Launch day" : `Delay ${w.i}`}<small>${fmtW(w.a, w.b)}</small></td>
+        <td><b>${w.pov == null ? "–" : w.pov + "%"}</b></td><td>${w.rules && w.rules.rl != null ? w.rules.rl + "%" : "–"}</td><td>${w.rules && w.rules.xlw != null ? w.rules.xlw + "%" : "–"}</td>
+        ${ob.pending ? '<td colspan="4" class="mut">window not over yet</td>' : `<td>${ob.cg == null ? "–" : ob.cg}</td><td>${ob.wind == null ? "–" : Math.round(ob.wind) + " kt"}${ob.limKt != null ? `<small>limit ${Math.round(ob.limKt)} kt</small>` : ""}</td><td>${ob.rain == null ? "–" : ob.rain.toFixed(2) + " in"}</td><td class="${ob.auto ? "bad" : ob.auto === 0 ? "good" : ""}">${yn(ob.auto)}</td>`}
+        <td><select data-call="${hesc(winId(rec, w))}"><option value="" ${!c ? "selected" : ""}>Use automatic</option><option value="go" ${c === "go" ? "selected" : ""}>No weather violation</option><option value="viol" ${c === "viol" ? "selected" : ""}>Weather violation</option></select></td></tr>`; }).join("")}
+    </tbody></table></div>
+    <p class="mut">Windows come from LMEFs exported in this browser, or loaded from database CSVs. "Your call" overrides the automatic check (lightning within 10 nmi, tower wind over the limit, rain with a flight-through-precipitation constraint), and it is what the PoV score uses. Cloud rules can't be observed automatically, so record those violations as your call.</p>`
+    : `<p class="mut">No launch forecasts yet. Every LMEF you export (PDF, HTML, Excel or CSV) is kept here automatically; you can also load LMEF database CSVs.</p>`;
+  box.querySelectorAll("[data-call]").forEach(sel => sel.onchange = () => { if (sel.value) LM.calls[sel.dataset.call] = sel.value; else delete LM.calls[sel.dataset.call]; saveCalls(); renderLaunch(); });
+}
+/* any CSV with a header row, quoted fields allowed */
+function lmCSV(text){
+  const lines = text.replace(/\r/g, "").split("\n").filter(l => l.trim());
+  const split = l => { const out = []; let cur = "", q = false; for (let i = 0; i < l.length; i++){ const ch = l[i]; if (q){ if (ch === '"' && l[i + 1] === '"'){ cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; } else if (ch === '"') q = true; else if (ch === ","){ out.push(cur); cur = ""; } else cur += ch; } out.push(cur); return out; };
+  const head = split(lines[0] || "").map(h => h.trim());
+  return lines.slice(1).map(l => { const c = split(l), o = {}; head.forEach((h, i) => o[h] = (c[i] ?? "").trim()); return o; });
+}
+/* LMEF database CSVs (forecasts made on other computers): windows and PoV; no rule chances or liftoff limit */
+function addLMEFdbCSV(text){
+  const rows = lmCSV(text.replace(/^\ufeff/, "")); if (!rows.length || !("window_open_utc" in rows[0])) return 0;
+  const t = s2 => { const m = String(s2 || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?/i); if (!m) return Date.parse(s2); let h = +m[4] % 12; if (/PM/i.test(m[6] || "")) h += 12; return Date.UTC(+m[3], +m[1] - 1, +m[2], h, +m[5]); };
+  const groups = {};
+  for (const r of rows){ const key = `${r.mission}|${t(r.issued_utc)}`; (groups[key] = groups[key] || []).push(r); }
+  let n = 0;
+  for (const [id, rs] of Object.entries(groups)){
+    const r0 = rs[0], padId = Object.keys(LM_PADS).find(k => LM_PADS[k][2].toUpperCase() === String(r0.pad_id || "").toUpperCase());
+    const pad = padId ? { id:padId, name:LM_PADS[padId][2], lat:LM_PADS[padId][0], lon:LM_PADS[padId][1] } : { id:"", name:r0.pad_id, lat:28.56, lon:-80.58 };
+    const rec = { id, mission:r0.mission, vehicle:r0.vehicle, pad, issued:t(r0.issued_utc), by:r0.forecaster || "", liftoff:{}, ftp:false,
+      windows: rs.map(r => ({ i:+r.window_index || 0, a:t(r.window_open_utc), b:t(r.window_close_utc), pov: r.pov_pct === "" ? null : +r.pov_pct, concerns:[r.primary_concern_1, r.primary_concern_2, r.primary_concern_3].filter(Boolean).join(", "), rules:{} })).filter(w => isFinite(w.a)) };
+    LM.recs = LM.recs.filter(x => x.id !== id); LM.recs.push(rec); n++;
+  }
+  LM.recs.sort((a, b) => b.issued - a.issued); saveLaunchStore(); return n;
 }
 bindExposure();
 /* forecasts published from this browser are kept automatically (with their guidance) */
