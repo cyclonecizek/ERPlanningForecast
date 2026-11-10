@@ -28,7 +28,7 @@ jobs:
           cache-dependency-path: .github/workflows/planning-hires.yml
       - name: Install GRIB reader
         run: pip install numpy pygrib
-      - name: RRFS, REFS members, HREF and REFS calibrated thunder
+      - name: RRFS, REFS members and REFS calibrated thunder
         env:
           HIRES_BUDGET_MIN: "35"
         run: python pipeline/planning_hires.py
