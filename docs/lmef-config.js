@@ -29,6 +29,23 @@ const LMK = "lmef:v1";
 /* risk levels offered on the product; the automatic levels use Low, Moderate and High */
 const RISK = ["Low", "Low-Mod", "Moderate", "Mod-High", "High"];
 const RISK_AUTO = ["Low", "Moderate", "High"];
+/* SWPC binned forecast translation (45 WS): the 3-day forecast's 10 MeV S1+ chance, by forecast day,
+   gives the 50 MeV Solar Activity category. Rows: 10, 20, ... 90 and 99% (max alert); columns: day 1, 2, 3. */
+const SOLAR_TABLES = {
+  "50mev100": { name:"50 MeV at 100 pfu", rows:{
+    10:["Low","Low","Low"], 20:["Low","Low","Low"], 30:["Low","Low","Low"], 40:["Low","Low","Low"], 50:["Low","Low","Low"],
+    60:["Low-Mod","Low","Low"], 70:["Low-Mod","Low","Low"], 80:["Low-Mod","Low-Mod","Low"], 90:["Low-Mod","Low-Mod","Low"], 99:["Low-Mod","Low-Mod","Low-Mod"] } },
+  "50mev10": { name:"50 MeV at 10 pfu", rows:{
+    10:["Low","Low","Low"], 20:["Low","Low","Low"], 30:["Low","Low","Low"], 40:["Low","Low","Low"], 50:["Low-Mod","Low","Low"],
+    60:["Low-Mod","Low-Mod","Low-Mod"], 70:["Low-Mod","Low-Mod","Low-Mod"], 80:["Low-Mod","Low-Mod","Low-Mod"], 90:["Low-Mod","Low-Mod","Low-Mod"], 99:["Moderate","Low-Mod","Low-Mod"] } },
+};
+const SOLAR_DEFAULT = "50mev100";
+/* the row for a chance: 99% and above is the max-alert row; otherwise the 10% step at or below it (under 10% uses the 10% row) */
+function solarCat(tbl, day, p){
+  if (p == null) return "Low";
+  const row = p >= 99 ? 99 : Math.min(90, Math.max(10, Math.floor(p/10)*10));
+  return (tbl.rows[row] || tbl.rows[10])[day] || "Low";
+}
 /* the product's fixed wording (from the legacy LMEF builder) */
 const WX_OPTS = ["None", "Isol Showers", "Sct Showers", "Num Showers", "Showers", "Isold Tstorms", "Sct Tstorms", "Num Tstorms", "Tstorms", "Fog", "Mist"];
 const VIS_OPTS = ["7+ mi", "6 mi", "5 mi", "4 mi", "3 mi", "2 mi", "1 mi", "3/4 mi", "1/2 mi", "1/4 mi", "M1/4 mi"];

@@ -168,6 +168,7 @@ document.addEventListener("DOMContentLoaded", function(){
   mark();
 });
 </script>
+<style>.srcbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 10px}.srcbar .mut{color:var(--ink-3);font-size:12.5px}</style>
 </head>
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="taf.html" aria-current="page">TAF generator</a><a href="mwp.html" data-page="mwp">Mission weather (MWP)</a><a href="burn.html">Burn forecasts</a><a href="exposure.html">Exposure forecasts</a><a href="lmef.html">Launch forecast (LMEF)</a><a href="verify.html">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
@@ -732,6 +733,10 @@ function init(){
   $("cfggrid").addEventListener("change", ev => { const k = ev.target.dataset.c; if (!k) return; T.cfg[k] = typeof DEF[k] === "boolean" ? ev.target.checked : typeof DEF[k] === "number" ? (parseFloat(ev.target.value) || DEF[k]) : ev.target.value; saveT(); generate(false); });
   $("cfggrid").addEventListener("click", ev => { if (ev.target.id !== "cfgReset") return; T.cfg = { ...DEF }; saveT(); renderCfg(); generate(false); });
   $("srcgrid").addEventListener("change", ev => { const id = ev.target.dataset.src; if (!id) return; T.enabled[id] = ev.target.checked; saveT(); generate(false); });
+  /* select all / unselect all above the source list */
+  $("srcgrid").insertAdjacentHTML("beforebegin", `<div class="srcbar" id="srcBar"><button type="button" class="btn ghost" id="srcAll">Select all</button><button type="button" class="btn ghost" id="srcNone">Unselect all</button></div>`);
+  const setAllSrc = on => { for (const s of ALL_SOURCES) T.enabled[s.id] = on; saveT(); generate(false); if (typeof renderSources === "function") renderSources(); };
+  $("srcAll").onclick = () => setAllSrc(true); $("srcNone").onclick = () => setAllSrc(false);
   loadAll();
 }
 init();

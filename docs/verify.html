@@ -322,6 +322,7 @@ body[data-vmode="launch"] .planmode,body[data-vmode="launch"] .exmode,body[data-
 .lmcards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin:4px 0 12px; } .lmc{ border:1px solid var(--rule); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
 .lmc b{ font:700 24px var(--cond); } .lmc span{ font-weight:600; font-size:13px; } .lmc small{ color:var(--ink-3); font-size:12px; }
 .lmt td small{ display:block; color:var(--ink-3); font-size:11.5px; } .lmt td.bad{ color:#B4231A; font-weight:700; } .lmt td.good{ color:#2F7A4A; font-weight:600; } .lmt select{ border:1px solid var(--rule); border-radius:6px; padding:3px 5px; background:var(--panel); color:var(--ink); }
+.lmmode h2{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; } .lmmode h3 select{ font:500 13px var(--font); margin-left:8px; border:1px solid var(--rule); border-radius:6px; padding:3px 6px; background:var(--panel); color:var(--ink); }
 .lmmode h3{ font:700 15px var(--cond); margin:14px 0 6px; } .fileb{ position:relative; overflow:hidden; cursor:pointer; } .fileb input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 body:not([data-vmode="exposure"]) .exmode{ display:none; }
 body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[data-vmode="exposure"] #vBand,body[data-vmode="exposure"] label:has(#vPoint),body[data-vmode="exposure"] label:has(#vBand),body[data-vmode="exposure"] #vCsv{ display:none; }
@@ -415,7 +416,7 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
     </section>
   </div>
   <div class="lmmode">
-    <section class="vpanel"><h2>Launch forecasts (LMEF) <span class="sp"></span><label class="btn fileb">Load LMEF database CSV<input type="file" id="lmLoad" accept=".csv,text/csv" multiple></label></h2><div id="lmBody"></div></section>
+    <section class="vpanel"><h2>Launch forecasts (LMEF) <span class="sp"></span><label class="btn fileb">Load forecast CSV<input type="file" id="lmLoad" accept=".csv,text/csv" multiple></label><label class="btn fileb">Load observed LLCC CSV<input type="file" id="lmObsLoad" accept=".csv,text/csv" multiple></label><button type="button" class="btn ghost" id="lmTplF">Forecast template</button><button type="button" class="btn ghost" id="lmTplO">Observed template</button></h2><div id="lmBody"></div></section>
   </div>
   <div class="vgrid planmode">
     <section class="vpanel">
@@ -436,6 +437,6 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
 </main>
 <div class="toast" id="toast"></div>
 <script src="guidance.js?v=102f19cbd7"></script>
-<script src="verify.js?v=b1f927c4c6"></script>
+<script src="verify.js?v=e9630906ce"></script>
 </body>
 </html>

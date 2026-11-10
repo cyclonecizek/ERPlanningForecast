@@ -590,7 +590,8 @@ function parseSchedCSV(text, defaultType){
     const type = tcol ? (/^(launch|lmef|mission)$/i.test(tcol) ? "launch" : "ground") : (defaultType || "ground");
     const name = col(r, "name", "op_name", "mission", "mission_name", "operation", "op");
     const a = rangeFmt ? parseWhen(`${col(r, "opstartdate_z")} ${col(r, "opstarttime_z").padStart(4, "0")}`, "Z") : parseWhen(col(r, "start", "window_open", "open", "start_time"), zone);
-    const b = rangeFmt ? parseWhen(`${col(r, "openddate_z") || col(r, "opstartdate_z")} ${col(r, "opendtime_z").padStart(4, "0")}`, "Z") : parseWhen(col(r, "end", "window_close", "close", "end_time"), zone);
+    let b = rangeFmt ? opEnd(col(r, "openddate_z"), col(r, "opendtime_z"), col(r, "opstartdate_z"), a) : parseWhen(col(r, "end", "window_close", "close", "end_time"), zone);
+    if (rangeFmt && a != null && (b == null || b <= a)) b = a + (type === "launch" ? 0 : 4*H);
     if (!name || a == null){ errors.push(`row ${n + 2}: needs a name and a start time`); return; }
     const ba = parseWhen(col(r, "backup_start", "backup_open"), zone), bb = parseWhen(col(r, "backup_end", "backup_close"), zone);
     const opid = col(r, "operation_id", "op_id", "id"), comments = col(r, "op_comments", "comments", "notes");
@@ -604,6 +605,15 @@ function parseSchedCSV(text, defaultType){
       lat: +col(r, "lat", "latitude") || null, lon: +col(r, "lon", "longitude") || null, notes: comments });
   });
   return { items, errors };
+}
+/* the op end from OpEndDate_Z / OpEndTime_Z; a missing end time is ignored (null: the default length is
+   used), a missing end date means the start date, rolling to the next day if that falls before the start */
+function opEnd(ed, et, sd, a){
+  ed = String(ed || "").trim(); et = String(et || "").trim();
+  if (!/\d/.test(et)) return null;
+  const b = parseWhen(`${ed || sd} ${et.replace(/\D/g, "").padStart(4, "0")}`, "Z");
+  if (b == null) return null;
+  return !ed && a != null && b <= a ? b + 24*H : b;
 }
 /* one row of the combined ops export */
 function parseAllOpsRow(r, col, rowNo, errors){
@@ -621,7 +631,7 @@ function parseAllOpsRow(r, col, rowNo, errors){
   const pri = win(col(r, "primary_date_z", "opstartdate_z"), col(r, "primary_window_z", "opstarttime_z"));
   if (!name || !pri){ errors.push(`row ${rowNo}: needs a name, a Zulu date and a window or start time`); return null; }
   let b = pri.b;
-  if (b == null){ const e = col(r, "openddate_z"), et = col(r, "opendtime_z"); b = e && et ? parseWhen(`${e} ${et.padStart(4, "0")}`, "Z") : null; }
+  if (b == null) b = opEnd(col(r, "openddate_z"), col(r, "opendtime_z"), col(r, "primary_date_z", "opstartdate_z"), pri.a);
   if (b == null || b <= pri.a) b = pri.a + (type === "launch" ? 0 : 4*H);
   const bk = win(col(r, "backup_date_z"), col(r, "backup_window_z"));
   const opid = col(r, "operation_id", "op_id", "id"), landing = col(r, "landing");
@@ -993,7 +1003,17 @@ function renderParams(){
 function autoKey(){ const ks = keysOf(prefs.param); const k = ks[0] || "t"; return /^pp/.test(k) ? "pop" : /^lt/.test(k) ? "tst" : P[k] && P[k].ex ? P[k].ex : k; }
 function autoLabel(){ const g = AUTO_GROUP(autoKey()); return { t:"temperature and dew point", s:"sustained wind", g:"peak wind", d:"wind direction", pp:"precipitation", lt:"lightning" }[g] || "this parameter"; }
 function autoNow(sid){ const G = S.G[prefs.site]; if (!G || !AUTO_W || prefs.autoW === false) return null; return autoFactor(G, prefs, sid, autoKey(), Date.now() + 12*H); }
+/* select all / unselect all above the source list */
+function srcBar(){
+  if ($("srcBar") || !$("srcgrid")) return;
+  $("srcgrid").insertAdjacentHTML("beforebegin", `<div class="srcbar" id="srcBar"><button type="button" class="btn ghost" id="srcAll">Select all</button><button type="button" class="btn ghost" id="srcNone">Unselect all</button><span class="mut" id="srcCount"></span></div>`);
+  const setAll = on => { for (const s2 of ALL_SOURCES) prefs.enabled[s2.id] = on; savePrefs(); recomputeAgg(); renderAll(); renderSources();
+    toast(on ? "All guidance sources selected" : "All guidance sources unselected: the guidance rows are empty until you pick at least one"); };
+  $("srcAll").onclick = () => setAll(true); $("srcNone").onclick = () => setAll(false);
+}
 function renderSources(){
+  srcBar();
+  { const n = ALL_SOURCES.filter(s2 => prefs.enabled[s2.id] !== false).length; if ($("srcCount")) $("srcCount").textContent = `${n} of ${ALL_SOURCES.length} selected`; }
   const fams = Object.keys(FAMILIES);
   let ok = 0, tot = 0;
   $("srcgrid").innerHTML = fams.map(f => {

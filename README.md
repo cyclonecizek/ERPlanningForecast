@@ -323,6 +323,15 @@ flight-through-precipitation constraint. **Your call** (weather violation or not
 check, since the cloud rules can't be observed automatically. Scores: PoV Brier score, a reliability diagram (PoV, lightning-rule and liftoff-wind chances against what was observed, dot size by number of windows, with a count per range) and table, and
 the lightning-rule and liftoff-wind chances against what was observed.
 
+**Uploads (Verification → Launch forecasts).** *Load forecast CSV* takes the LMEF database CSV, plus optional
+rule chance columns (any column naming a rule and ending in `_pct`, e.g. `lightning_rule_pct`,
+`cumulus_cloud_rule_pct`, `liftoff_winds_pct`). *Load observed LLCC CSV* takes one row per window: `mission`,
+`window_index` and/or `window_open_utc`, an optional overall `weather_violation`, a column per rule marked
+violated (Y, 1, X, violated) or not (N, 0, ok), and optional `notes`; column names are matched loosely.
+Observed rows are matched to forecasts by mission and window (same index within 36 h, or the closest open time
+within 12 h). The outcome is your call, then the uploaded observations, then the automatic checks; each rule
+gets its own Brier score and reliability curve. *Forecast template* and *Observed template* download examples.
+
 ## LMEF wording, units and database CSV (28 Oct updates)
 * **No upper-level wind shear** criterion for any customer; ULA defaults to Solar Activity only.
 * **Up to three cloud layers** on every product and in the editor (all three go into the database CSV).
@@ -340,6 +349,16 @@ the lightning-rule and liftoff-wind chances against what was observed.
   wind_dir_deg, wind_min_kt, wind_max_kt, cloud1-3 type/coverage/base/tops, risktype/risklevel 1-4,
   next_forecast, discussion`; values quoted, empty fields bare, times MM/DD/YYYY h:mm AM in UTC, cloud
   heights with thousands separators, a missing second or third cloud group as 0, winds in knots, UTF-8 with BOM.
+
+**Solar Activity (SWPC binned translation).** The SWPC 3-day forecast's S1-or-greater chance (10 MeV at
+10 pfu) on the window's forecast day sets the Solar Activity level through the 45 WS translation tables
+(`SOLAR_TABLES` in `docs/lmef-config.js`): **50 MeV at 100 pfu** (default) or **50 MeV at 10 pfu**, chosen on
+the Solar Activity row. Rows are 10% steps (the step at or below the chance) and 99% (max alert); columns are
+days 1-3. An event already under way within 12 h of the window raises it (10 MeV at 10 pfu: Low-Mod; at
+100 pfu: Moderate). Beyond the 3-day forecast the level is Low.
+
+**Mission name on the products** reads vehicle first ("Vulcan KA-01", "Falcon 9 Starlink 3-48") unless the
+mission name already starts with the vehicle; the database CSV keeps mission and vehicle in their own columns.
 
 ## Fire Weather Forecast (burn product)
 Haines is gone; the burn page adds **Inversion base** (the lowest level where temperature rises with height,

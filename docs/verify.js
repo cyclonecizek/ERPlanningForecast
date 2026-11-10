@@ -475,6 +475,9 @@ function bindExposure(){
   $("exClear").onclick = () => { if (!confirm("Remove the exposure forecasts stored on this computer?")) return; EX.ops = []; saveExposureStore(); renderExposure(); };
   $("exBody").addEventListener("click", e => { const r = e.target.closest("[data-ci]"); if (!r) return; EX.csel = +r.dataset.ci; renderExposure(); });
   $("vMode").onclick = e => { const b = e.target.closest("[data-m]"); if (!b) return; setMode(b.dataset.m); };
+  if ($("lmObsLoad")) $("lmObsLoad").onchange = async e => { let n = 0; for (const f of e.target.files) n += addLaunchObsCSV(await f.text()); e.target.value = ""; renderLaunch(); if (typeof toast === "function") toast(n ? `Loaded observations for ${n} window${n === 1 ? "" : "s"}` : "No observation rows found: the CSV needs a mission column and a window time or index"); };
+  if ($("lmTplF")) $("lmTplF").onclick = () => lmTemplate("fc");
+  if ($("lmTplO")) $("lmTplO").onclick = () => lmTemplate("obs");
   if ($("lmLoad")) $("lmLoad").onchange = async e => { let n = 0; for (const f of e.target.files) n += addLMEFdbCSV(await f.text()); e.target.value = ""; await prefetchLaunchObs(); renderLaunch(); if (typeof toast === "function") toast(n ? `Loaded ${n} launch forecast${n === 1 ? "" : "s"}` : "No LMEF database rows found"); };
 }
 function setMode(m){
@@ -482,7 +485,7 @@ function setMode(m){
   document.querySelectorAll("#vMode button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === m));
   try { localStorage.setItem("erwx:verifyMode", m); } catch (e) { /* ignore */ }
   if (m === "exposure") prefetchExposureObs().then(renderExposure);
-  if (m === "launch") loadLaunchStore().then(prefetchLaunchObs).then(renderLaunch);
+  if (m === "launch") Promise.all([loadLaunchStore(), loadLaunchObs()]).then(prefetchLaunchObs).then(renderLaunch);
 }
 /* ---------- launch forecasts (LMEF) ----------
    Each exported LMEF keeps a copy here (this browser). A window is checked against what the range
@@ -491,7 +494,55 @@ function setMode(m){
    through-precipitation constraint. The forecaster's own call (weather violation or not) overrides
    the automatic check, since the cloud rules can't be observed automatically. */
 const LM_PADS = { lc39a:[28.6083,-80.6041,"LC-39A"], lc39b:[28.6272,-80.6208,"LC-39B"], slc40:[28.5620,-80.5772,"SLC-40"], slc41:[28.5833,-80.5830,"SLC-41"], slc37:[28.5314,-80.5650,"SLC-37"], lc36:[28.4710,-80.5378,"LC-36"], slc46:[28.4585,-80.5284,"SLC-46"] };
-const LM = { recs:[], calls:{} };
+const LM = { recs:[], calls:{}, obs:[], series:"rl" };
+/* launch commit criteria: forecast keys in the LMEF, and the words that identify a column in an uploaded CSV */
+const LM_RULES = [
+  { id:"rl",    name:"Lightning Rule",               keys:["rl"],         re:/lightning/ },
+  { id:"rcu",   name:"Cumulus Cloud Rule",           keys:["rcu"],        re:/cumulus/ },
+  { id:"anvil", name:"Anvil Cloud Rules",            keys:["raa","rda"],  re:/anvil/ },
+  { id:"rdb",   name:"Debris Cloud Rules",           keys:["rdb"],        re:/debris/ },
+  { id:"rdw",   name:"Disturbed Weather Rule",       keys:["rdw"],        re:/disturbed/ },
+  { id:"rtc",   name:"Thick Cloud Layers Rule",      keys:["rtc"],        re:/thick/ },
+  { id:"rsm",   name:"Smoke Plume Rule",             keys:["rsm"],        re:/smoke/ },
+  { id:"ref",   name:"Surface Electric Fields Rule", keys:["ref"],        re:/electric|field_?mill|\befm\b/ },
+  { id:"tribo", name:"Triboelectrification Rule",    keys:["tribo"],      re:/tribo/ },
+  { id:"rftp",  name:"Flight Through Precip",        keys:["rftp"],       re:/flight_?through|\bftp\b|precip/ },
+  { id:"xlw",   name:"Liftoff / Ground Winds",       keys:["xlw"],        re:/liftoff_?wind|ground_?wind|\bwinds?\b/ },
+];
+const normCol = c => String(c || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+const ruleOfCol = c => { const n = normCol(c); return LM_RULES.find(r => r.re.test(n.replace(/_/g, " ")) || r.re.test(n)); };
+const yesNo = v => { const t = String(v ?? "").trim().toLowerCase(); if (!t) return null; if (/^(y|yes|1|true|x|v|viol|violated|violation|nogo|no.go|red)$/.test(t)) return 1; if (/^(n|no|0|false|ok|go|green|clear|none|-)$/.test(t)) return 0; const n = +t; return isFinite(n) ? (n > 0 ? 1 : 0) : null; };
+const lmTime = s2 => { const m = String(s2 || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?/i); if (m){ let h = +m[4]; if (m[6]){ h %= 12; if (/PM/i.test(m[6])) h += 12; } return Date.UTC(+m[3], +m[1] - 1, +m[2], h, +m[5]); }
+  const z = String(s2 || "").trim(); const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(z) ? z : z.replace(" ", "T") + (z.length > 10 ? "Z" : "T00:00Z")); return isFinite(t) ? t : null; };
+const normMission = m => String(m || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+async function loadLaunchObs(){ try { const db = await idb(); LM.obs = await new Promise(r => { const t = db.transaction(DB.store).objectStore(DB.store).get("lmefObs"); t.onsuccess = () => r(t.result || []); t.onerror = () => r([]); }); } catch (e) { LM.obs = []; } }
+async function saveLaunchObs(){ try { const db = await idb(); db.transaction(DB.store, "readwrite").objectStore(DB.store).put(LM.obs, "lmefObs"); } catch (e) { /* storage unavailable */ } }
+/* the uploaded observation row for a forecast window: same mission, and the same window (index within
+   36 h, or the closest open time within 12 h) */
+function uploadedObs(rec, w){
+  const mi = normMission(rec.mission); let best = null, bd = Infinity;
+  for (const o of LM.obs){ if (normMission(o.mission) !== mi) continue; const d = o.a != null ? Math.abs(o.a - w.a) : Infinity;
+    if (o.idx != null && o.idx === w.i && (o.a == null || d < 36*H)) return o; if (d < 12*H && d < bd){ best = o; bd = d; } }
+  return best;
+}
+/* observed LLCC CSV: one row per window; rule columns marked violated (Y, 1, X, violated) or not (N, 0, ok) */
+function addLaunchObsCSV(text){
+  const rows = lmCSV(text.replace(/^\ufeff/, "")); if (!rows.length) return 0;
+  const cols = Object.keys(rows[0]), C = re => cols.find(c => re.test(normCol(c)));
+  const cMis = C(/^mission|mission_?name|^name$/), cOpen = C(/window_?open|^t0|launch_?time|liftoff_?time|^time|^date|open_?utc/), cIdx = C(/window_?index|^attempt|^window$/);
+  const cAll = C(/^weather_?violation|overall|^wx_?viol|weather_?scrub|scrub_?weather/), cNote = C(/note|comment|remark/);
+  const ruleCols = cols.map(c => ({ c, r: ruleOfCol(c) })).filter(x => x.r && x.c !== cMis && x.c !== cOpen && x.c !== cAll && !/(_pct|_prob|chance|pov)$/.test(normCol(x.c)));
+  if (!cMis || (!cOpen && !cIdx)) return 0;
+  let n = 0;
+  for (const r of rows){
+    const a = cOpen ? lmTime(r[cOpen]) : null, idx = cIdx && r[cIdx] !== "" ? +r[cIdx] : null; if (!r[cMis] || (a == null && idx == null)) continue;
+    const rules = {}; ruleCols.forEach(({ c, r: rl }) => { const v = yesNo(r[c]); if (v != null) rules[rl.id] = Math.max(rules[rl.id] ?? 0, v); });
+    const overall = cAll ? yesNo(r[cAll]) : null;
+    const o = { mission:r[cMis], a, idx, rules, overall, note: cNote ? r[cNote] : "" };
+    LM.obs = LM.obs.filter(x => !(normMission(x.mission) === normMission(o.mission) && x.a === o.a && x.idx === o.idx)); LM.obs.push(o); n++;
+  }
+  saveLaunchObs(); return n;
+}
 try { LM.calls = JSON.parse(localStorage.getItem("erwx:lmefCalls") || "{}"); } catch (e) { LM.calls = {}; }
 const saveCalls = () => { try { localStorage.setItem("erwx:lmefCalls", JSON.stringify(LM.calls)); } catch (e) { /* ignore */ } };
 async function loadLaunchStore(){ try { const db = await idb(); LM.recs = await new Promise(r => { const t = db.transaction(DB.store).objectStore(DB.store).get("lmef"); t.onsuccess = () => r(t.result || []); t.onerror = () => r([]); }); } catch (e) { LM.recs = []; } LM.recs.sort((a, b) => b.issued - a.issued); }
@@ -523,7 +574,18 @@ function launchObs(rec, w){
   return { cg, rain, wind, limKt, ltV, wdV, rnV, auto: known.length ? (known.some(x => x) ? 1 : 0) : null, point: pt && pt.id, complete: have >= hours*0.75 };
 }
 const winId = (rec, w) => `${rec.id}|${w.i}`;
-function outcomeOf(rec, w, ob){ const c = LM.calls[winId(rec, w)]; return c === "viol" ? 1 : c === "go" ? 0 : ob.auto; }
+function outcomeOf(rec, w, ob){
+  const c = LM.calls[winId(rec, w)]; if (c === "viol") return 1; if (c === "go") return 0;
+  const u = uploadedObs(rec, w); if (u){ if (u.overall != null) return u.overall; const v = Object.values(u.rules); if (v.length) return v.some(x => x) ? 1 : 0; }
+  return ob.auto;
+}
+/* forecast chance and observed violation for one rule in one window */
+const ruleFc = (w, rl) => { const v = rl.keys.map(k => w.rules ? w.rules[k] : null).filter(x => x != null); return v.length ? Math.max(...v) : null; };
+function ruleObs(rec, w, ob, rl){
+  const u = uploadedObs(rec, w); if (u && u.rules[rl.id] != null) return u.rules[rl.id];
+  if (rl.id === "rl") return ob.ltV ?? null; if (rl.id === "xlw") return ob.wdV ?? null; if (rl.id === "rftp") return ob.rnV ?? null;
+  return null;
+}
 function brierRows(pairs){ const v = pairs.filter(([p, o]) => p != null && o != null); if (!v.length) return null; return { n:v.length, bs: v.reduce((s2, [p, o]) => s2 + (p/100 - o)**2, 0)/v.length, mp: v.reduce((s2, [p]) => s2 + p, 0)/v.length, of: v.reduce((s2, [, o]) => s2 + o, 0)/v.length }; }
 /* reliability diagram for launch forecasts: forecast chance against how often it happened, by range,
    dot size by the number of windows, with the perfect-reliability line and a count of windows per range */
@@ -565,28 +627,49 @@ function renderLaunch(){
   const pov = brierRows(done.map(x => [x.w.pov, outcomeOf(x.rec, x.w, x.ob)]));
   const ltg = brierRows(done.map(x => [x.w.rules && x.w.rules.rl, x.ob.ltV]));
   const wnd = brierRows(done.map(x => [x.w.rules && x.w.rules.xlw, x.ob.wdV]));
+  /* every rule: forecast chance against the observed violation (uploaded, or the automatic check) */
+  const ruleStats = LM_RULES.map(rl => { const pairs = done.map(x => [ruleFc(x.w, rl), ruleObs(x.rec, x.w, x.ob, rl)]); const r = brierRows(pairs);
+    const up = done.some(x => { const u = uploadedObs(x.rec, x.w); return u && u.rules[rl.id] != null; });
+    return { rl, r, n: r ? r.n : 0, nf: pairs.filter(([p]) => p != null).length, nv: pairs.filter(([, o]) => o === 1).length, src: up ? "uploaded observations" + (["rl","xlw","rftp"].includes(rl.id) ? ", then automatic" : "") : ["rl","xlw","rftp"].includes(rl.id) ? "automatic (MERLIN, towers, rain)" : "upload observed LLCC data" }; });
+  if (!ruleStats.some(x => x.rl.id === LM.series && x.n)){ const first = ruleStats.find(x => x.n); if (first) LM.series = first.rl.id; }
+  const selRule = (ruleStats.find(x => x.rl.id === LM.series && x.n) || {}).rl;
   const card = (t, r, note) => `<div class="lmc"><b>${r ? r.bs.toFixed(3) : "–"}</b><span>${t}</span><small>${r ? `${r.n} window${r.n === 1 ? "" : "s"} · forecast ${Math.round(r.mp)}% · observed ${Math.round(r.of*100)}%` : note}</small></div>`;
   /* reliability of PoV: windows grouped by forecast chance */
   const bins = [[0, 10], [10, 30], [30, 50], [50, 70], [70, 101]].map(([a, b]) => { const v = done.map(x => [x.w.pov, outcomeOf(x.rec, x.w, x.ob)]).filter(([p, o]) => p != null && o != null && p >= a && p < b); return { a, b, n:v.length, of: v.length ? v.reduce((s2, [, o]) => s2 + o, 0)/v.length : null }; });
   const fmtW = (a, b) => { const d = new Date(a); return `${d.toISOString().slice(5, 10)} ${d.toISOString().slice(11, 16)}–${new Date(b).toISOString().slice(11, 16)}Z`; };
   box.innerHTML = rows.length ? `
-    <div class="lmcards">${card("PoV Brier score", pov, "no finished windows yet")}${card("Lightning rule vs MERLIN CG ≤10 nmi", ltg, "needs MERLIN observations")}${card("Liftoff winds vs tower", wnd, "needs tower observations and a liftoff limit")}</div>
-    <h3>Reliability</h3>${lmRelSVG([
+    <div class="lmcards">${card("PoV Brier score", pov, "no finished windows yet")}${card("Lightning Rule Brier score", (ruleStats.find(x => x.rl.id === "rl") || {}).r, "needs observed LLCC data or MERLIN observations")}${card("Liftoff / Ground Winds Brier score", (ruleStats.find(x => x.rl.id === "xlw") || {}).r, "needs observed LLCC data, or tower observations and a liftoff limit")}</div>
+    <h3>Reliability <select id="lmSeries" aria-label="Rule to show">${ruleStats.filter(x => x.n).map(x => `<option value="${x.rl.id}" ${x.rl.id === LM.series ? "selected" : ""}>${hesc(x.rl.name)}</option>`).join("") || '<option value="">no rule observations yet</option>'}</select></h3>${lmRelSVG([
       { name:"PoV vs weather violation", c:"#1F5F99", bins: lmRelSeries(done.map(x => [x.w.pov, outcomeOf(x.rec, x.w, x.ob)])) },
-      { name:"Lightning rule vs MERLIN", c:"#8A4FA0", bins: lmRelSeries(done.map(x => [x.w.rules && x.w.rules.rl, x.ob.ltV])) },
-      { name:"Liftoff winds vs tower", c:"#C0702A", bins: lmRelSeries(done.map(x => [x.w.rules && x.w.rules.xlw, x.ob.wdV])) }].filter(sr => sr.bins.some(b => b.n) || sr.name.startsWith("PoV")))}
+      ...(selRule ? [{ name:`${selRule.name}`, c:"#8A4FA0", bins: lmRelSeries(done.map(x => [ruleFc(x.w, selRule), ruleObs(x.rec, x.w, x.ob, selRule)])) }] : [])].filter(sr => sr.bins.some(b => b.n) || sr.name.startsWith("PoV")))}
+    <h3>By rule</h3><table class="sc"><thead><tr><th>Rule</th><th>Windows</th><th>Forecast chance</th><th>Observed violations</th><th>Brier score</th><th>Observed from</th></tr></thead><tbody>
+      ${ruleStats.filter(x => x.n || x.nf).map(x => `<tr><th>${hesc(x.rl.name)}</th><td>${x.n}</td><td>${x.r ? Math.round(x.r.mp) + "%" : "–"}</td><td>${x.r ? Math.round(x.r.of*100) + "%" : x.nv ? x.nv + " seen" : "–"}</td><td>${x.r ? x.r.bs.toFixed(3) : "–"}</td><td class="mut">${x.src}</td></tr>`).join("") || '<tr><td colspan="6" class="mut">No rule forecasts or observations yet</td></tr>'}</tbody></table>
     <table class="sc"><thead><tr><th>Forecast PoV</th>${bins.map(b => `<th>${b.a}–${b.b > 100 ? 100 : b.b}%</th>`).join("")}</tr></thead><tbody>
       <tr><th>Windows</th>${bins.map(b => `<td>${b.n}</td>`).join("")}</tr><tr><th>Weather violation observed</th>${bins.map(b => `<td>${b.of == null ? "–" : Math.round(b.of*100) + "%"}</td>`).join("")}</tr></tbody></table>
-    <h3>Windows</h3><div class="scroll"><table class="sc lmt"><thead><tr><th>Mission</th><th>Pad</th><th>Window</th><th>PoV</th><th>Lightning rule</th><th>Liftoff winds</th><th>CG ≤10 nmi</th><th>Peak tower wind</th><th>Rain</th><th>Automatic</th><th>Your call</th></tr></thead><tbody>
+    <h3>Windows</h3><div class="scroll"><table class="sc lmt"><thead><tr><th>Mission</th><th>Pad</th><th>Window</th><th>PoV</th><th>Lightning rule</th><th>Liftoff winds</th><th>CG ≤10 nmi</th><th>Peak tower wind</th><th>Rain</th><th>Automatic</th><th>Uploaded observed</th><th>Your call</th></tr></thead><tbody>
     ${rows.map(({ rec, w, ob }) => { const c = LM.calls[winId(rec, w)] || ""; const yn = v => v == null ? "–" : v ? "violation" : "ok";
       return `<tr><td>${hesc(rec.mission)}<small>${hesc(rec.vehicle)} · issued ${new Date(rec.issued).toISOString().slice(5, 16).replace("T", " ")}Z${rec.by ? " · " + hesc(rec.by) : ""}</small></td><td>${hesc(rec.pad && rec.pad.name || "")}</td><td>${w.i === 0 ? "Launch day" : `Delay ${w.i}`}<small>${fmtW(w.a, w.b)}</small></td>
         <td><b>${w.pov == null ? "–" : w.pov + "%"}</b></td><td>${w.rules && w.rules.rl != null ? w.rules.rl + "%" : "–"}</td><td>${w.rules && w.rules.xlw != null ? w.rules.xlw + "%" : "–"}</td>
         ${ob.pending ? '<td colspan="4" class="mut">window not over yet</td>' : `<td>${ob.cg == null ? "–" : ob.cg}</td><td>${ob.wind == null ? "–" : Math.round(ob.wind) + " kt"}${ob.limKt != null ? `<small>limit ${Math.round(ob.limKt)} kt</small>` : ""}</td><td>${ob.rain == null ? "–" : ob.rain.toFixed(2) + " in"}</td><td class="${ob.auto ? "bad" : ob.auto === 0 ? "good" : ""}">${yn(ob.auto)}</td>`}
+        <td>${(() => { const u = uploadedObs(rec, w); if (!u) return '<span class="mut">–</span>'; const viol = LM_RULES.filter(rl => u.rules[rl.id]).map(rl => rl.name); return `${u.overall === 1 || viol.length ? '<b class="bad">violation</b>' : u.overall === 0 || Object.keys(u.rules).length ? '<span class="good">no violation</span>' : "–"}${viol.length ? `<small>${hesc(viol.join(", "))}</small>` : ""}${u.note ? `<small>${hesc(u.note)}</small>` : ""}`; })()}</td>
         <td><select data-call="${hesc(winId(rec, w))}"><option value="" ${!c ? "selected" : ""}>Use automatic</option><option value="go" ${c === "go" ? "selected" : ""}>No weather violation</option><option value="viol" ${c === "viol" ? "selected" : ""}>Weather violation</option></select></td></tr>`; }).join("")}
     </tbody></table></div>
-    <p class="mut">Windows come from LMEFs exported in this browser, or loaded from database CSVs. "Your call" overrides the automatic check (lightning within 10 nmi, tower wind over the limit, rain with a flight-through-precipitation constraint), and it is what the PoV score uses. Cloud rules can't be observed automatically, so record those violations as your call.</p>`
+    <p class="mut">Windows come from LMEFs exported in this browser, or loaded from forecast CSVs. The outcome is your call if you've made one, otherwise the uploaded observed LLCC data, otherwise the automatic check (lightning within 10 nmi, tower wind over the limit, rain with a flight-through-precipitation constraint), and it is what the PoV score uses. Cloud rules can't be observed automatically, so record those violations as your call.</p>`
     : `<p class="mut">No launch forecasts yet. Every LMEF you export (PDF, HTML, Excel or CSV) is kept here automatically; you can also load LMEF database CSVs.</p>`;
+  if ($("lmSeries")) $("lmSeries").onchange = e => { LM.series = e.target.value; renderLaunch(); };
   box.querySelectorAll("[data-call]").forEach(sel => sel.onchange = () => { if (sel.value) LM.calls[sel.dataset.call] = sel.value; else delete LM.calls[sel.dataset.call]; saveCalls(); renderLaunch(); });
+}
+/* templates for the two uploads */
+function lmTemplate(kind){
+  const rules = LM_RULES.map(r => normCol(r.name.replace(" / ", "_")));
+  const text = kind === "obs"
+    ? ["mission,window_index,window_open_utc,weather_violation," + rules.join(",") + ",notes",
+       `Starlink 10-11,0,11/3/2026 6:00 PM,Y,N,Y,N,N,N,N,N,N,N,N,N,Cumulus within 5 nmi of the flight path at T-0`,
+       `Starlink 10-11,1,11/4/2026 6:00 PM,N,,,,,,,,,,,,`]
+    : ["mission,vehicle,pad_id,issued_utc,forecaster,window_index,window_open_utc,window_close_utc,pov_pct," + rules.map(r => r + "_pct").join(","),
+       `Starlink 10-11,Falcon 9,SLC-40,11/2/2026 9:07 PM,BC,0,11/3/2026 6:00 PM,11/3/2026 10:00 PM,25,15,20,5,0,0,0,0,0,0,0,5`];
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + text.join("\r\n") + "\r\n"], { type:"text/csv" }));
+  a.download = kind === "obs" ? "LMEF_observed_LLCC_template.csv" : "LMEF_forecast_template.csv"; document.body.appendChild(a); a.click(); a.remove();
 }
 /* any CSV with a header row, quoted fields allowed */
 function lmCSV(text){
@@ -605,8 +688,11 @@ function addLMEFdbCSV(text){
   for (const [id, rs] of Object.entries(groups)){
     const r0 = rs[0], padId = Object.keys(LM_PADS).find(k => LM_PADS[k][2].toUpperCase() === String(r0.pad_id || "").toUpperCase());
     const pad = padId ? { id:padId, name:LM_PADS[padId][2], lat:LM_PADS[padId][0], lon:LM_PADS[padId][1] } : { id:"", name:r0.pad_id, lat:28.56, lon:-80.58 };
+    /* optional rule chances: any column naming a rule and ending in _pct, _prob or chance */
+    const rc = Object.keys(r0).map(c => ({ c, rl: /(_pct|_prob|_chance|chance)$/.test(normCol(c)) && !/^(pov|relative_humidity|rh)/.test(normCol(c)) ? ruleOfCol(c) : null })).filter(x => x.rl);
     const rec = { id, mission:r0.mission, vehicle:r0.vehicle, pad, issued:t(r0.issued_utc), by:r0.forecaster || "", liftoff:{}, ftp:false,
-      windows: rs.map(r => ({ i:+r.window_index || 0, a:t(r.window_open_utc), b:t(r.window_close_utc), pov: r.pov_pct === "" ? null : +r.pov_pct, concerns:[r.primary_concern_1, r.primary_concern_2, r.primary_concern_3].filter(Boolean).join(", "), rules:{} })).filter(w => isFinite(w.a)) };
+      windows: rs.map(r => ({ i:+r.window_index || 0, a:t(r.window_open_utc), b:t(r.window_close_utc), pov: r.pov_pct === "" ? null : +r.pov_pct, concerns:[r.primary_concern_1, r.primary_concern_2, r.primary_concern_3].filter(Boolean).join(", "),
+        rules:Object.fromEntries(rc.filter(x => r[x.c] !== "" && r[x.c] != null && isFinite(+String(r[x.c]).replace("%", ""))).map(x => [x.rl.keys[0], +String(r[x.c]).replace("%", "")])) })).filter(w => isFinite(w.a)) };
     LM.recs = LM.recs.filter(x => x.id !== id); LM.recs.push(rec); n++;
   }
   LM.recs.sort((a, b) => b.issued - a.issued); saveLaunchStore(); return n;

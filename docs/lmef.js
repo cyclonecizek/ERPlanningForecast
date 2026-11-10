@@ -212,8 +212,15 @@ function derive(i){
   if (SX.proton){
     const dayP = (SX.proton.days || []).filter(x => A < x.d + 86400e3 && B > x.d).map(x => x.p);
     const p = dayP.length ? Math.max(...dayP) : null, now = SX.proton.now, soon = A - Date.now() < 12*H;
-    risk.proton = RISK_AUTO[(soon && now != null && now >= 100) || (p != null && p >= 50) ? 2 : (soon && now != null && now >= 10) || (p != null && p >= 10) ? 1 : 0];
-    why.proton = [now != null ? `${now < 1 ? now.toFixed(2) : Math.round(now)} pfu now` : "", p != null ? `S1+ ${p}%` : "beyond the 3-day forecast"].filter(Boolean).join(", ");
+    /* the SWPC binned translation: the 3-day forecast's S1+ chance (10 MeV at 10 pfu) on the window's
+       forecast day gives the 50 MeV category; an event already under way near the window raises it */
+    const days = SX.proton.days || [], k = days.findIndex(x => A < x.d + 86400e3 && B > x.d);
+    const pk = k >= 0 ? Math.max(...days.filter(x => A < x.d + 86400e3 && B > x.d).map(x => x.p)) : null;
+    const tbl = SOLAR_TABLES[L.solarTbl] || SOLAR_TABLES[SOLAR_DEFAULT];
+    let lvl = k >= 0 ? solarCat(tbl, Math.min(k, 2), pk) : "Low";
+    if (soon && now != null && now >= 10){ const bump = now >= 100 ? "Moderate" : "Low-Mod"; if (RISK.indexOf(bump) > RISK.indexOf(lvl)) lvl = bump; }
+    risk.proton = lvl;
+    why.proton = [now != null ? `${now < 1 ? now.toFixed(2) : Math.round(now)} pfu now` : "", k >= 0 ? `S1+ ${pk}% on day ${Math.min(k, 2) + 1} → ${lvl} (${tbl.name})` : "beyond the 3-day forecast"].filter(Boolean).join(", ");
   }
   const rec = recoveryEval(A, B);
   if (rec.length){ risk.recovery = RISK_AUTO[Math.max(...rec.map(r => r.lv))]; why.recovery = rec.map(r => `${r.name}: gusts ${r.gmax == null ? "–" : Math.round(r.gmax) + " kt"}, seas ${r.wmax == null ? "–" : r.wmax.toFixed(1) + " ft"}`).join("; "); }
@@ -236,6 +243,14 @@ function keepLMEFForVerify(){
     q.onsuccess = () => { const os = q.result.transaction("official", "readwrite").objectStore("official"), g = os.get("lmef");
       g.onsuccess = () => { const arr = (g.result || []).filter(x => x.id !== rec.id && Date.now() - x.issued < 400*86400e3); arr.push(rec); os.put(arr, "lmef"); }; };
   } catch (e) { /* storage unavailable */ }
+}
+/* the mission as the products print it: vehicle first ("Vulcan KA-01", "Falcon 9 Starlink 3-48"),
+   unless the mission name already starts with the vehicle */
+function missionLabel(){
+  const m = (L.mission || "").trim(), v = (L.vehicle || "").trim();
+  if (!v) return m; if (!m) return v;
+  const norm = t => t.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return norm(m).startsWith(norm(v)) ? m : `${v} ${m}`;
 }
 /* the liftoff wind in the customer's unit (the range is built in mph, rounded to 5) */
 function windText(dir, loMph, hiMph){
@@ -316,7 +331,7 @@ function productHTML(logo){
     <header class="lm-head">
       ${logo ? `<img src="data:image/png;base64,${logo.b64}" alt="45th Weather Squadron">` : `<img src="${LOGO_SRC}" alt="45th Weather Squadron" onerror="this.remove()">`}
       <div class="lm-title"><p class="lm-kicker">45th Weather Squadron</p><h1>Launch Mission Execution Forecast</h1>
-        <div class="lm-mission"><b>${hesc(L.mission || "Mission name")}</b><span>${hesc(L.vehicle || "")}${pad ? " · " + pad.name : ""}</span></div></div>
+        <div class="lm-mission"><b>${hesc(missionLabel() || "Mission name")}</b><span>${hesc(L.vehicle || "")}${pad ? " · " + pad.name : ""}</span></div></div>
       <div class="lm-meta"><div><span>Issued</span><b>${issuedText(issued)}</b></div><div><span>Launch window</span><b>${winText(W0.a, W0.b)}</b></div></div>
     </header>
     <section class="lm-disc"><h3>Forecast discussion</h3><p>${hesc(L.discussion || "").replace(/\n/g, "<br>")}</p></section>
@@ -375,7 +390,7 @@ const LM_CSS = `.edgrid .u select{flex:1;width:100%;min-width:0;border:1px solid
 /* ---------- exports ---------- */
 function fieldRows(){
   const pad = PADS.find(p => p.id === L.pad) || PADS[2], W0 = (L.windows || [])[0] || {}, out = [];
-  out.push(["Mission", L.mission], ["Vehicle", L.vehicle], ["Pad", pad.full], ["Issued", issuedText(L.issued || Date.now())], ["Launch window", winText(W0.a, W0.b)], ["Forecast discussion", L.discussion]);
+  out.push(["Mission", missionLabel()], ["Vehicle", L.vehicle], ["Pad", pad.full], ["Issued", issuedText(L.issued || Date.now())], ["Launch window", winText(W0.a, W0.b)], ["Forecast discussion", L.discussion]);
   (L.windows || []).forEach((w, i) => {
     const D = dayData(i), lab = winLabel(i);
     out.push([`${lab} window`, winText(w.a, w.b)], [`${lab} PoV`, D.povText]);
@@ -495,7 +510,7 @@ function csvLMEF(){ return csvLMEFdb(); }
 function xlsxLMEF(logo){
   const rows = [], merges = [], heights = {};
   rows.push([{ v:"Launch Mission Execution Forecast", s:1 }]); heights[0] = 24; merges.push("A1:C1");
-  rows.push([{ v:`${L.mission || ""}  |  ${L.vehicle || ""}  |  ${(PADS.find(p => p.id === L.pad) || {}).name || ""}`, s:2 }]); merges.push("A2:C2");
+  rows.push([{ v:`${missionLabel()}  |  ${(PADS.find(p => p.id === L.pad) || {}).name || ""}`, s:2 }]); merges.push("A2:C2");
   rows.push([]); rows.push([]);
   let section = null;
   const labs = (L.windows || []).map((w, i) => winLabel(i));
@@ -525,11 +540,11 @@ function pdfLMEF(logo){
     if (full){
       text("45TH WEATHER SQUADRON", tx, 28, 8, { bold:true, color:[251,185,64] });
       text("Launch Mission Execution Forecast", tx, 48, 18, { bold:true, color:[255,255,255] });
-      text(L.mission || "Mission name", tx, 68, 13, { bold:true, color:[255,255,255] });
+      text(missionLabel() || "Mission name", tx, 68, 13, { bold:true, color:[255,255,255] });
       text(`${L.vehicle || ""}  |  ${pad.full}`, tx, 84, 9, { color:[205,216,226] });
       text("ISSUED", W - M, 30, 6.5, { bold:true, align:"r", color:[170,186,201] }); text(issuedText(L.issued || Date.now()), W - M, 41, 8.5, { align:"r", color:[255,255,255] });
       text("LAUNCH WINDOW", W - M, 58, 6.5, { bold:true, align:"r", color:[170,186,201] }); text(winText(W0.a, W0.b), W - M, 69, 8.5, { align:"r", color:[255,255,255] });
-    } else { text(`Launch Mission Execution Forecast: ${L.mission || ""} (continued)`, tx, 28, 11, { bold:true, color:[255,255,255] }); }
+    } else { text(`Launch Mission Execution Forecast: ${missionLabel()} (continued)`, tx, 28, 11, { bold:true, color:[255,255,255] }); }
     return hh;
   };
   let y = header(true) + 18;
@@ -608,9 +623,9 @@ function pdfLMEFLegacy(logo, seal){
     if (seal) { const sw = ih*seal.rw/seal.rh; cs.push(`q ${f(sw)} 0 0 ${f(ih)} ${f(X0 + 8)} ${f(Hp - 16 - (hh - ih)/2 - ih)} cm /Im2 Do Q`); }
     if (logo) { const lw2 = ih*logo.rw/logo.rh; cs.push(`q ${f(lw2)} 0 0 ${f(ih)} ${f(X1 - 8 - lw2)} ${f(Hp - 16 - (hh - ih)/2 - ih)} cm /Im1 Do Q`); }
     const tx = seal ? X0 + 132 : X0 + 14;
-    if (cont){ text(`Launch Mission Execution Forecast: ${L.mission || ""} (continued)`, tx, 43, 13, "b"); return 16 + hh; }
+    if (cont){ text(`Launch Mission Execution Forecast: ${missionLabel()} (continued)`, tx, 43, 13, "b"); return 16 + hh; }
     text("Launch Mission Execution Forecast", tx, 42, 17, "b");
-    [["Mission", L.mission || ""], ["Issued", legacyTimes(L.issued || Date.now())], ["Valid", W0.a ? legacyTimes(W0.a, W0.b) : ""]].forEach(([k, v], n) => { text(`${k}:`, tx, 60 + n*15, 11, "b"); text(v, tx + 62, 60 + n*15, 11); });
+    [["Mission", missionLabel()], ["Issued", legacyTimes(L.issued || Date.now())], ["Valid", W0.a ? legacyTimes(W0.a, W0.b) : ""]].forEach(([k, v], n) => { text(`${k}:`, tx, 60 + n*15, 11, "b"); text(v, tx + 62, 60 + n*15, 11); });
     return 16 + hh;
   };
   let y = header(false);
@@ -688,7 +703,7 @@ async function loadSeal(){
 }
 const sealURL = () => localStorage.getItem("lmef:seal") || SEAL_SRC;
 function htmlLMEF(logo){
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LMEF ${hesc(L.mission || "")}</title><link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet"><style>body{margin:0;padding:24px;background:#EEF2F4}${LM_CSS}@media print{body{background:#fff;padding:0}.lm{box-shadow:none}}</style></head><body>${productHTML(logo)}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LMEF ${hesc(missionLabel())}</title><link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet"><style>body{margin:0;padding:24px;background:#EEF2F4}${LM_CSS}@media print{body{background:#fff;padding:0}.lm{box-shadow:none}}</style></head><body>${productHTML(logo)}</body></html>`;
 }
 
 
@@ -790,7 +805,7 @@ function renderSetup(){
   if (!$("lmLift").contains(ae)) $("lmLift").innerHTML = `<label>Height <span class="u"><input data-l="h" type="number" min="10" max="600" value="${L.liftoff.h}"> ft</span></label><label>Wind <select data-l="kind">${[["peak","Peak"],["sust","Sustained"]].map(([v, l]) => `<option value="${v}" ${L.liftoff.kind === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label>Limit <span class="u"><select data-l="op"><option value=">" ${L.liftoff.op === ">" ? "selected" : ""}>&gt;</option><option value=">=" ${L.liftoff.op === ">=" ? "selected" : ""}>≥</option></select><input data-l="v" type="number" min="0" value="${L.liftoff.v}"></span></label><label>Units <select data-l="unit">${Object.keys(LIFT_UNITS).map(u => `<option ${u === L.liftoff.unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>`;
   $("lmFtp").checked = !!L.ftp; if ($("lmWindRange") !== ae) $("lmWindRange").value = L.windRange || "avg";
   if (!$("lmWins").contains(ae)) $("lmWins").innerHTML = (L.windows || []).map((w, i) => `<div class="wrow" data-w="${i}"><span>${winLabel(i)}</span><input type="datetime-local" data-wa="a" value="${toInput(w.a)}"><input type="datetime-local" data-wa="b" value="${toInput(w.b)}">${i ? `<button type="button" class="x" data-delw="${i}" aria-label="Remove ${winLabel(i)}">×</button>` : "<i></i>"}</div>`).join("") + `<button type="button" class="lnk" id="lmAddWin">+ add delay day</button>`;
-  if (!$("lmRisks").contains(ae)) $("lmRisks").innerHTML = L.risks.map((r, i) => { const b = BUILTIN_RISKS.find(x => x.id === r.id); return `<div class="rrow" data-r="${i}"><input type="checkbox" data-ron ${r.on ? "checked" : ""} aria-label="Show ${hesc(r.name)}">${b ? `<span>${hesc(r.name)}<small>auto from ${b.auto}</small></span><i></i>` : `<input data-rname value="${hesc(r.name)}" placeholder="Criterion name"><button type="button" class="x" data-delr="${i}" aria-label="Remove">×</button>`}</div>`; }).join("") + `<button type="button" class="lnk" id="lmAddRisk">+ custom criterion</button>`;
+  if (!$("lmRisks").contains(ae)) $("lmRisks").innerHTML = L.risks.map((r, i) => { const b = BUILTIN_RISKS.find(x => x.id === r.id); return `<div class="rrow" data-r="${i}"><input type="checkbox" data-ron ${r.on ? "checked" : ""} aria-label="Show ${hesc(r.name)}">${b ? `<span>${hesc(r.name)}<small>auto from ${b.auto}${r.id === "proton" ? `, SWPC binned translation <select data-solar aria-label="Translation table">${Object.entries(SOLAR_TABLES).map(([k, t]) => `<option value="${k}" ${(L.solarTbl || SOLAR_DEFAULT) === k ? "selected" : ""}>${hesc(t.name)}</option>`).join("")}</select>` : ""}</small></span><i></i>` : `<input data-rname value="${hesc(r.name)}" placeholder="Criterion name"><button type="button" class="x" data-delr="${i}" aria-label="Remove">×</button>`}</div>`; }).join("") + `<button type="button" class="lnk" id="lmAddRisk">+ custom criterion</button>`;
   if (!$("lmRec").contains(ae)) $("lmRec").innerHTML = ((L.recovery || []).length ? `<div class="recrow hd"><span>Site</span><span>Latitude</span><span>Longitude</span><span>Max wind</span><span>Max seas</span><i></i></div>` : `<p class="mut">Add the booster or fairing recovery site to evaluate its winds and seas against your limits.</p>`) + (L.recovery || []).map((r, i) => `<div class="recrow" data-k="${i}"><input data-rc="name" value="${hesc(r.name || "")}" placeholder="Site (e.g. ASDS)"><input data-rc="lat" inputmode="decimal" value="${r.lat ?? ""}" placeholder="Lat"><input data-rc="lon" inputmode="decimal" value="${r.lon ?? ""}" placeholder="Lon"><span class="u"><input data-rc="windKt" type="number" value="${r.windKt ?? ""}" placeholder="Wind"> kt</span><span class="u"><input data-rc="waveFt" type="number" step="0.5" value="${r.waveFt ?? ""}" placeholder="Seas"> ft</span><button type="button" class="x" data-delrec="${i}" aria-label="Remove site">×</button></div>`).join("") + `<button type="button" class="lnk" id="lmAddRec">+ recovery site</button>`;
 }
 function renderProductEditor(){
@@ -863,7 +878,7 @@ function productHTMLLegacy(){
   const ncol = rk.length ? 3 : 2;
   return `<div class="lg"><div class="lg-note">Preview of the legacy PDF</div><table class="lg-t">
     <tr><td colspan="${ncol + 1}" class="lg-head"><img src="${hesc(sealURL())}" alt="" class="lg-seal" onerror="this.style.visibility='hidden'"><div class="lg-title"><h2>Launch Mission Execution Forecast</h2>
-      <p><b>Mission:</b><span>${hesc(L.mission || "")}</span></p><p><b>Issued:</b><span>${hesc(legacyTimes(L.issued || Date.now()))}</span></p><p><b>Valid:</b><span>${W0.a ? hesc(legacyTimes(W0.a, W0.b)) : ""}</span></p></div>
+      <p><b>Mission:</b><span>${hesc(missionLabel())}</span></p><p><b>Issued:</b><span>${hesc(legacyTimes(L.issued || Date.now()))}</span></p><p><b>Valid:</b><span>${W0.a ? hesc(legacyTimes(W0.a, W0.b)) : ""}</span></p></div>
       <img src="${hesc(LOGO_SRC)}" alt="" class="lg-logo" onerror="this.style.visibility='hidden'"></td></tr>
     <tr><td colspan="${ncol + 1}" class="lg-disc"><b>Forecast Discussion:</b> ${hesc(L.discussion || "")}</td></tr>
     ${(L.windows || []).map(sec).join("")}
@@ -978,7 +993,7 @@ function bindLM(){
     if (e.target.id === "lmAddWin"){ const last = L.windows[L.windows.length - 1]; L.windows.push({ a:last.a + 24*H, b:last.b + 24*H }); reconfigure(false); }
     if (e.target.dataset.delw){ const i = +e.target.dataset.delw; L.windows.splice(i, 1); L.days.splice(i, 1); reconfigure(false); }
   });
-  $("lmRisks").addEventListener("change", e => { const row = e.target.closest("[data-r]"); if (!row) return; const r = L.risks[+row.dataset.r]; if (e.target.hasAttribute("data-ron")) r.on = e.target.checked; if (e.target.hasAttribute("data-rname")) r.name = e.target.value; saveL(); refreshProduct(); });
+  $("lmRisks").addEventListener("change", e => { if (e.target.hasAttribute("data-solar")){ L.solarTbl = e.target.value; saveL(); refreshProduct(); return; } const row = e.target.closest("[data-r]"); if (!row) return; const r = L.risks[+row.dataset.r]; if (e.target.hasAttribute("data-ron")) r.on = e.target.checked; if (e.target.hasAttribute("data-rname")) r.name = e.target.value; saveL(); refreshProduct(); });
   $("lmRisks").addEventListener("input", e => { if (!e.target.hasAttribute("data-rname")) return; L.risks[+e.target.closest("[data-r]").dataset.r].name = e.target.value; saveL(); renderPreview(); });
   $("lmRisks").addEventListener("click", e => {
     if (e.target.tagName === "BUTTON") e.target.blur();
@@ -1024,7 +1039,7 @@ function bindLM(){
     if (e.target.dataset.delc != null){ if (!ov.clouds) ov.clouds = (dayData(i).clouds || []).map(c => ({ ...c })); ov.clouds.splice(+e.target.dataset.delc, 1); saveL(); box.innerHTML = ""; refreshProduct(); }
   });
   const stamp = () => { const p = lp(Date.now()); return `${p.y}${lpad(p.mo)}${lpad(p.d)}_${lpad(p.h)}${lpad(p.mi)}`; };
-  const base = () => `LMEF_${(L.mission || "Mission").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}_${stamp()}`;
+  const base = () => `LMEF_${(missionLabel() || "Mission").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}_${stamp()}`;
   $("lmSchFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) schedUpload(f, () => { renderMissions(); const n = SX.official.find(x => x.w1 > Date.now()); if (n && !String(L.missionId || "").startsWith("sched:")){ $("lmMission").value = n.id; pickMission(n.id); } }, "launch"); };
   $("lmSchTpl").onclick = () => download(new Blob([SCHED_TEMPLATE], { type:"text/csv" }), "Official_Schedule_template.csv");
   $("lmSchClear").onclick = () => { if (!confirm("Remove the official launches stored on this computer?")) return; saveSched(loadSched().filter(x => x.type !== "launch")); renderMissions(); };
