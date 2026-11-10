@@ -13,6 +13,22 @@ published as Excel or CSV. Static page on GitHub Pages; everything runs in the b
 
 Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days 6 and 7.
 
+## Rows shown, rain and hail
+* **Rows shown** (above the table on the forecast pages): a checkbox for every row, grouped as in the table,
+  with Show all and Hide all. Hidden rows leave the table, the graph list and the PDF, Excel and HTML products;
+  the CSV keeps every column. Saved with the page's settings.
+* **SPC hail** (Days 1 and 2): the chance of hail 1 inch or larger within 25 mi, as a Severe potential row on
+  the planning forecast. The MOS workflow mirrors `spc_hail_dayN.json`; the page falls back to SPC directly.
+* **Exposure constraints:** **Rain** (rate, the wettest hour in the row, or the total in the period, in inches
+  or mm; its chance comes from the models' hourly precipitation, and a QPF row is added for context) and **Hail
+  (SPC)** (the SPC hail probability, flagged at the chosen percentage).
+
+## Retired sources
+HREF (and its SPC calibrated thunder), the NAM 3 km and NAM MOS were retired by NCEP on 3 November 2026 and
+have been removed from every page, the MOS mirror, the high-resolution job and verification. Thunder
+guidance now comes from the REFS calibrated thunder, MOS (LAMP, GFS MOS, NBM text) and the NWS forecast.
+Their past scores stay in the verification archive under their old names.
+
 ## REFS members
 The high-resolution job fetches the five RRFS ensemble members (the REFS membership, `rrfsens.YYYYMMDD/CC/m00N/`
 on AWS and NOMADS) **first, in parallel**, with only the fields they feed (temperature, dew point, 10 and

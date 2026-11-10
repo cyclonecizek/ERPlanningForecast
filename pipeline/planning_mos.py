@@ -18,7 +18,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "docs", "data", "mos")
 STATIONS = ["KTTS", "KXMR", "KCOF"]           # SLF / LC-39B, KXMR / SLC-37, Patrick
-MODELS = ["LAV", "GFS", "NAM", "GFSX", "NBS", "NBE"]
+MODELS = ["LAV", "GFS", "GFSX", "NBS", "NBE"]   # NAM MOS retired with the NAM, 3 Nov 2026
 IEM = "https://mesonet.agron.iastate.edu/api/1/mos.json?{st}&model={model}"
 SPC = "https://www.spc.noaa.gov/products/outlook/day{d}otlk_cat.nolyr.geojson"
 # WPC Excessive Rainfall Outlook, Days 1-5 (NWS map service, GeoJSON in lat/lon)
@@ -153,6 +153,15 @@ def main():
                 print(f"SPC day {d}: {len(js['features'])} features")
         except Exception as e:  # noqa: BLE001
             print(f"SPC day {d}: failed ({e}), keeping previous file")
+    # SPC hail probability, Days 1 and 2
+    for d in (1, 2):
+        try:
+            js = get(f"https://www.spc.noaa.gov/products/outlook/day{d}otlk_hail.nolyr.geojson")
+            if isinstance(js, dict) and "features" in js:
+                write(f"spc_hail_day{d}.json", js)
+                print(f"SPC hail day {d}: {len(js['features'])} features")
+        except Exception as e:  # noqa: BLE001
+            print(f"SPC hail day {d}: failed ({e}), keeping previous file")
     for d in range(1, 6):
         try:
             js = get(ERO.format(layer=d - 1))

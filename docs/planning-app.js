@@ -13,6 +13,8 @@ const LS = PERSONAL ? { edits:"persfx:v1:edits", prefs:"persfx:v1:prefs", pub:"p
 /* the LMEF page supplies its own points, parameters, rows and rule guidance through these hooks */
 const HOOKS = (typeof window !== "undefined" && (window.EDITOR_HOOKS = window.EDITOR_HOOKS || {})) || {};
 const PLANNING_PARAMS = PARAMS.map(p => ({ ...p }));
+/* rows the forecaster has switched off: kept out of the table, graphs list and products (the CSV keeps every column) */
+const shownParams = () => { const h = (typeof prefs !== "undefined" && prefs.hideRows) || []; return h.length ? PARAMS.filter(p => !h.includes(p.k)) : PARAMS; };
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
@@ -146,6 +148,16 @@ function constraintParams(exp){
       return { k:"x" + c.id, g:"Constraint probability (%)", l:`${opText(c.op)}${fmtNum(+c.v)} ${c.unit}`, s:`${ft} ft ${c.kind === "sust" ? "sust" : "peak"}`, chip:`${ft} ft ${c.kind === "sust" ? "sust" : "peak"} ${opText(c.op)}${fmtNum(+c.v)}${c.unit === "kt" ? "" : " " + c.unit}`,
         kind:"prob", ex:key, dep:[key], op:c.op, v:kt, title:`${c.kind === "sust" ? "Sustained" : "Peak"} wind at ${ft} ft ${opText(c.op)} ${fmtNum(+c.v)} ${c.unit}`, csv:`p_${c.kind}${ft}ft_${c.op === ">" ? "gt" : "ge"}${fmtNum(+c.v)}${c.unit.replace("/", "")}_pct`, cons:c, thrKt:kt, ft };
     }
+    if (c.type === "rain"){
+      /* rain rate (the wettest hour in the row) or rain total over the row, in inches */
+      const inch = c.unit === "mm" ? (+c.v || 0)/25.4 : (+c.v || 0), rate = c.kind === "rate", u = c.unit === "mm" ? "mm" : "in";
+      return { k:"x" + c.id, g:"Constraint probability (%)", l:`${opText(c.op)}${fmtNum(+c.v)} ${u}${rate ? "/hr" : ""}`, s: rate ? "rain rate" : "rain total", chip:`Rain ${rate ? "rate" : "total"} ${opText(c.op)}${fmtNum(+c.v)} ${u}${rate ? "/hr" : ""}`,
+        kind:"prob", ex: rate ? "prmax" : "qpf", dep:[], op:c.op, v:inch, title: rate ? `Rain rate ${opText(c.op)} ${fmtNum(+c.v)} ${u} per hour` : `Rain total in the period ${opText(c.op)} ${fmtNum(+c.v)} ${u}`, csv:`p_rain_${rate ? "rate" : "total"}_${c.op === ">" ? "gt" : "ge"}${fmtNum(+c.v)}${u}_pct`, cons:c };
+    }
+    if (c.type === "hail"){
+      /* SPC hail probability at the point (chance of 1 in+ hail within 25 mi), flagged at the threshold */
+      return { k:"hailp", g:"Constraint probability (%)", l:`Hail ≥${fmtNum(+c.v)}%`, s:"SPC", chip:"Hail (SPC)", kind:"num", thr:[+c.v], title:`SPC hail probability, flagged at ${fmtNum(+c.v)}% or more (Days 1-2)`, csv:"spc_hail_pct", cons:c };
+    }
     const f = c.unit === "C" ? (+c.v)*9/5 + 32 : +c.v, below = c.op === "<" || c.op === "<=";
     return { k:"x" + c.id, g:"Constraint probability (%)", l:`${below ? "<" : ">"}${fmtNum(+c.v)}°${c.unit}`, s:"temp", chip:`Temp ${below ? "<" : ">"}${fmtNum(+c.v)}°${c.unit}`, kind:"prob", ex: below ? "tmin" : "tmax", dep:["t"], op: below ? "<" : ">", v:f,
       title:`Temperature ${below ? "below" : "above"} ${fmtNum(+c.v)}°${c.unit}`, csv:`p_temp_${below ? "lt" : "gt"}${fmtNum(+c.v)}${c.unit}_pct`, cons:c };
@@ -217,7 +229,9 @@ function applyExposureConfig(exp){
     return [ { k:"s" + ft, g:"Winds (kt)", l:`${ft} ft`, s:"sust", kind:"num", unit:"kt", step:1, lo:0, title:`${ft} ft sustained wind`, thr, csv:`wind${ft}ft_sust_kt` },
              { k:"g" + ft, g:"Winds (kt)", l:`${ft} ft`, s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:`${ft} ft peak wind`, thr, peakOf:"s" + ft, csv:`wind${ft}ft_peak_kt` } ];
   });
-  const list = [...["sky","t","td","wbgt","pp1","pp3","pp6","lt1","lt3","lt6"].map(base), ...winds, base("dir"), ...cons.map(p => ({ ...p, unit:"%", step:1, lo:0, hi:100 })), base("sev")];
+  const hasRain = (exp.constraints || []).some(c => c.type === "rain");
+  const consRows = cons.filter((p, i) => p.k !== "hailp" || cons.findIndex(q => q.k === "hailp") === i);
+  const list = [...["sky","t","td","wbgt","pp1","pp3","pp6", ...(hasRain ? ["qpf"] : []),"lt1","lt3","lt6"].map(base), ...winds, base("dir"), ...consRows.map(p => ({ ...p, unit:"%", step:1, lo:0, hi:100 })), base("sev")];
   list.find(p => p.k === "dir").s = `${hs[0]} ft`;
   const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", wbgt:"wbgt_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg", sev:"spc_category" };
   list.forEach(p => { if (CSVN[p.k]) p.csv = CSVN[p.k]; });
@@ -230,7 +244,7 @@ function constraintSummary(){
   if (PERSONAL) return "";
   if (BURN) return burnSummary();
   const cons = constraintParams(prefs.exp || expStored);
-  return cons.length ? "Constraints: " + cons.map((p, j) => j ? p.title.charAt(0).toLowerCase() + p.title.slice(1) : p.title).join("; ") + "." : "No constraints set.";
+  return cons.length ? "Constraints: " + cons.map((p, j) => j && !/^[A-Z]{2}/.test(p.title) ? p.title.charAt(0).toLowerCase() + p.title.slice(1) : p.title).join("; ") + "." : "No constraints set.";
 }
 if (EXPO) applyExposureConfig(expStored);
 if (LMEF && HOOKS.config) HOOKS.config();
@@ -514,10 +528,14 @@ function renderExpSetup(){
     }).join("") : `<p class="mut">No prescription yet. Add the burn plan's limits (humidity, winds, mixing height, transport wind, dispersion) to get the chance each one, and all together, is met.</p>`;
     return;
   }
-  $("expCons").innerHTML = e.constraints.length ? e.constraints.map(c => c.type === "wind"
+  $("expCons").innerHTML = e.constraints.length ? e.constraints.map(c => c.type === "rain"
+    ? `<div class="con" data-id="${c.id}"><span class="ct">Rain</span>${sel("kind", [["rate","Rate (wettest hour)"],["total","Total in the period"]], c.kind)}${sel("op", [[">=","≥"],[">",">"]], c.op)}<input data-f="v" type="number" min="0" step="0.05" value="${c.v}">${sel("unit", [["in", c.kind === "rate" ? "in/hr" : "in"],["mm", c.kind === "rate" ? "mm/hr" : "mm"]], c.unit)}<button type="button" class="x" data-del="${c.id}" aria-label="Remove constraint">×</button></div>`
+    : c.type === "hail"
+    ? `<div class="con" data-id="${c.id}"><span class="ct">Hail (SPC)</span><span class="mut">flag at</span><input data-f="v" type="number" min="5" max="60" step="5" value="${c.v}"><span class="mut">% chance within 25 mi</span><button type="button" class="x" data-del="${c.id}" aria-label="Remove constraint">×</button></div>`
+    : c.type === "wind"
     ? `<div class="con" data-id="${c.id}"><span class="ct">Wind</span><label><input data-f="h" type="number" min="5" max="600" step="1" value="${c.h}"> ft</label>${sel("kind", [["peak","Peak"],["sust","Sustained"]], c.kind)}${sel("op", [[">=","≥"],[">",">"]], c.op)}<input data-f="v" type="number" min="0" step="1" value="${c.v}">${sel("unit", Object.keys(WIND_UNITS).map(u => [u, u]), c.unit)}<button type="button" class="x" data-del="${c.id}" aria-label="Remove constraint">×</button></div>`
     : `<div class="con" data-id="${c.id}"><span class="ct">Temperature</span>${sel("op", [["<","Below"],[">","Above"]], c.op)}<input data-f="v" type="number" step="1" value="${c.v}">${sel("unit", [["F","°F"],["C","°C"]], c.unit)}<button type="button" class="x" data-del="${c.id}" aria-label="Remove constraint">×</button></div>`).join("")
-    : `<p class="mut">No constraints yet. Add a wind or temperature constraint to get its probability in the forecast.</p>`;
+    : `<p class="mut">No constraints yet. Add a wind, temperature or rain constraint, or the SPC hail chance, to get it in the forecast.</p>`;
 }
 let expT = null;
 function expChanged(full){
@@ -955,6 +973,9 @@ function bindExp(){
   }
   $("addWind").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"wind", h:60, kind:"peak", op:">=", v:25, unit:"kt" }); expChanged(false); };
   $("addTemp").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"temp", op:">", v:95, unit:"F" }); expChanged(false); };
+  if ($("addRain")) $("addRain").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"rain", kind:"rate", op:">=", v:0.5, unit:"in" }); expChanged(false); };
+  if ($("addHail")) $("addHail").onclick = () => { if (prefs.exp.constraints.some(c => c.type === "hail")){ toast("There's already a hail constraint"); return; } prefs.exp.constraints.push({ id:newId(), type:"hail", v:15 }); expChanged(false); };
+  if (BURN){ ["addRain", "addHail"].forEach(id => { if ($(id)) $(id).hidden = true; }); }
   bindTpls();
   renderSchedExpo();
   $("schUse").onclick = () => useSchedExpo($("schSel").value);
@@ -995,9 +1016,31 @@ const chartGroups = () => LMEF ? [
   ...(LMEF ? [["Probability of violation", PARAMS.filter(p => p.k === "rpov").map(p => p.k)], ["LLCC rules", PARAMS.filter(p => /^r/.test(p.k) && p.k !== "rpov").map(p => p.k)]] : []),
 ].filter(g => g[1].length);
 const chipName = k => ({ sky:"Sky", t:"Temp", td:"Dew pt", wbgt:"WBGT", pp:"Precipitation", lt:"Lightning", dir:"Direction", xhot:`>${hotOf(site())}°F` }[k] || (VIEWS[k] ? VIEWS[k].chip : P[k] ? (P[k].chip || P[k].l) : k));
+/* rows shown: a checkbox per row, grouped as the table groups them, with show-all and hide-all */
+function renderRowPick(){
+  if (!$("matrix")) return;
+  if (!$("rowPick")){
+    $("matrix").insertAdjacentHTML("beforebegin", `<details class="panel rowpick" id="rowPick"><summary><span class="chev">&#9656;</span>Rows shown <span class="sum" id="rowSum"></span></summary><div class="srcbar"><button type="button" class="btn ghost" id="rowAll">Show all</button><button type="button" class="btn ghost" id="rowNone">Hide all</button><span class="mut">Hidden rows stay out of the table, the graph list and the PDF, Excel and HTML products; the CSV keeps every column.</span></div><div class="rowgrid" id="rowList"></div></details>`);
+    $("rowList").addEventListener("change", ev => {
+      const t = ev.target, h = new Set(prefs.hideRows || []);
+      if (t.dataset.row){ if (t.checked) h.delete(t.dataset.row); else h.add(t.dataset.row); }
+      if (t.dataset.rg){ PARAMS.filter(p => grpLabel(p.g) === t.dataset.rg).forEach(p => t.checked ? h.delete(p.k) : h.add(p.k)); }
+      prefs.hideRows = [...h]; savePrefs(); renderAll();
+    });
+    $("rowAll").onclick = () => { prefs.hideRows = []; savePrefs(); renderAll(); };
+    $("rowNone").onclick = () => { prefs.hideRows = PARAMS.map(p => p.k); savePrefs(); renderAll(); toast("Every row hidden: tick the rows you want back"); };
+  }
+  const h = new Set(prefs.hideRows || []), groups = [];
+  PARAMS.forEach(p => { const g = grpLabel(p.g), last = groups[groups.length - 1]; if (last && last.g === g) last.ps.push(p); else groups.push({ g, ps:[p] }); });
+  $("rowList").innerHTML = groups.map(gr => { const on = gr.ps.filter(p => !h.has(p.k)).length;
+    return `<div class="rowfam"><label class="rg"><input type="checkbox" data-rg="${hesc(gr.g)}" ${on === gr.ps.length ? "checked" : ""}> <b>${hesc(gr.g)}</b></label>${gr.ps.map(p => `<label><input type="checkbox" data-row="${p.k}" ${h.has(p.k) ? "" : "checked"}> ${hesc(p.l)}${p.s ? ` <span class="mut">${hesc(p.s)}</span>` : ""}</label>`).join("")}</div>`; }).join("");
+  document.querySelectorAll("#rowList [data-rg]").forEach(x => { const gr = groups.find(g => g.g === x.dataset.rg); const on = gr.ps.filter(p => !h.has(p.k)).length; x.indeterminate = on > 0 && on < gr.ps.length; });
+  const nOn = PARAMS.filter(p => !h.has(p.k)).length; $("rowSum").textContent = nOn === PARAMS.length ? "all rows" : `${nOn} of ${PARAMS.length} rows`;
+}
 function renderParams(){
   const e = edits[prefs.site] || {};
-  $("params").innerHTML = chartGroups().map(([gl, ks]) => `<div class="pgroup"><span class="gl">${gl}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${keysOf(k).some(q => e[q] && Object.keys(e[q]).length) ? "edited" : ""}" data-p="${k}" aria-pressed="${k === prefs.param}">${chipName(k)}</button>`).join("")}</div></div>`).join("");
+  const hid = new Set(prefs.hideRows || []);
+  $("params").innerHTML = chartGroups().map(([gl, ks]) => [gl, ks.filter(k => keysOf(k).some(q => !hid.has(q)))]).filter(([, ks]) => ks.length).map(([gl, ks]) => `<div class="pgroup"><span class="gl">${gl}</span><div class="chips">${ks.map(k => `<button type="button" class="chip ${keysOf(k).some(q => e[q] && Object.keys(e[q]).length) ? "edited" : ""}" data-p="${k}" aria-pressed="${k === prefs.param}">${chipName(k)}</button>`).join("")}</div></div>`).join("");
 }
 /* the automatic factor for the parameter on the graph, day 1, at the selected point */
 function autoKey(){ const ks = keysOf(prefs.param); const k = ks[0] || "t"; return /^pp/.test(k) ? "pop" : /^lt/.test(k) ? "tst" : P[k] && P[k].ex ? P[k].ex : k; }
@@ -1049,7 +1092,7 @@ function renderStatus(){
   else if (!S.loading && ok === 0){ b.className = "banner show"; b.textContent = "Couldn't reach any guidance source from this browser. Check the network connection, then press Refresh guidance. You can still type a forecast into the table."; }
   else if (!S.loading && ![...OM_DET, ...OM_ENS].some(d => (S.status[d.id] || {}).ok)){ b.className = "banner show"; b.textContent = "Model guidance from Open-Meteo didn't load, so only MOS and LAMP are showing. Press Refresh guidance to try again."; }
   else if (PERSONAL && !S.loading && OF && OF.o && ["lt1","lt3","lt6"].every(k => !OF.o[k] || OF.o[k].every(v => v == null))){ b.className = "banner show"; b.textContent = "No thunder guidance for this place, so the thunder rows are blank. Fill them in by hand if needed."; }
-  else if (!PERSONAL && !S.loading && !["lav","mav","nbs","met","mex","nbe","hrefct","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
+  else if (!PERSONAL && !S.loading && !["lav","mav","nbs","mex","nbe","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
   else b.className = "banner";
 }
 
@@ -1087,11 +1130,11 @@ function cellTitle(p, r, i){
 function recompute(){ OF = officialFor(prefs.site); QC = qcIssues(prefs.site, OF); }
 function renderTable(){
   const s = site(), rows = S.rows, { o } = OF, e = edits[s.id] || {}, z = zulu();
-  const groups = []; PARAMS.forEach(p => { const g = groups[groups.length - 1]; if (g && g.g === p.g) g.n++; else groups.push({ g:p.g, n:1 }); });
+  const groups = []; shownParams().forEach(p => { const g = groups[groups.length - 1]; if (g && g.g === p.g) g.n++; else groups.push({ g:p.g, n:1 }); });
   let h = `<table class="mx"><thead><tr class="g"><th class="stick" rowspan="1"></th><th class="stick2"></th>${groups.map(g => `<th colspan="${g.n}" class="gstart">${grpLabel(g.g)}</th>`).join("")}</tr>`;
   h += `<tr class="c"><th class="stick">Day</th><th class="stick2">Time<small>${tzLabel()}</small></th>`;
   let lastG = null;
-  for (const p of PARAMS){ const gs = p.g !== lastG; lastG = p.g; h += `<th data-p="${p.k}" class="${gs ? "gstart" : ""} ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" title="${p.title}">${colLabel(p, s)}${p.s ? `<small>${p.s}</small>` : ""}</th>`; }
+  for (const p of shownParams()){ const gs = p.g !== lastG; lastG = p.g; h += `<th data-p="${p.k}" class="${gs ? "gstart" : ""} ${keysOf(prefs.param).includes(p.k) ? "sel" : ""}" title="${p.title}">${colLabel(p, s)}${p.s ? `<small>${p.s}</small>` : ""}</th>`; }
   h += `</tr></thead><tbody>`;
   let lastDay = null, lastBlk = null;
   const dayRuns = {}; rows.forEach(r => { const dk = dayKey(r.a, z); dayRuns[dk] = (dayRuns[dk] || 0) + 1; });
@@ -1102,7 +1145,7 @@ function renderTable(){
     if (ds){ const L = dayLabel(r.a, z); const today = dayKey(r.a, z) === dayKey(Date.now(), z) ? "Today" : (dayKey(r.a, z) === dayKey(Date.now() + 24*H, z) ? "Tomorrow" : L.wd); h += `<td class="stick day" rowspan="${dayRuns[dk]}"><b>${today}</b>${today === L.wd ? "" : L.wd + "<br>"}${L.dt}</td>`; }
     h += `<td class="stick2 tm">${rowTime(r)}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</td>`;
     lastG = null;
-    for (const p of PARAMS){
+    for (const p of shownParams()){
       const gs = p.g !== lastG; lastG = p.g;
       const sp = spanMap(p.k)[i]; if (sp.cov) continue;
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
@@ -1127,9 +1170,9 @@ function renderTableAcross(){
   h += `</tr><tr class="c"><th class="stick">Parameter</th><th class="stick2"></th>`;
   rows.forEach((r, i) => { h += `<th data-i="${i}" class="tcol ${dstart.has(i) ? "dcol" : ""} ${S.hoverRow === i ? "hov" : ""}">${tlab(r)}${r.len > 1 ? `<small>${r.len} h</small>` : ""}</th>`; });
   h += `</tr></thead><tbody>`;
-  const gcount = {}; PARAMS.forEach(p => gcount[p.g] = (gcount[p.g] || 0) + 1);
+  const gcount = {}; shownParams().forEach(p => gcount[p.g] = (gcount[p.g] || 0) + 1);
   let lastG = null;
-  for (const p of PARAMS){
+  for (const p of shownParams()){
     const gs = p.g !== lastG; lastG = p.g;
     h += `<tr class="${gs ? "gfirst" : ""}">`;
     if (gs) h += `<th class="stick grp" rowspan="${gcount[p.g]}">${grpLabel(p.g)}</th>`;
@@ -1160,7 +1203,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); renderSites(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN) renderFWF(); if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); renderSites(); renderRowPick(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN) renderFWF(); if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
@@ -2042,7 +2085,7 @@ function workbook(sheets, logo){
   }
   return zip(files);
 }
-const xcols = () => ["Day","Time","Period", ...PARAMS.map(p => p.k)];
+const xcols = () => ["Day","Time","Period", ...shownParams().map(p => p.k)];
 /* product name for titles, sheets and files */
 const FILE_BASE = () => PERSONAL ? ((prefs.exp && prefs.exp.title || "Forecast").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "") || "Forecast") : EXPO ? ((prefs.exp && prefs.exp.op ? prefs.exp.op.replace(/[^A-Za-z0-9]+/g, "_") + "_" : "") + (BURN ? "Burn_Forecast" : "Exposure_Forecast")) : "Planning_Forecast";
 const productName = s => PERSONAL ? ((prefs.exp && prefs.exp.title) || "Forecast") : EXPO ? `${(prefs.exp && prefs.exp.op) ? prefs.exp.op + " " : ""}${BURN ? "Burn Forecast" : "Exposure Forecast"}` : "Daily Planning Forecast";
@@ -2179,7 +2222,7 @@ function siteSheet(s, OFs, issued, by){
   R.push([{ v:`Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times are ${tz}. Probabilities are the chance of the event at any time in the period.`, s:2 }]);
   R.push([{ v: EXPO ? `Valid ${dayLabel(rows[0].a, z).dt} ${hhmm(rows[0].a, z)} to ${dayLabel(rows[rows.length - 1].b, z).dt} ${hhmm(rows[rows.length - 1].b, z)} ${tz}. ${constraintSummary()}` : "Hourly to 24 h, 3-hour blocks to day 5, 6-hour blocks on days 6 and 7. In blocks, temperature is the daytime high or overnight low, winds are the block maximum.", s:2 }]);
   R.push([]);
-  const G = [["Valid",0,2]]; PARAMS.forEach((p, j) => { const ci = j + 3, g = G[G.length - 1]; const lab = grpLabel(p.g).replace(" (%)", ""); if (g[0] === lab && g[2] === ci - 1) g[2] = ci; else G.push([lab, ci, ci]); });
+  const G = [["Valid",0,2]]; shownParams().forEach((p, j) => { const ci = j + 3, g = G[G.length - 1]; const lab = grpLabel(p.g).replace(" (%)", ""); if (g[0] === lab && g[2] === ci - 1) g[2] = ci; else G.push([lab, ci, ci]); });
   const gr = new Array(ncol).fill(null).map(() => ({ v:"", s:3 }));
   G.forEach(([n, a, b]) => { gr[a] = { v:n, s:3 }; if (b > a) merges.push(`${colName(a)}6:${colName(b)}6`); });
   R.push(gr); heights[5] = 20;
@@ -2209,8 +2252,8 @@ function siteSheet(s, OFs, issued, by){
   const n0 = 8, n1 = 7 + rows.length;
   merges.push(`A1:${last}1`, `A2:${last}2`, `A3:${last}3`, `A4:${last}4`);
   return { name: `${s.name} (${s.point})`.slice(0, 31), rows:R, merges, heights, freeze:{ r:7, c:3 },
-    cols:[11,11,7, ...PARAMS.map(p => p.kind === "sev" ? 14 : p.kind === "prob" ? 8 : 7)],
-    cf: PARAMS.map((p, j) => p.kind === "prob" ? `${colName(j + 3)}${n0}:${colName(j + 3)}${n1}` : null).filter(Boolean) };
+    cols:[11,11,7, ...shownParams().map(p => p.kind === "sev" ? 14 : p.kind === "prob" ? 8 : 7)],
+    cf: shownParams().map((p, j) => p.kind === "prob" ? `${colName(j + 3)}${n0}:${colName(j + 3)}${n1}` : null).filter(Boolean) };
 }
 function csvFor(list, issued, by, internal){
   if (EXPO) return csvGeneric(list, issued, by, internal);
@@ -2324,7 +2367,7 @@ function reportModel(list, issued, by){
         const dayHdr = pg.days.map((d, j) => { const L = dayLabel(rows[d.cols[0]].a, z); const nm = d.dk === dayKey(issued, z) ? "Today" : d.dk === dayKey(issued + 24*H, z) ? "Tomorrow" : L.wd; return { label: d.cols.length >= 3 ? `${nm}, ${L.dt}` : L.dt, n:d.cols.length }; });
         const times = pg.cols.map(i => ({ t:tlab(rows[i]), sub: rows[i].len > 1 ? rows[i].len + " h" : "", day: pg.days.some(d => d.cols[0] === i) }));
         const groups = [];
-        for (const p of PARAMS){
+        for (const p of shownParams()){
           let g = groups[groups.length - 1]; if (!g || g.g !== grpLabel(p.g)){ g = { g:grpLabel(p.g), rows:[] }; groups.push(g); }
           const spm = spanMap(p.k), cells = [];
           pg.cols.forEach((i, ci) => {
@@ -2419,7 +2462,7 @@ function interactiveReport(list, issued, by, logo){
     logo: logo ? `data:image/png;base64,${logo.b64}` : null, rows,
     sites: list.map(([st, OFs]) => ({
       id:st.id, name: EXPO ? st.point : st.name, point:st.point, lat:st.lat, lon:st.lon,
-      params: PARAMS.map(p => {
+      params: shownParams().map(p => {
         const spm = spanMap(p.k);
         return { k:p.k, label: p.kind === "sev" ? (p.k === "ero" ? "WPC excessive rain" : "SPC category") : colLabel(p, st), sub:p.s || "", group:p.g, kind:p.kind, wind:isWind(p), unit:p.unit || "", thr:p.thr || [], cons:!!p.cons, limit: p.cons ? p.v : null,
           cells: rows.map((r, i) => {
@@ -2988,7 +3031,7 @@ function addSrc(sid, d, members, extra){ (S.raw[sid] = S.raw[sid] || []).push([d
 function rebuildGuidance(){
   S.rows = rowsNow(); S.spanCache = {}; CH.layout = null;
   for (const s of SITES){
-    const old = S.G[s.id], G = new SiteGuidance(s, S.TL, S.rows); G.sev = old ? old.sev : []; G.ero = old ? old.ero : [];
+    const old = S.G[s.id], G = new SiteGuidance(s, S.TL, S.rows); G.sev = old ? old.sev : []; G.ero = old ? old.ero : []; G.hail = old ? old.hail : [];
     for (const [d, members, extra] of (S.raw[s.id] || [])){ members.forEach(m => deriveHeights(m, S.TL.n)); G.addSource(d, members, extra); }
     S.G[s.id] = G;
   }
@@ -3041,6 +3084,7 @@ async function loadAll(){
     }
   }).catch(e => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleRender));
   if (!PERSONAL) tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
+  if (!PERSONAL){ S.status.hail = { loading:true }; tasks.push((DEMO ? demoHail() : fetchHail()).then(h => { for (const s of SITES) S.G[s.id].hail = h; S.status.hail = { ok:true, note: h.length ? "Days 1-2" : "no hail areas" }; }).catch(() => { S.status.hail = { err:"not reachable" }; }).finally(scheduleRender)); }
   if (!PERSONAL && P.ero){ S.status.ero = { loading:true }; tasks.push((DEMO ? demoERO() : fetchERO()).then(ero => { for (const s of SITES) S.G[s.id].ero = ero; S.status.ero = { ok:true, note: ero.length ? `${new Set(ero.map(x => x.day)).size} days` : "no risk areas" }; }).catch(() => { S.status.ero = { err:"not reachable" }; }).finally(scheduleRender)); }
   await Promise.allSettled(tasks);
   S.loading = false; S.fetchedAt = Date.now(); scheduleRender();
@@ -3125,7 +3169,7 @@ async function demoPipeline(TL){
     SITES.forEach((s, si) => {
       const r = rng(d.id.length*101 + si*17);
       if (d.fam === "ct"){
-        const tst = [], tst4 = [], maxh = d.id === "hrefct" ? 48 : 60;
+        const tst = [], tst4 = [], maxh = 60;
         for (let h = 1; h <= maxh; h++){ const b = run + h*H, lh = lp(b).h; const base = lh >= 13 && lh <= 20 && h < 40 ? 0.08 + r()*0.25 : 0.01; tst.push({ a:b - H, b, p:base }); if (h >= 4) tst4.push({ a:b - 4*H, b, p:Math.min(0.9, base*2.2) }); }
         per[s.id] = { members:[], iv:{ tst, tst4 } };
       } else {
@@ -3138,6 +3182,7 @@ async function demoPipeline(TL){
   }
   return out;
 }
+async function demoHail(){ const d = new Date(), v = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 12); const box = { type:"Polygon", coordinates:[[[-81.5, 27.5], [-80.0, 27.5], [-80.0, 29.2], [-81.5, 29.2], [-81.5, 27.5]]] }; return [{ p:5, sig:false, a:v - 24*H, b:v, geom:box, day:1 }, { p:15, sig:false, a:v, b:v + 24*H, geom:box, day:2 }]; }
 async function demoERO(){ const d = new Date(), v = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 12); return [{ cat:"SLGT", a:v, b:v + 24*H, day:2, geom:{ type:"Polygon", coordinates:[[[-81.5, 27.5], [-80.0, 27.5], [-80.0, 29.2], [-81.5, 29.2], [-81.5, 27.5]]] } }, { cat:"MRGL", a:v - 24*H, b:v, day:1, geom:{ type:"Polygon", coordinates:[[[-81.5, 27.5], [-80.0, 27.5], [-80.0, 29.2], [-81.5, 29.2], [-81.5, 27.5]]] } }]; }
 async function demoSPC(){ const t = Date.now(); const d = new Date(t); const v = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, 12); return [{ cat:"MRGL", a:v, b:v + 24*H, geom:{ type:"Polygon", coordinates:[[[-81.5,27.5],[-80,27.5],[-80,29.5],[-81.5,29.5],[-81.5,27.5]]] } }]; }
 
@@ -3250,7 +3295,7 @@ function bind(){
   mx.addEventListener("mouseleave", () => { S.hoverRow = null; markHover(null); moveCursor(null); });
   mx.addEventListener("keydown", ev => {
     if (editor || !S.cur) return;
-    const ks = PARAMS.map(p => p.k); let { i, k } = S.cur; let ki = ks.indexOf(k);
+    const ks = shownParams().map(p => p.k); let { i, k } = S.cur; let ki = ks.indexOf(k);
     const mv = (di, dk) => {
       ev.preventDefault();
       if (di > 0){ const sp = spanMap(ks[ki])[i]; i += sp && sp.s ? sp.s : 1; } else if (di < 0) i -= 1;
@@ -3270,7 +3315,7 @@ function bind(){
     const txt = (ev.clipboardData || window.clipboardData).getData("text"); if (!txt) return;
     ev.preventDefault();
     const lines = txt.replace(/\r/g, "").split("\n"); if (lines[lines.length - 1] === "") lines.pop();
-    const ks = PARAMS.map(p => p.k), k0 = ks.indexOf(S.cur.k), g = []; let bad = 0, ri = S.cur.i;
+    const ks = shownParams().map(p => p.k), k0 = ks.indexOf(S.cur.k), g = []; let bad = 0, ri = S.cur.i;
     if (across()){
       /* lines are parameters, tab-separated cells run along time */
       lines.forEach((ln, li) => {

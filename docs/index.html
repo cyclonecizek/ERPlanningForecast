@@ -362,6 +362,7 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 <style>.srcbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 10px}.srcbar .mut{color:var(--ink-3);font-size:12.5px}</style>
+<style>.rowpick{padding:0}.rowpick > summary{padding:12px 16px;cursor:pointer;font-weight:600;list-style:none}.rowpick > summary::-webkit-details-marker{display:none}.rowpick .srcbar{padding:0 16px}.rowgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px 18px;padding:6px 16px 16px}.rowfam{display:flex;flex-direction:column;gap:3px;font-size:13px}.rowfam .rg{margin-bottom:2px}.rowfam label{display:flex;gap:6px;align-items:center}</style>
 </head>
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="taf.html" data-page="taf">TAF generator</a><a href="mwp.html" data-page="mwp">Mission weather (MWP)</a><a href="burn.html" data-page="burn">Burn forecasts</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="verify.html" data-page="verify">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
@@ -536,7 +537,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </form>
 </dialog>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=102f19cbd7"></script>
-<script src="planning-app.js?v=fbb48a173d"></script>
+<script src="guidance.js?v=3369124b01"></script>
+<script src="planning-app.js?v=e5618ba2ab"></script>
 </body>
 </html>

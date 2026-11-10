@@ -63,7 +63,7 @@ MRMS_AWS = "https://noaa-mrms-pds.s3.amazonaws.com/CONUS/MultiSensor_QPE_01H_Pas
 IEM_ASOS = "https://mesonet.agron.iastate.edu/cgi-bin/request/asos.py"
 
 # ---------------------------------------------------------------- forecast sources
-OM_DET = [("hrrr", "ncep_hrrr_conus"), ("nam3", "ncep_nam_conus"), ("nbm", "ncep_nbm_conus"), ("gfs", "gfs_seamless"),
+OM_DET = [("hrrr", "ncep_hrrr_conus"), ("nbm", "ncep_nbm_conus"), ("gfs", "gfs_seamless"),
           ("ifs", "ecmwf_ifs025"), ("aifs", "ecmwf_aifs025_single"), ("icon", "icon_global"), ("gem", "gem_global"),
           ("ukmo", "ukmo_global_deterministic_10km")]
 OM_ENS = [("gefs", "gfs025"), ("eps", "ecmwf_ifs025"), ("aifsens", "ecmwf_aifs025"), ("iconeps", "icon_global"), ("geps", "gem_global")]
@@ -761,7 +761,7 @@ def blend(sources, weights=None, issue=None):
                     v = v[k] if v else None
                     if v is None:
                         continue
-                    w = 2.0 if sid in ("hrefct", "refsct") else 1.0
+                    w = 2.0 if sid == "refsct" else 1.0
                     if weights:
                         w *= weight_of(weights, pid, grp, band, sid)
                     if sid in NBM_FAMILY:

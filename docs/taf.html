@@ -229,7 +229,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=102f19cbd7"></script>
+<script src="guidance.js?v=3369124b01"></script>
 <script>
 "use strict";
 /* ============================================================
@@ -654,7 +654,7 @@ async function demoMOS(d){
 async function demoPipe(){
   const run = Math.floor(Date.now()/(6*H))*6*H - 6*H, tst = [], tst4 = [];
   for (let h = 1; h <= 48; h++){ const b = run + h*H, lh = lp(b).h; const p = lh >= 15 && lh <= 19 ? .45 : .02; tst.push({ a:b - H, b, p }); if (h >= 4) tst4.push({ a:b - 4*H, b, p: Math.min(.9, p*1.8) }); }
-  return { hrefct:{ run, per:{ [SITE.id]:{ members:[], iv:{ tst, tst4 } } } } };
+  return { refsct:{ run, per:{ [SITE.id]:{ members:[], iv:{ tst, tst4 } } } } };
 }
 
 /* ---------- events ---------- */

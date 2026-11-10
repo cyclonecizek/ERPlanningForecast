@@ -8,7 +8,6 @@ Sources
           fields the members feed (no ceilings or cloud layers), so they finish inside the time
           budget; each member is labelled (m001-m005) and the reason for a short or missing run is
           written to "status" in hires.json and shown on the pages.
-  hrefct  SPC HREF calibrated thunder, 1 h and 4 h periods (retires with HREF on Nov 3, 2026)
   refsct  SPC REFS calibrated thunder, 1 h and 4 h periods (para until Nov 3, then prod)
 
 Point values are taken from the nearest grid point to each forecast point. Inventories (.idx)
@@ -494,7 +493,7 @@ def main():
         out += [s] if s else []
 
     # SPC calibrated thunder
-    for sid, name in (("hrefct", "HREF calibrated thunder"), ("refsct", "REFS calibrated thunder")):
+    for sid, name in (("refsct", "REFS calibrated thunder"),):   # HREF retired 3 Nov 2026
         if time_left() < 90:
             s = keep_or_drop(old, sid, now)
             out += [s] if s else []

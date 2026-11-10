@@ -6,7 +6,7 @@ const SEAL_SRC = (typeof window !== "undefined" && window.SEAL_SRC) || "ussf-sea
 /* ============================================================
    Daily Planning Forecast — KSC / CCSFS / Patrick SFB
    Guidance: Open-Meteo deterministic + ensemble models, IEM MOS
-   (LAMP, GFS, NAM, GFS-X, NBM text). Everything runs in the page.
+   (LAMP, GFS, GFS-X, NBM text). Everything runs in the page.
    ============================================================ */
 /* local time: Eastern for the Cape tools; the personal page uses its location's time zone */
 const TZ = (() => { try { if (typeof window !== "undefined" && window.PAGE === "personal"){ const p = JSON.parse(localStorage.getItem("persfx:v1:prefs") || "{}"); return (p.exp && p.exp.tz) || "America/New_York"; } } catch (e) { /* fall back */ } return "America/New_York"; })();
@@ -44,7 +44,6 @@ const FAMILIES = {
 const NDFD = { id:"ndfd", name:"NWS Forecast", fam:"nws" };
 const OM_DET = [
   { id:"hrrr", name:"HRRR",       model:"ncep_hrrr_conus",               fam:"hires" },
-  { id:"nam3", name:"NAM 3 km",   model:"ncep_nam_conus",                fam:"hires" },
   { id:"nbm",  name:"NBM",        model:"ncep_nbm_conus",                fam:"blend" },
   { id:"gfs",  name:"GFS",        model:"gfs_seamless",                  fam:"global" },
   { id:"ifs",  name:"ECMWF IFS",  model:"ecmwf_ifs025",                  fam:"global" },
@@ -63,7 +62,6 @@ const OM_ENS = [
 const MOS = [
   { id:"lav", name:"LAMP",            model:"LAV",  fam:"mos" },
   { id:"mav", name:"GFS MOS",         model:"GFS",  fam:"mos" },
-  { id:"met", name:"NAM MOS",         model:"NAM",  fam:"mos" },
   { id:"mex", name:"GFS MOS extended",model:"GFSX", fam:"mos" },
   { id:"nbs", name:"NBM text",        model:"NBS",  fam:"mos" },
   { id:"nbe", name:"NBM text extended",model:"NBE", fam:"mos" },
@@ -72,10 +70,10 @@ const MOS = [
 const PIPE = [
   { id:"rrfs",   name:"RRFS",                    fam:"hires" },
   { id:"refsm",  name:"REFS members",            fam:"hires" },
-  { id:"hrefct", name:"HREF calibrated thunder", fam:"ct", w:2 },
   { id:"refsct", name:"REFS calibrated thunder", fam:"ct", w:2 },
 ];
-const ALL_SOURCES = [NDFD, ...OM_DET.slice(0, 2), PIPE[0], PIPE[1], ...OM_DET.slice(2), ...OM_ENS, ...MOS, PIPE[2], PIPE[3]];
+/* HREF, the NAM and NAM MOS were retired by NCEP on 3 November 2026 and are no longer sources */
+const ALL_SOURCES = [NDFD, OM_DET[0], PIPE[0], PIPE[1], ...OM_DET.slice(1), ...OM_ENS, ...MOS, PIPE[2]];
 
 /* ---------- parameters (matrix columns) ---------- */
 const SKY = [ ["CLR",0,6.25], ["FEW",6.25,31.25], ["SCT",31.25,56.25], ["BKN",56.25,93.75], ["OVC",93.75,101] ];
@@ -108,6 +106,7 @@ const PARAMS = [
   { k:"x32",  g:"Probability of exceeding, sfc to 200 ft (%)", l:"<32°F",  s:"",     kind:"prob", ex:"tmin", dep:["t"], op:"<", v:32, title:"Temperature below 32°F" },
   { k:"xvis", g:"Probability of exceeding, sfc to 200 ft (%)", l:"Vis <3 mi", s:"", kind:"prob", ex:"vmin", op:"<", v:4828, title:"Visibility below 3 miles" },
   { k:"sev",  g:"Severe potential", l:"Damaging wind, hail, tornado", s:"", kind:"sev", title:"Severe thunderstorm potential" },
+  { k:"hailp", g:"Severe potential", l:"Hail", s:"SPC %", kind:"num", unit:"%", step:1, lo:0, hi:100, title:"SPC hail probability: the chance of hail 1 inch or larger within 25 mi of the point (Days 1-2)" },
   { k:"ero",  g:"Excessive rainfall", l:"WPC outlook", s:"", kind:"sev", title:"WPC Excessive Rainfall Outlook (chance rain exceeds flash flood guidance within 25 mi)" },
 ];
 const P = Object.fromEntries(PARAMS.map(p => [p.k, p]));
@@ -563,7 +562,7 @@ async function fetchNDFD(sites, TL){
   }
   return out;
 }
-/* High-res pipeline output: RRFS, REFS members, HREF / REFS calibrated thunder */
+/* High-res pipeline output: RRFS, REFS members, REFS calibrated thunder */
 async function fetchPipeline(TL){
   const js = await getJSON(`${DATA_BASE}data/hires.json?ts=${Date.now()}`, 15000);
   const out = {};
@@ -619,6 +618,26 @@ async function fetchERO(){
   }
   return out;
 }
+/* SPC hail probability (within 25 mi of a point), Days 1 and 2; significant-hail areas are flagged */
+async function fetchHail(){
+  const out = [];
+  for (const d of [1, 2]){
+    try {
+      let js = null;
+      try { js = await getJSON(`${DATA_BASE}data/mos/spc_hail_day${d}.json?ts=${Date.now()}`, 8000); } catch (e) { js = null; }
+      if (!js || !js.features) js = await getJSON(`https://www.spc.noaa.gov/products/outlook/day${d}otlk_hail.nolyr.geojson`, 15000);
+      const pt = s => { s = String(s || ""); return Date.UTC(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8), +s.slice(8,10), +s.slice(10,12)); };
+      for (const f of js.features || []){
+        const pr = f.properties || {}, lab = String(pr.LABEL || pr.label || ""), lab2 = String(pr.LABEL2 || "");
+        const sig = /SIG/i.test(lab) || /significant/i.test(lab2);
+        const p = sig ? null : (+lab < 1 && +lab > 0 ? Math.round(+lab*100) : +pr.DN);
+        if (!f.geometry || (!sig && !(p > 0))) continue;
+        out.push({ p, sig, a: pt(pr.VALID), b: pt(pr.EXPIRE), geom: f.geometry, day:d });
+      }
+    } catch (e) { /* not reachable from this browser */ }
+  }
+  return out;
+}
 async function fetchSPC(){
   const out = [];
   for (const d of [1,2,3]){
@@ -668,7 +687,7 @@ function blockOf(m, row, TL){
   const mx = ks => { const v = ks.map(k => o[k]).filter(x => x != null); return v.length ? Math.max(...v) : null; };
   o.smax = mx(HEIGHTS.map(f => "s" + f)); o.gmax = mx(HEIGHTS.map(f => "g" + f));
   /* rainfall: the total over the row */
-  if (m.pr){ let s2 = 0, n2 = 0; for (const i of rng){ const v = m.pr[i]; if (v == null) continue; s2 += v; n2++; } o.qpf = n2 ? s2 : null; }
+  if (m.pr){ let s2 = 0, n2 = 0, mx2 = null; for (const i of rng){ const v = m.pr[i]; if (v == null) continue; s2 += v; n2++; if (mx2 == null || v > mx2) mx2 = v; } o.qpf = n2 ? s2 : null; o.prmax = mx2; }
   if (RHROW){
     /* RH like temperature; waves: highest in a block, period and water temperature averaged, direction from the first hour */
     const how = { rh:"min", wvh:"max", swh:"max", wvp:"mean", sst:"mean" };
@@ -726,7 +745,7 @@ function intervalProb(list, A, B){
 }
 
 class SiteGuidance {
-  constructor(site, TL, rows){ this.site = site; this.TL = TL; this.rows = rows; this.src = []; this.sev = []; this.ero = []; }
+  constructor(site, TL, rows){ this.site = site; this.TL = TL; this.rows = rows; this.src = []; this.sev = []; this.ero = []; this.hail = []; }
   addSource(def, members, extra){
     const s = { def, members, iv: extra && extra.iv, run: extra && extra.run, blocks: members.map(m => this.rows.map(r => blockOf(m, r, this.TL))), win: new Map() };
     this.src.push(s); return s;
@@ -855,6 +874,9 @@ function aggregate(G, prefs){
     for (const o of G.sev){ if (r.a < o.b && r.b > o.a && inGeom(G.site.lon, G.site.lat, o.geom) && SEV.indexOf(o.cat) > SEV.indexOf(best)) best = o.cat; }
     return best;
   });
+  /* hail: the highest SPC hail probability over the row; a significant-hail area is marked */
+  val.hailp = rows.map(r => { let best = null; for (const o of (G.hail || [])){ if (o.sig || !(r.a < o.b && r.b > o.a) || !inGeom(G.site.lon, G.site.lat, o.geom)) continue; if (best == null || o.p > best) best = o.p; } return best ?? 0; });
+  val.hailsig = rows.map(r => (G.hail || []).some(o => o.sig && r.a < o.b && r.b > o.a && inGeom(G.site.lon, G.site.lat, o.geom)));
   /* excessive rainfall: WPC outlook */
   val.ero = rows.map(r => {
     let best = "-";
