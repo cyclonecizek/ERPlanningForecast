@@ -662,8 +662,25 @@ function bind(){
   $("altEdit").onclick = () => { const d = $("altDlg"); $("altBody").innerHTML = PR().alts.map(id => `<label>${id}<textarea data-alt="${id}" rows="5">${esc(M.altPaste[id] || G.alts[id] || "")}</textarea></label>`).join(""); d.showModal(); };
   $("altSave").onclick = () => { document.querySelectorAll("[data-alt]").forEach(t => { const id = t.dataset.alt, v = t.value.trim(); if (v && v !== (G.alts[id] || "").trim()) M.altPaste[id] = v; else delete M.altPaste[id]; }); save(); $("altDlg").close(); renderAll(); };
   $("altClose").onclick = () => $("altDlg").close();
-  $("pdfBtn").onclick = async () => download(await pdfMWP(), fileBase() + ".pdf");
-  $("htmlBtn").onclick = () => download(new Blob([htmlMWP()], { type:"text/html" }), fileBase() + ".html");
+  /* the official archive: page 1 only (never the drop zone page), once per product version */
+  const archiveMWP = () => { try { const p1 = $("preview").querySelector(".prod:not(.p2)"); if (!p1 || typeof archiveOnce !== "function") return; const css = document.getElementById("prodcss").textContent, p = PR(), b = M.blocks[M.block] || [0, 0];
+    archiveOnce(`mwp|${M.prod}|${M.block}|${dateLabel()}`, { type:"mwp", title:`${p.short.replace(/ MWP$/, "")} Mission Weather Product`, subtitle:`${M.block} ${p2(b[0])}-${p2(b[1])}L, ${dateLabel()}`, issued: Date.now(), forecaster: M.fc || "" },
+      { html:`<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${css}</style></head><body>${p1.outerHTML}</body></html>`, rows: model().rows.map(r => ({ t:r.t, cat:r.cat, v:r.v })) }, p1.textContent); } catch (e) { /* not archived */ } };
+  $("pdfBtn").onclick = async () => { archiveMWP(); download(await pdfMWP(), fileBase() + ".pdf"); };
+  /* public copy: page 1 only (take-off and landing, flight-level winds, sun, moon and sea state, WWAs,
+     alternates); the drop zone page and positions never leave the studio */
+  $("pubBtn").onclick = async () => {
+    if (!confirm("Make a public copy of this mission weather product?\n\nOnly page 1 goes out: the drop zone page is left off.\n\nOK confirms it's cleared for public release.")) return;
+    const p1 = $("preview").querySelector(".prod:not(.p2)"); if (!p1){ toast("Nothing to publish yet"); return; }
+    const css = document.getElementById("prodcss").textContent, p = PR(), b = M.blocks[M.block] || [0, 0];
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(p.short)} ${esc(M.block)} ${dateLabel()}</title><style>${css} body{margin:0;padding:16px;background:#fff;font-family:Arial,Helvetica,sans-serif}</style></head><body>${p1.outerHTML}</body></html>`;
+    const rows = model().rows, cats = [...new Set(rows.map(r => r.cat).filter(Boolean))];
+    const meta = { type:"mwp", key:`mwp:${M.prod}:${M.block}`, title:`${p.short.replace(/ MWP$/, "")} Mission Weather Product`, subtitle:`${M.block} ${p2(b[0])}-${p2(b[1])}L, ${dateLabel()}`, issued: Date.now(), forecaster: M.fc || "",
+      headline: `${p.place}: ${cats.length ? cats.join(" to ") : "conditions"} during the ${M.block}${rows[0] && rows[0].v.wind ? `, winds ${rows[0].v.wind}` : ""}` };
+    const zipFn = async () => { const snap = await publicSnapshot(meta, { html }); download(snap.blob, snap.name); };
+    await showReleaseDialog(meta, { kind:"html", html }, M.fc || "", zipFn);
+  };
+  $("htmlBtn").onclick = () => { archiveMWP(); download(new Blob([htmlMWP()], { type:"text/html" }), fileBase() + ".html"); };
   $("reload").onclick = () => loadAll();
   document.querySelectorAll(".pagenav a").forEach(a => { if (/mwp\.html$/.test(a.getAttribute("href"))) a.setAttribute("aria-current", "page"); });
 }

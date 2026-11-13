@@ -360,23 +360,161 @@ function linkProbs(ev, rows, Gv, ed){
   }
   return { out, fit };
 }
+/* ---------- the planning forecast as the forecast of record ----------
+   The planning page saves its official forecast (values, and the change from guidance) hour by hour for
+   each point in this browser. Exposure, burn and LMEF pages start from it: a cell nobody edited on that
+   page gets the planning forecast's adjustment from the nearest planning point (full within 15 km,
+   tapering to 40% at 65 km; none beyond), the same way edits carry between planning points. */
+const FOR_KEY = "erwx:for:v1", FOR_MAX_AGE = 48*H;
+const IS_PLANNING = !EXPO && !LMEF && !PERSONAL;
+function readFOR(){ try { const r = JSON.parse(localStorage.getItem(FOR_KEY) || "null"); return r && r.v === 1 && Date.now() - r.saved < FOR_MAX_AGE ? r : null; } catch (e) { return null; } }
+let forT = null;
+function saveFOR(published){
+  if (!IS_PLANNING || !S.rows || !S.rows.length) return;
+  clearTimeout(forT);
+  forT = setTimeout(() => { try { const rec = buildFOR(published); if (rec) localStorage.setItem(FOR_KEY, JSON.stringify(rec)); } catch (e) { /* storage full or unavailable */ } }, published ? 0 : 1200);
+}
+/* the planning forecast's official values and their change from guidance, hour by hour, for every point */
+function buildFOR(published){
+  if (!IS_PLANNING || !S.rows || !S.rows.length) return null;
+  {
+    {
+      const rows = S.rows, t0 = Math.floor(rows[0].a/H)*H, n = Math.ceil((rows[rows.length - 1].b - t0)/H), prev = readFOR();
+      const rec = { v:1, saved: Date.now(), published: published || (prev && prev.published) || null, t0, n, sites:{}, hr: new Array(n).fill(0) };
+      rows.forEach(r => { if (r.len === 1){ const j = Math.round((Math.floor(r.a/H)*H - t0)/H); if (j >= 0 && j < n) rec.hr[j] = 1; } });
+      for (const st of SITES){
+        if (!S.G[st.id] || !S.agg[st.id]) continue;
+        const OFs = officialFor(st.id, true), o = OFs.o, g = OFs.g || guidanceFor(st.id) || {};
+        const z = () => new Array(n).fill(null), V = { t:z(), td:z(), sky:z(), s54:z(), g54:z(), s200:z(), g200:z(), pp:z(), lt:z() }, D = { t:z(), td:z(), sky:z(), pp:z(), lt:z() }, Rt = { s54:z(), g54:z(), s200:z(), g200:z() };
+        rows.forEach((r, i) => {
+          const prob = ev => { const k = r.len === 1 ? ev + "1" : (o[ev + "3"] && o[ev + "3"][i] != null ? ev + "3" : ev + "6"); return [o[k] ? o[k][i] : null, g[k] ? g[k][i] : null]; };
+          const [pp, gpp] = prob("pp"), [lt, glt] = prob("lt");
+          for (let t = Math.floor(r.a/H)*H; t < r.b; t += H){
+            const j = Math.round((t - t0)/H); if (j < 0 || j >= n) continue;
+            for (const k of ["t","td","sky","s54","g54","s200","g200"]) if (o[k] && o[k][i] != null) V[k][j] = o[k][i];
+            for (const k of ["t","td","sky"]) if (o[k] && g[k] && o[k][i] != null && g[k][i] != null) D[k][j] = Math.round((o[k][i] - g[k][i])*10)/10;
+            for (const k of ["s54","g54","s200","g200"]) if (o[k] && g[k] && o[k][i] != null && g[k][i] > 0.5) Rt[k][j] = Math.round(o[k][i]/g[k][i]*100)/100;
+            if (pp != null){ V.pp[j] = pp; if (gpp != null) D.pp[j] = pp - gpp; }
+            if (lt != null){ V.lt[j] = lt; if (glt != null) D.lt[j] = lt - glt; }
+          }
+        });
+        rec.sites[st.id] = { name: st.name, lat: st.lat, lon: st.lon, v:V, d:D, r:Rt };
+      }
+      return rec;
+    }
+  }
+}
+/* the nearest planning point to a forecast point, and how strongly its adjustments carry */
+function forNear(rec, s){
+  let best = null;
+  for (const [id, p] of Object.entries(rec.sites || {})){ const d = kmBetween(s.lat, s.lon, p.lat, p.lon); if (!best || d < best.d) best = { id, p, d }; }
+  if (!best || best.d > 65) return null;
+  best.w = Math.max(0.4, Math.min(1, 1 - (best.d - 15)/50)); return best;
+}
+const forAvg = (arr, r, rec) => { const v = []; for (let t = Math.floor(r.a/H)*H; t < r.b; t += H){ const j = Math.round((t - rec.t0)/H); if (j >= 0 && j < rec.n && arr[j] != null) v.push(arr[j]); } return v.length ? v.reduce((a, b) => a + b, 0)/v.length : null; };
+const forMax = (arr, r, rec) => { let m = null; for (let t = Math.floor(r.a/H)*H; t < r.b; t += H){ const j = Math.round((t - rec.t0)/H); if (j >= 0 && j < rec.n && arr[j] != null && (m == null || arr[j] > m)) m = arr[j]; } return m; };
+/* the planning forecast's value at a height between 54 and 200 ft (log-height interpolation) */
+function forWindAt(P, kind, h, r, rec, how){
+  const f = how === "ratio" ? forAvg : (kind === "g" ? forMax : forAvg), src = how === "ratio" ? P.r : P.v;
+  const a = f(src[kind + "54"], r, rec), b = f(src[kind + "200"], r, rec);
+  if (a == null || b == null) return a ?? b;
+  if (h <= 54) return a; if (h >= 200) return b;
+  const x = Math.log(h/54)/Math.log(200/54); return a + (b - a)*x;
+}
+function planCarryFor(sid, g){
+  if (IS_PLANNING || PERSONAL || prefs.fromPlan === false) return null;
+  const rec = readFOR(), s = SITES.find(x => x.id === sid); if (!rec || !s) return null;
+  const near = forNear(rec, s); if (!near) return null;
+  const P = near.p, w = near.w, rows = S.rows, out = {};
+  for (const p of PARAMS){
+    const k = p.k, gv = g[k]; if (!gv) continue;
+    let fn = null;
+    if (k === "t" || k === "td") fn = (r, i) => { const d = forAvg(P.d[k], r, rec); return d == null || gv[i] == null ? undefined : Math.round(gv[i] + w*d); };
+    else if (k === "sky") fn = (r, i) => { const d = forAvg(P.d.sky, r, rec); return d == null || gv[i] == null ? undefined : Math.max(0, Math.min(100, Math.round(gv[i] + w*d))); };
+    else if (/^(pp|lt)[136]$/.test(k)) fn = (r, i) => { const d = forAvg(P.d[k.slice(0, 2)], r, rec); return d == null || gv[i] == null ? undefined : probRound(Math.max(0, Math.min(prefs.clamp ? 99 : 100, gv[i] + w*d))); };
+    else { const m = k.match(/^([sg])(\d+)$/); if (m) fn = (r, i) => { const ratio = forWindAt(P, m[1], +m[2], r, rec, "ratio"); return ratio == null || gv[i] == null ? undefined : Math.round(gv[i]*(1 + w*(ratio - 1))); }; }
+    if (!fn) continue;
+    out[k] = rows.map((r, i) => { if (p.win && !probCell(r, p.win)) return undefined; const v = fn(r, i); return v === gv[i] ? undefined : v; });
+  }
+  /* humidity follows the carried temperature and dew point */
+  if (P && g.rh && (out.t || out.td)) out.rh = rows.map((r, i) => { const t = (out.t && out.t[i] !== undefined) ? out.t[i] : g.t && g.t[i], td = (out.td && out.td[i] !== undefined) ? out.td[i] : g.td && g.td[i]; if (t == null || td == null || g.t[i] == null || g.td[i] == null || g.rh[i] == null) return undefined; const v = Math.max(1, Math.min(100, Math.round(g.rh[i] + rhFrom(t, td) - rhFrom(g.t[i], g.td[i])))); return v === g.rh[i] ? undefined : v; });
+  out.__near = { name: P.name, d: near.d, w, saved: rec.saved, published: rec.published };
+  return out;
+}
+/* ---------- nudge mode: start from the last issued planning forecast ----------
+   The newest issued planning forecast (this computer's last publish, or the team's from the official
+   archive) is the starting point. For each cell nobody edited:
+     nudged = previous official + beta x (new guidance - guidance at that issue)
+     start  = new guidance + fade x (nudged - new guidance),  fade = 0.5 ^ (age in hours / 24)
+   beta: 1 for temperature and dew point, 0.7 for sky and winds, 0.6 for chances. Where the guidance moved
+   by more than the consistency thresholds since that issue, the cell is flagged for a fresh look. */
+const PREV_KEY = "erwx:prevpub:v1", NUDGE_BETA = { t:1, td:1, sky:0.7, s54:0.7, g54:0.7, s200:0.7, g200:0.7, pp:0.6, lt:0.6 };
+function prevIssued(){
+  let a = null; try { a = JSON.parse(localStorage.getItem(PREV_KEY) || "null"); } catch (e) { a = null; }
+  const b = S.prevArchive || null;
+  const ok = r => r && r.v === 1 && r.published && Date.now() - r.published < 72*H;
+  return [a, b].filter(ok).sort((x, y) => y.published - x.published)[0] || null;
+}
+function nudgeFor(sid, g){
+  if (!IS_PLANNING || prefs.nudge === false) return null;
+  const rec = prevIssued(); if (!rec) return null;
+  const P = rec.sites && rec.sites[sid]; if (!P) return null;
+  const age = (Date.now() - rec.published)/H, fade = Math.pow(0.5, Math.max(0, age)/24), rows = S.rows, out = { __flags:{} };
+  /* the guidance at that issue, hour by hour: official minus its change (winds: official over its ratio) */
+  const Gh = {};
+  for (const k of ["t","td","sky","pp","lt"]) Gh[k] = (P.v[k] || []).map((v, j) => v == null || P.d[k] == null || P.d[k][j] == null ? null : v - P.d[k][j]);
+  for (const k of ["s54","g54","s200","g200"]) Gh[k] = (P.v[k] || []).map((v, j) => v == null || !P.r[k] || P.r[k][j] == null || !P.r[k][j] ? null : v/P.r[k][j]);
+  const thr = { t:3, td:3, sky:25, s54:5, g54:5, s200:5, g200:5, pp:25, lt:25 };
+  for (const p of PARAMS){
+    const k = p.k, gv = g[k]; if (!gv) continue;
+    const base = /^(pp|lt)[136]$/.test(k) ? k.slice(0, 2) : k; if (!NUDGE_BETA[base]) continue;
+    if (/^(pp|lt)1$/.test(k) === false && /^(pp|lt)[36]$/.test(k) === false && /^(pp|lt)/.test(k)) continue;
+    const vals = [], flags = [];
+    rows.forEach((r, i) => {
+      vals[i] = undefined;
+      if (p.win && !probCell(r, p.win)) return;
+      /* chances: only on rows of their own length (the record holds 1-hour chances on hourly rows and 3-hour
+         chances on 3-hour rows); the 1, 3 and 6 hour linking rebuilds the windows from them */
+      if (/^(pp|lt)1$/.test(k) && r.len !== 1) return;
+      if (/^(pp|lt)3$/.test(k) && r.len !== 3) return;
+      if (/^(pp|lt)6$/.test(k)) return;
+      const Pv = forAvg(P.v[base], r, rec), Gv = forAvg(Gh[base], r, rec), gn = gv[i];
+      if (Pv == null || Gv == null || gn == null) return;
+      const nudged = Pv + NUDGE_BETA[base]*(gn - Gv);
+      let v = gn + fade*(nudged - gn);
+      if (/^(pp|lt)/.test(base)) v = probRound(Math.max(0, Math.min(prefs.clamp ? 99 : 100, v)));
+      else if (base === "sky") v = Math.max(0, Math.min(100, Math.round(v)));
+      else v = Math.round(v);
+      if (v !== gn) vals[i] = v;
+      const moved = gn - Gv, lim = thr[base];
+      if (Math.abs(moved) > lim && (!/^[sg]/.test(base) || Math.abs(moved) > 0.3*Math.max(Math.abs(gn), Math.abs(Gv)))) flags[i] = Math.round(moved);
+    });
+    out[k] = vals; out.__flags[k] = flags;
+  }
+  out.__near = { prev: rec, fade, age };
+  return out;
+}
 function officialFor(sid, fast){
   const s = SITES.find(x => x.id === sid), G = S.G[sid], g = guidanceFor(sid) || {};
   const e = edits[sid] || {}, rows = S.rows, o = {}, src = {};
   const ed = (k, r) => e[k] && e[k][r.key] !== undefined ? e[k][r.key] : undefined;
+  const pc = IS_PLANNING ? nudgeFor(sid, g) : planCarryFor(sid, g);
   for (const p of PARAMS){
     if (p.k.startsWith("x")) continue;
-    o[p.k] = rows.map((r, i) => { if (p.win && !probCell(r, p.win)) return undefined; const x = ed(p.k, r); return x !== undefined ? x : (g[p.k] ? g[p.k][i] : null); });
+    o[p.k] = rows.map((r, i) => { if (p.win && !probCell(r, p.win)) return undefined; const x = ed(p.k, r); if (x !== undefined) return x; const cv = pc && pc[p.k] ? pc[p.k][i] : undefined; return cv !== undefined ? cv : (g[p.k] ? g[p.k][i] : null); });
   }
   /* precip and lightning: keep 1, 3 and 6 hr consistent */
   const fits = [];
   if (prefs.linkWin !== false && S.agg[sid]){
     for (const ev of ["pp","lt"].filter(ev => P[ev + "3"] && P[ev + "6"])){
-      const res = linkProbs(ev, rows, S.agg[sid].val, ed);
+      /* chances carried in from the planning forecast count like edits here, so the windows follow them */
+      const rowIx = new Map(rows.map((r, i) => [r.key, i]));
+      const edc = (k, r) => { const x = ed(k, r); if (x !== undefined) return x; const v = pc && pc[k] ? pc[k][rowIx.get(r.key)] : undefined; return v === undefined ? undefined : v; };
+      const res = linkProbs(ev, rows, S.agg[sid].val, edc);
       for (const k of [ev + "1", ev + "3", ev + "6"]){
         o[k] = rows.map((r, i) => {
           if (o[k][i] === undefined) return undefined;
-          const x = ed(k, r); if (x !== undefined) return x;
+          const x = edc(k, r); if (x !== undefined) return x;
           const v = res.out[k][i]; return v == null || v === undefined ? null : probRound(Math.min(prefs.clamp ? 99 : 100, v));
         });
       }
@@ -402,7 +540,7 @@ function officialFor(sid, fast){
   if (fast && OF && OF.site === sid){
     /* while dragging: keep the exceedance probabilities from the last full pass */
     for (const p of PARAMS.filter(p => p.k.startsWith("x"))){ o[p.k] = OF.o[p.k] || []; gx[p.k] = OF.g[p.k] || []; src[p.k] = OF.xsrc[p.k] || {}; }
-    const outF = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
+    const outF = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid, pc };
     if (HOOKS.official) HOOKS.official(outF, ed, rows);
     return outF;
   }
@@ -429,7 +567,7 @@ function officialFor(sid, fast){
     const crit = PARAMS.filter(p => p.k.startsWith("x") && p.k !== "xall" && p.k !== "xinv");
     rows.forEach((r, i) => { if (ed("xall", r) !== undefined || o.xall[i] == null) return; const lo = Math.min(...crit.map(p => o[p.k][i]).filter(v => v != null)); if (isFinite(lo)) o.xall[i] = Math.min(o.xall[i], lo); });
   }
-  const out = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid };
+  const out = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid, pc };
   if (HOOKS.official) HOOKS.official(out, ed, rows);
   return out;
 }
@@ -923,7 +1061,14 @@ function bindPersonal(){
   $("pSumReset").onclick = () => { prefs.exp.summary = null; prefs.exp.concerns = null; savePrefs(); renderPersSummary(); };
   renderPersSetup();
 }
+/* planning page: the public copy option in the publish dialog */
+function bindPublicCopy(){
+  if (EXPO || LMEF || !$("fmtH") || $("fmtPub")) return;
+  $("fmtH").closest("fieldset").insertAdjacentHTML("afterend", `<fieldset class="pubpub"><legend>Public products page</legend><div class="opts"><label><input type="checkbox" id="fmtPub"> Public copy (a ZIP to upload to the products repository)</label><label class="pubok" hidden><input type="checkbox" id="pubCleared"> I confirm this forecast is cleared for public release</label></div></fieldset>`);
+  $("fmtPub").onchange = e => { document.querySelector(".pubpub .pubok").hidden = !e.target.checked; };
+}
 function bindExp(){
+  bindPublicCopy();
   if (!EXPO) return;
   if (PERSONAL){ document.querySelectorAll(".plan-only").forEach(x => x.hidden = true); bindPersonal(); return; }
   $("expSetup").hidden = false;
@@ -1016,6 +1161,84 @@ const chartGroups = () => LMEF ? [
   ...(LMEF ? [["Probability of violation", PARAMS.filter(p => p.k === "rpov").map(p => p.k)], ["LLCC rules", PARAMS.filter(p => /^r/.test(p.k) && p.k !== "rpov").map(p => p.k)]] : []),
 ].filter(g => g[1].length);
 const chipName = k => ({ sky:"Sky", t:"Temp", td:"Dew pt", wbgt:"WBGT", pp:"Precipitation", lt:"Lightning", dir:"Direction", xhot:`>${hotOf(site())}°F` }[k] || (VIEWS[k] ? VIEWS[k].chip : P[k] ? (P[k].chip || P[k].l) : k));
+/* ---------- cross-product check: this page's official forecast against the planning forecast ----------
+   Same thresholds as the planning consistency flags: 3 F for temperatures, 5 kt and 30% for winds,
+   25 points for chances. Consecutive rows with the same difference are grouped. Returns
+   [{ msg, k, i }] for rows from..to (indices into S.rows). */
+function crossChecks(sid, from, to){
+  if (IS_PLANNING || PERSONAL) return [];
+  const rec = readFOR(), s = SITES.find(x => x.id === sid); if (!rec || !s) return [];
+  const near = forNear(rec, s); if (!near) return [];
+  const P = near.p, OFs = officialFor(sid), o = OFs.o, rows = S.rows, z = zulu(), u = wuLabel(), out = [];
+  /* compare only where the planning forecast is hourly too (its block rows hold highs, lows and 3 or 6 hour chances) */
+  const hourly = r => { if (!rec.hr) return false; for (let t = Math.floor(r.a/H)*H; t < r.b; t += H){ const j = Math.round((t - rec.t0)/H); if (j < 0 || j >= rec.n || !rec.hr[j]) return false; } return true; };
+  const checks = [];
+  if (o.t) checks.push({ k:"t", what:"Temperature", get: r => forAvg(P.v.t, r, rec), bad: (a, b) => Math.abs(a - b) > 3, fmt: v => `${Math.round(v)}°F` });
+  if (o.td) checks.push({ k:"td", what:"Dew point", get: r => forAvg(P.v.td, r, rec), bad: (a, b) => Math.abs(a - b) > 3, fmt: v => `${Math.round(v)}°F` });
+  for (const p of PARAMS){ const m = p.k.match(/^([sg])(\d+)$/); if (!m || !o[p.k]) continue;
+    checks.push({ k:p.k, what:`${m[1] === "g" ? "Peak" : "Sustained"} wind at ${m[2]} ft`, get: r => forWindAt(P, m[1], +m[2], r, rec, "value"), bad: (a, b) => Math.abs(a - b) > 5 && Math.abs(a - b) > 0.3*Math.max(a, b), fmt: v => `${Math.round(v*wfac())} ${u}` }); }
+  for (const ev of ["pp", "lt"]) for (const w of ["1"]) if (o[ev + w]) checks.push({ k:ev + w, what: ev === "pp" ? "Rain chance" : "Lightning chance", get: r => forMax(P.v[ev], r, rec), bad: (a, b) => Math.abs(a - b) > 25, fmt: v => `${Math.round(v)}%` });
+  if (LMEF && o.rl) checks.push({ k:"rl", what:"Lightning rule chance", get: r => forMax(P.v.lt, r, rec), bad: (a, b) => Math.abs(a - b) > 25, fmt: v => `${Math.round(v)}%`, vs:"planning lightning chance" });
+  for (const c of checks){
+    let run = null;
+    const flush = () => { if (!run) return; const a = rows[run.i0], b = rows[run.i1];
+      out.push({ k:c.k, i:run.i0, msg:`${c.what}, ${dayLabel(a.a, z).wd.slice(0, 3)} ${hhmm(a.a, z)}–${hhmm(b.b, z)}${z ? "Z" : "L"}: ${c.fmt(run.a)} here, ${c.vs || "planning"} ${c.fmt(run.b)} (${near.p.name})` }); run = null; };
+    for (let i = Math.max(0, from); i <= Math.min(rows.length - 1, to); i++){
+      const a = o[c.k] ? o[c.k][i] : null, b = rows[i].len === 1 && hourly(rows[i]) ? c.get(rows[i]) : null;
+      if (a == null || a === undefined || b == null || !c.bad(a, b)){ flush(); continue; }
+      if (run && run.i1 === i - 1) run.i1 = i; else { flush(); run = { i0:i, i1:i, a, b }; }
+    }
+    flush();
+  }
+  return out;
+}
+function clearAllEdits(){
+  const grp = [];
+  for (const sid in edits) for (const k in (edits[sid] || {})) for (const key in edits[sid][k]) grp.push({ sid, k, key, old: edits[sid][k][key], nw: undefined, lo: linkedFlag(sid, k, key), ln: false });
+  if (!grp.length) return;
+  for (const c of grp){ delete edits[c.sid][c.k][c.key]; }
+  S.undo.push(grp); if (S.undo.length > 200) S.undo.shift(); S.redo = [];
+  saveEdits(); renderAll(); toast(`Cleared ${grp.length} edit${grp.length === 1 ? "" : "s"}: starting from the last issued forecast (Ctrl+Z to undo)`);
+}
+/* the "planning forecast" bar on the exposure, burn and LMEF pages */
+function renderNudgeBar(){
+  if (!$("matrix")) return;
+  if (!$("planBar")){
+    $("matrix").insertAdjacentHTML("beforebegin", `<div class="planbar" id="planBar"></div>`);
+    $("planBar").addEventListener("change", ev => { if (ev.target.id === "nudgeSw"){ prefs.nudge = ev.target.checked; savePrefs(); renderAll(); } });
+    $("planBar").addEventListener("click", ev => {
+      const b = ev.target.closest("button"); if (!b) return;
+      if (b.id === "nudgeClear"){ if (!confirm("Clear your hand edits at every point, so the forecast starts from the last issued one nudged by the new guidance? Undo brings them back.")) return; clearAllEdits(); }
+      if (b.dataset.ng){ const [sid, k, i] = b.dataset.ng.split("|"); prefs.site = sid; prefs.param = k.replace(/^(pp|lt)\d$/, m => m.slice(0, 2)); savePrefs(); renderAll(); selectCell(+i, k, true); }
+    });
+  }
+  const rec = prevIssued(), on = prefs.nudge !== false, tm = t => t ? `${dayLabel(t, zulu()).wd.slice(0, 3)} ${hhmm(t, zulu())}${zulu() ? "Z" : "L"}` : "";
+  /* big guidance changes at every point, for the "since last issue" list */
+  const big = [];
+  if (rec && on) for (const st of SITES){ const pc = officialFor(st.id, true).pc; if (!pc || !pc.__flags) continue; const e = edits[st.id] || {};
+    for (const [k, arr] of Object.entries(pc.__flags)) arr.forEach((f, i) => { if (f != null && !(e[k] && e[k][S.rows[i].key] !== undefined)) big.push({ sid:st.id, name:st.name, k, i, f }); }); }
+  const nCells = OF && OF.pc ? Object.entries(OF.pc).filter(([k]) => !k.startsWith("__")).reduce((n, [, a]) => n + a.filter(v => v !== undefined).length, 0) : 0;
+  const pname = k => { const p = P[k]; if (!p) return k; const g = p.g ? grpLabel(p.g).replace(/\s*\(.*\)$/, "") : ""; const l = `${p.l}${p.s ? " " + p.s : ""}`;
+    return !g ? l : g.toLowerCase().startsWith(String(p.l).toLowerCase()) ? g : `${g} ${l}`; };
+  const nEd = Object.values(edits).reduce((n, e) => n + Object.values(e || {}).reduce((m, x) => m + Object.keys(x || {}).length, 0), 0);
+  $("planBar").innerHTML = `<label class="lsw"><input type="checkbox" id="nudgeSw" ${on ? "checked" : ""}> <b>Start from the last issued forecast</b></label>
+    <span class="mut">${!rec ? "No forecast issued in the last 72 hours (on this computer or in the official archive): starting from guidance." : !on ? "Off: starting from guidance." : `The ${tm(rec.published)} forecast${rec.by ? ` by ${hesc(rec.by)}` : ""}, nudged by the new guidance; its adjustments now count ${Math.round(Math.pow(0.5, Math.max(0, (Date.now() - rec.published)/H)/24)*100)}% (halving each day). ${nCells} cell${nCells === 1 ? "" : "s"} here start from it (blue underline); your edits win.`}</span>
+    ${rec && on && nEd ? `<button type="button" class="btn ghost" id="nudgeClear" title="For a new shift: clear the hand edits so every cell starts from the last issued forecast">Clear my edits and start from it</button>` : ""}
+    ${rec && on && big.length ? `<details class="ngl"><summary>Guidance changed a lot since then: ${big.length} cell${big.length === 1 ? "" : "s"}</summary><ul>${big.slice(0, 40).map(x => `<li>${hesc(x.name)}, ${hesc(pname(x.k))}, ${dayLabel(S.rows[x.i].a, zulu()).wd.slice(0, 3)} ${rowTime(S.rows[x.i])}: guidance ${x.f > 0 ? "+" : ""}${x.f}${/^[sg]\d/.test(x.k) ? " kt" : /^(pp|lt|sky)/.test(x.k) ? " points" : "°F"} <button type="button" class="btn ghost" data-ng="${x.sid}|${x.k}|${x.i}">Show</button></li>`).join("")}${big.length > 40 ? `<li>and ${big.length - 40} more</li>` : ""}</ul></details>` : ""}`;
+}
+function renderPlanBar(){
+  if (IS_PLANNING) return renderNudgeBar();
+  if (PERSONAL || !$("matrix")) return;
+  if (!$("planBar")){
+    $("matrix").insertAdjacentHTML("beforebegin", `<div class="planbar" id="planBar"></div>`);
+    $("planBar").addEventListener("change", ev => { if (ev.target.id === "fromPlan"){ prefs.fromPlan = ev.target.checked; savePrefs(); renderAll(); } });
+  }
+  const rec = readFOR(), on = prefs.fromPlan !== false, near = OF && OF.pc && OF.pc.__near;
+  const tm = t => t ? `${dayLabel(t, zulu()).wd.slice(0, 3)} ${hhmm(t, zulu())}${zulu() ? "Z" : "L"}` : "";
+  const nCells = OF && OF.pc ? Object.entries(OF.pc).filter(([k]) => k !== "__near").reduce((n, [, a]) => n + a.filter(v => v !== undefined).length, 0) : 0;
+  $("planBar").innerHTML = `<label class="lsw"><input type="checkbox" id="fromPlan" ${on ? "checked" : ""}> <b>Start from the planning forecast</b></label>
+    <span class="mut">${!rec ? "No planning forecast on this computer in the last 48 hours: this page starts from guidance. Open the planning forecast to make one." : !on ? "Off: this page starts from guidance." : near ? `Adjustments from <b>${hesc(near.name)}</b> (${Math.round(near.d)} km, ${Math.round(near.w*100)}%), planning forecast saved ${tm(rec.saved)}${rec.published ? `, published ${tm(rec.published)}` : ", not yet published"}. ${nCells} cell${nCells === 1 ? "" : "s"} carried in (blue underline); your edits here always win.` : "No planning point within 65 km of this point: it starts from guidance."}</span>`;
+}
 /* rows shown: a checkbox per row, grouped as the table groups them, with show-all and hide-all */
 function renderRowPick(){
   if (!$("matrix")) return;
@@ -1054,8 +1277,29 @@ function srcBar(){
     toast(on ? "All guidance sources selected" : "All guidance sources unselected: the guidance rows are empty until you pick at least one"); };
   $("srcAll").onclick = () => setAll(true); $("srcNone").onclick = () => setAll(false);
 }
+/* blend by parameter: a source set for each parameter group, under the source list */
+function renderBlendBy(){
+  if (!$("srcgrid")) return;
+  if (!$("blendBy")){
+    $("srcgrid").insertAdjacentHTML("afterend", `<div class="blendby" id="blendBy"></div>`);
+    $("blendBy").addEventListener("change", ev => {
+      const t = ev.target, gs = prefs.grpSrc = prefs.grpSrc || {};
+      if (t.dataset.bg){ const g = t.dataset.bg, mode = t.value;
+        gs[g] = mode === "all" ? undefined : { mode, ids: mode === "custom" ? ((gs[g] && gs[g].ids) || ALL_SOURCES.filter(x => prefs.enabled[x.id] !== false).map(x => x.id)) : undefined }; }
+      if (t.dataset.bgid){ const [g, id] = t.dataset.bgid.split("|"), c = gs[g] = gs[g] || { mode:"custom", ids:[] }; c.ids = (c.ids || []).filter(x => x !== id); if (t.checked) c.ids.push(id); }
+      savePrefs(); recomputeAgg(); renderAll(); renderBlendBy();
+    });
+  }
+  const gs = prefs.grpSrc || {}, fb = Object.values(S.G).reduce((m, G) => { for (const [g, set] of Object.entries(G.blendFallback || {})) m[g] = (m[g] || 0) + set.size; return m; }, {});
+  const used = BLEND_GROUPS.filter(([g]) => !(PERSONAL && g === "thunder"));
+  $("blendBy").innerHTML = `<h3>Blend by parameter</h3><p class="mut">Each group blends only the sources you choose here (your weights and the automatic weights still apply among them). An hour the chosen sources don't cover uses all sources.</p>
+    <table class="bbt"><tbody>${used.map(([g, label]) => { const c = gs[g] || {}, mode = c.mode || "all";
+      return `<tr><th>${label}</th><td><select data-bg="${g}">${BLEND_PRESETS.map(([k, l]) => `<option value="${k}" ${k === mode ? "selected" : ""}>${l}</option>`).join("")}</select>${fb[g] ? ` <span class="mut" title="Hours where the chosen sources had no value">${fb[g]} row${fb[g] === 1 ? "" : "s"} used all sources</span>` : ""}
+        ${mode === "custom" ? `<div class="bbc">${ALL_SOURCES.filter(x => prefs.enabled[x.id] !== false).map(x => `<label><input type="checkbox" data-bgid="${g}|${x.id}" ${(c.ids || []).includes(x.id) ? "checked" : ""}> ${hesc(x.name)}</label>`).join("")}</div>` : ""}</td></tr>`; }).join("")}</tbody></table>`;
+}
 function renderSources(){
   srcBar();
+  renderBlendBy();
   { const n = ALL_SOURCES.filter(s2 => prefs.enabled[s2.id] !== false).length; if ($("srcCount")) $("srcCount").textContent = `${n} of ${ALL_SOURCES.length} selected`; }
   const fams = Object.keys(FAMILIES);
   let ok = 0, tot = 0;
@@ -1092,7 +1336,7 @@ function renderStatus(){
   else if (!S.loading && ok === 0){ b.className = "banner show"; b.textContent = "Couldn't reach any guidance source from this browser. Check the network connection, then press Refresh guidance. You can still type a forecast into the table."; }
   else if (!S.loading && ![...OM_DET, ...OM_ENS].some(d => (S.status[d.id] || {}).ok)){ b.className = "banner show"; b.textContent = "Model guidance from Open-Meteo didn't load, so only MOS and LAMP are showing. Press Refresh guidance to try again."; }
   else if (PERSONAL && !S.loading && OF && OF.o && ["lt1","lt3","lt6"].every(k => !OF.o[k] || OF.o[k].every(v => v == null))){ b.className = "banner show"; b.textContent = "No thunder guidance for this place, so the thunder rows are blank. Fill them in by hand if needed."; }
-  else if (!PERSONAL && !S.loading && !["lav","mav","nbs","mex","nbe","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
+  else if (!PERSONAL && !S.loading && !["lav","mav","nbs","mex","nbe","ecm","refsct"].some(id => (S.status[id] || {}).ok)){ b.className = "banner show"; b.textContent = "No thunder guidance loaded (calibrated thunder, LAMP or MOS), so lightning probabilities are blank. Fill them in by hand, or check that the MOS mirror and high-res workflows are running."; }
   else b.className = "banner";
 }
 
@@ -1119,6 +1363,11 @@ function spanMap(k){
   return (S.spanCache[k] = res);
 }
 const ownerIdx = (k, i) => { const m = spanMap(k); while (i > 0 && m[i] && m[i].cov) i--; return i; };
+function nudgeNote(p, i){
+  const f = OF && OF.pc && OF.pc.__flags && OF.pc.__flags[p.k] && OF.pc.__flags[p.k][i]; if (f == null) return "";
+  const prev = OF.pc.__near && OF.pc.__near.prev, u = /^[sg]\d/.test(p.k) ? " kt" : /^(pp|lt|sky)/.test(p.k) ? " points" : "°F";
+  return `Guidance changed by ${f > 0 ? "+" : ""}${f}${u} since the ${prev ? hhmm(prev.published, zulu()) + (zulu() ? "Z" : "L") : "last"} forecast: worth a fresh look. `;
+}
 function cellTitle(p, r, i){
   if (!p.win) return p.title;
   const c = probCell(r, p.win);
@@ -1151,8 +1400,8 @@ function renderTable(){
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i];
       const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
-      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
-      h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : fmt(p, v)}</td>`;
+      const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${!edd && OF.pc && OF.pc[p.k] && OF.pc[p.k][i] !== undefined ? "pf" : ""} ${!edd && OF.pc && OF.pc.__flags && OF.pc.__flags[p.k] && OF.pc.__flags[p.k][i] != null ? "ng" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
+      h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || (nudgeNote(p, i) + cellTitle(p, r, i))}">${na ? "–" : fmt(p, v)}</td>`;
     }
     h += `</tr>`;
   });
@@ -1182,8 +1431,8 @@ function renderTableAcross(){
       const sp = spm[i]; if (sp.cov) return;
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i], cur = S.cur && S.cur.i === i && S.cur.k === p.k;
-      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
-      h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || cellTitle(p, r, i)}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
+      const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${!edd && OF.pc && OF.pc[p.k] && OF.pc[p.k][i] !== undefined ? "pf" : ""} ${!edd && OF.pc && OF.pc.__flags && OF.pc.__flags[p.k] && OF.pc.__flags[p.k][i] != null ? "ng" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
+      h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || (nudgeNote(p, i) + cellTitle(p, r, i))}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
     });
     h += `</tr>`;
   }
@@ -1203,7 +1452,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); renderSites(); renderRowPick(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN) renderFWF(); if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN) renderFWF(); if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
@@ -2292,7 +2541,7 @@ function csvGeneric(list, issued, by, internal){
 function download(blob, name){ const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 function openPublish(){
   const dlg = $("pubDlg");
-  $("pubSites").innerHTML = SITES.map(s => `<label><input type="checkbox" value="${s.id}" ${s.id === prefs.site || editCount(s.id) ? "checked" : ""}> ${s.name} <span style="color:var(--ink-3)">${s.point}</span></label>`).join("");
+  $("pubSites").innerHTML = SITES.map(s => `<label><input type="checkbox" value="${s.id}" ${(!EXPO && !LMEF) || s.id === prefs.site || editCount(s.id) ? "checked" : ""}> ${s.name} <span style="color:var(--ink-3)">${s.point}</span></label>`).join("");   /* the planning forecast publishes every point by default */
   $("pubInit").value = prefs.initials || "";
   const fm = prefs.fmt || { x:true, c:true, p:true, h:true };
   $("fmtX").checked = fm.x; $("fmtC").checked = fm.c; $("fmtP").checked = fm.p; $("fmtH").checked = fm.h;
@@ -2301,6 +2550,7 @@ function openPublish(){
     const msgs = [];
     consistencyIssues(ids).forEach(it => msgs.push(`Consistency: ${consText(it)}`));
     ids.forEach(id => { const q = qcIssues(id, officialFor(id)); q.list.forEach(it => msgs.push(`${SITES.find(s => s.id === id).name}, ${dayLabel(S.rows[it.i].a, zulu()).wd.slice(0,3)} ${rowTime(S.rows[it.i])}: ${it.msg}`)); });
+    ids.forEach(id => crossChecks(id, 0, S.rows.length - 1).forEach(it => msgs.push(`Differs from the planning forecast: ${it.msg}`)));
     const el = $("qc");
     if (msgs.length){ el.className = "qc show"; el.innerHTML = `<b>${msgs.length} check${msgs.length > 1 ? "s" : ""} to look at.</b> You can still publish.<ul>${msgs.slice(0, 10).map(m => `<li>${m}</li>`).join("")}${msgs.length > 10 ? `<li>and ${msgs.length - 10} more</li>` : ""}</ul>`; }
     else el.className = "qc";
@@ -2308,6 +2558,68 @@ function openPublish(){
   };
   $("pubSites").onchange = qcRefresh; qcRefresh();
   dlg.showModal(); $("pubInit").focus();
+}
+/* the public preview: day (0600-1800 local) and night periods for about three days at each point, each
+   summarizing the official rows inside it: high or low, sky, the highest rain and lightning chances,
+   rain total, strongest 54 ft wind and peak, and the outlooks */
+function planningPreview(list, issued){
+  const z = false, H6 = 6, H18 = 18;
+  const p0 = lp(issued); let start = Date.UTC(p0.y, p0.mo - 1, p0.d) + (lp(issued).h < H6 ? 0 : 0);
+  /* the boundaries in local time: 0600 and 1800 */
+  const at = (t, hh) => { const p = lp(t); return dtParse(`${p.y}-${pad2(p.mo)}-${pad2(p.d)}T${pad2(hh)}:00`); };
+  let a = lp(issued).h < H6 ? at(issued - 24*H, H18) : lp(issued).h < H18 ? at(issued, H6) : at(issued, H18);
+  const periods = [];
+  for (let k = 0; k < 7; k++){
+    const day = lp(a + H).h >= H6 && lp(a + H).h < H18, b = day ? at(a + H, H18) : at(a + 13*H, H6);
+    if (b <= a) break;
+    const isToday = dayKey(a + H, z) === dayKey(issued, z), isTom = dayKey(a + H, z) === dayKey(issued + 24*H, z), wd = dayLabel(a + H, z).wd.slice(0, 3);
+    const label = day ? (isToday ? "Today" : isTom ? "Tomorrow" : wd) : (isToday ? "Tonight" : isTom ? "Tomorrow night" : `${wd} night`);
+    if (b > issued + H) periods.push({ label, night: !day, start: new Date(a).toISOString(), end: new Date(b).toISOString(), a, b });
+    a = b;
+  }
+  const ps = periods.slice(0, 6), rows = S.rows, wf = wfac(), maxOf = arr => { const v = arr.filter(x => x != null); return v.length ? Math.max(...v) : null; };
+  const sites = list.map(([s2, OFs]) => { const o = OFs.o;
+    const cells = ps.map(per => {
+      const idx = rows.map((r, i) => i).filter(i => rows[i].b > per.a && rows[i].a < per.b && rows[i].b > issued);
+      if (!idx.length) return null;
+      const vals = k => idx.map(i => o[k] ? o[k][i] : null).filter(v => v != null && v !== undefined && v !== "-");
+      const ts = vals("t"), sk = vals("sky"), g = vals("g54"), sv = vals("s54");
+      const gi = idx.reduce((best, i) => o.g54 && o.g54[i] != null && (best == null || o.g54[i] > o.g54[best]) ? i : best, null);
+      const cat = arr => arr.sort((x, y) => SEV.indexOf(y) - SEV.indexOf(x))[0] || null;
+      const q = vals("qpf");
+      return { t: ts.length ? Math.round(per.night ? Math.min(...ts) : Math.max(...ts)) : null, sky: sk.length ? skyCat(sk.reduce((x, y) => x + y, 0)/sk.length) : null,
+        pop: maxOf([...vals("pp1"), ...vals("pp3"), ...vals("pp6")]), ltg: maxOf([...vals("lt1"), ...vals("lt3"), ...vals("lt6")]),
+        qpf: q.length ? Math.round(q.reduce((x, y) => x + y, 0)*100)/100 : null,
+        s: sv.length ? Math.round(Math.max(...sv)*wf) : null, g: g.length ? Math.round(Math.max(...g)*wf) : null, dir: gi != null && o.dir && o.dir[gi] != null ? compass(o.dir[gi]) : null,
+        sev: cat(vals("sev")), ero: cat(vals("ero")), hail: maxOf(vals("hailp")) || null };
+    });
+    return { id:s2.id, name:s2.name, point:s2.point, cells };
+  });
+  return { units: wuLabel(), tz: tzAbbr(issued), periods: ps.map(({ label, night, start, end }) => ({ label, night, start, end })), sites };
+}
+/* the interactive product's data on its own (what the public viewer draws), without the logo */
+function interactiveData(list, issued, by){
+  const html = interactiveReport(list, issued, by, null), i = html.indexOf('id="data">'), j = html.indexOf("</script>", i);
+  const d = JSON.parse(html.slice(i + 10, j)); d.logo = null; return d;
+}
+/* maintenance: the public viewer template for the products repository (viewer/planning.html); run
+   downloadPublicViewer() in the browser console on the planning page after changing the report viewer */
+function downloadPublicViewer(){
+  const list = SITES.slice(0, 1).map(s2 => [s2, officialFor(s2.id)]), html = interactiveReport(list, Date.now(), "", null);
+  const i = html.indexOf('id="data">'), j = html.indexOf("</script>", i);
+  let t = html.slice(0, i + 10) + "__ERWX_DATA__" + html.slice(j);
+  t = t.replace('<header class="top">', '<header class="top"><img src="45ws-logo.png" alt="45th Weather Squadron">');
+  download(new Blob([t], { type:"text/html" }), "planning.html");
+}
+/* the planning page's public copy: a one-line headline and the numbers the products page shows */
+function planningPublicMeta(list, issued, by){
+  const all = (k, f) => list.flatMap(([, OFs]) => (OFs.o[k] || []).filter(v => v != null && v !== "-")).reduce((a, v) => f(a, v), null);
+  const mx = (a, v) => a == null || v > a ? v : a, mn = (a, v) => a == null || v < a ? v : a;
+  const hi = all("t", mx), lo = all("t", mn), pp = Math.max(all("pp6", mx) ?? 0, all("pp3", mx) ?? 0, all("pp1", mx) ?? 0), lt = Math.max(all("lt6", mx) ?? 0, all("lt3", mx) ?? 0, all("lt1", mx) ?? 0);
+  const pk = all("g54", mx), sev = list.flatMap(([, OFs]) => OFs.o.sev || []).filter(v => v && v !== "-").sort((a, b) => SEV.indexOf(b) - SEV.indexOf(a))[0];
+  const bits = [hi != null && lo != null ? `${Math.round(lo)}–${Math.round(hi)}°F` : "", `rain up to ${Math.round(pp)}%`, lt >= 10 ? `lightning up to ${Math.round(lt)}%` : "", pk != null ? `54 ft peaks to ${Math.round(pk*wfac())} ${wuLabel()}` : "", sev ? `SPC ${sev}` : ""].filter(Boolean);
+  return { type:"planning", key:"planning", title:"Daily Planning Forecast", subtitle: list.map(([s]) => s.name).join(", "), issued, forecaster: by,
+    headline: bits.join(" · "), summary:{ tmax: hi, tmin: lo, pop: Math.round(pp), ltg: Math.round(lt), sev: sev || null }, preview: planningPreview(list, issued) };
 }
 async function doPublish(){
   const logo = await loadLogo();
@@ -2326,7 +2638,24 @@ async function doPublish(){
     if (wantP){ if (BURN) fwfPDF(logo).then(pdf => download(pdf, `${FILE_BASE()}${tag}_${stamp}.pdf`)); else setTimeout(() => download(pdfReport(models, logo), `${FILE_BASE()}${tag}_${stamp}.pdf`), 600); nfiles++; }
     if (wantH){ setTimeout(() => download(new Blob([interactiveReport(list, issued, by, logo)], { type:"text/html" }), `${FILE_BASE()}${tag}_${stamp}.html`), 900); nfiles++; }
   }
+  /* a public copy for the products page (planning forecast only) */
+  if ($("fmtPub") && $("fmtPub").checked){
+    if (!$("pubCleared").checked){ toast("Tick the release confirmation to make a public copy"); }
+    else {
+      /* release through a GitHub issue; the ZIP stays available from the dialog */
+      const meta = planningPublicMeta(list, issued, by), models = reportModel(list, issued, by);
+      const zipFn = async () => { const snap = await publicSnapshot(meta, { html: interactiveReport(list, issued, by, logo), pdf: pdfReport(models, logo) }); download(snap.blob, snap.name); };
+      setTimeout(() => showReleaseDialog(meta, { kind:"planning-data", data: interactiveData(list, issued, by) }, by, zipFn), 1300);
+    }
+  }
   keepForVerification(list, issued, by);
+  if (IS_PLANNING){
+    saveFOR(issued);
+    try { const rec = buildFOR(issued); if (rec){ rec.by = by || ""; localStorage.setItem(PREV_KEY, JSON.stringify(rec));
+      /* the official archive (with a GitHub connection): the planning CSV for verification, and the forecast record for nudging */
+      archiveOfficial({ type:"planning", title:"Daily Planning Forecast", subtitle: list.map(([st]) => st.name).join(", "), issued, forecaster: by || "" },
+        { csv: csvFor(list, issued, by, false), for: rec }); } } catch (e) { /* storage full */ }
+  }
   prefs.fmt = { x:$("fmtX").checked, c:$("fmtC").checked, p:wantP, h:wantH }; savePrefs();
   ids.forEach(id => published[id] = { t: issued, by }); store.set(LS.pub, published);
   renderStatus();
@@ -3080,10 +3409,16 @@ async function loadAll(){
       if (!x || !Object.keys(x.per).length){ S.status[d.id] = { err: why || "not in this run" }; continue; }
       SITES.forEach(s => { const p = x.per[s.id]; if (p) addSrc(s.id, d, p.members, p.iv ? { iv:p.iv, run:x.run } : null); });
       const ageH = (Date.now() - x.run)/H;
-      S.status[d.id] = { ok:true, note: `${pad2(new Date(x.run).getUTCHours())}Z run${x.n > 1 ? `, ${x.n} members` : ""}${d.id === "refsm" && x.n && x.n < 5 ? " (some members missing)" : ""}${ageH > 13 ? ` · ${Math.round(ageH)} h old` : ""}` };
+      S.status[d.id] = { ok:true, note: `${pad2(new Date(x.run).getUTCHours())}Z ${/tl$/.test(d.id) ? "newest" : "run"}${x.n > 1 ? `, ${x.n} ${/tl$/.test(d.id) ? "runs" : "members"}` : ""}${d.id === "refsm" && x.n && x.n < 5 ? " (some members missing)" : ""}${ageH > 13 ? ` · ${Math.round(ageH)} h old` : ""}` };
     }
   }).catch(e => { PIPE.forEach(d => S.status[d.id] = { err:"pipeline file missing" }); }).finally(scheduleRender));
   if (!PERSONAL) tasks.push((DEMO ? demoSPC() : fetchSPC()).then(sev => { for (const s of SITES) S.G[s.id].sev = sev; }).finally(scheduleRender));
+  /* nudge mode across forecasters: the newest planning forecast in the official archive (last 72 hours) */
+  if (IS_PLANNING && !DEMO && typeof archiveEntries === "function") tasks.push(archiveEntries(3, "planning").then(async es => {
+    const e = es[0]; if (!e) return;
+    const r = await archiveFile(e.path); const f = r && r.data && r.data.for;
+    if (f && f.v === 1){ f.published = Date.parse(r.issued); f.by = r.forecaster || ""; S.prevArchive = f; }
+  }).catch(() => {}).finally(scheduleRender));
   if (!PERSONAL){ S.status.hail = { loading:true }; tasks.push((DEMO ? demoHail() : fetchHail()).then(h => { for (const s of SITES) S.G[s.id].hail = h; S.status.hail = { ok:true, note: h.length ? "Days 1-2" : "no hail areas" }; }).catch(() => { S.status.hail = { err:"not reachable" }; }).finally(scheduleRender)); }
   if (!PERSONAL && P.ero){ S.status.ero = { loading:true }; tasks.push((DEMO ? demoERO() : fetchERO()).then(ero => { for (const s of SITES) S.G[s.id].ero = ero; S.status.ero = { ok:true, note: ero.length ? `${new Set(ero.map(x => x.day)).size} days` : "no risk areas" }; }).catch(() => { S.status.ero = { err:"not reachable" }; }).finally(scheduleRender)); }
   await Promise.allSettled(tasks);
@@ -3173,8 +3508,8 @@ async function demoPipeline(TL){
         for (let h = 1; h <= maxh; h++){ const b = run + h*H, lh = lp(b).h; const base = lh >= 13 && lh <= 20 && h < 40 ? 0.08 + r()*0.25 : 0.01; tst.push({ a:b - H, b, p:base }); if (h >= 4) tst4.push({ a:b - 4*H, b, p:Math.min(0.9, base*2.2) }); }
         per[s.id] = { members:[], iv:{ tst, tst4 } };
       } else {
-        const n = d.id === "refsm" ? 5 : 1, ms = [];
-        for (let k = 0; k < n; k++){ const m = demoSeries(TL, r, (r() - 0.5)*3); const lim = TL.idx(run + (d.id === "rrfs" ? 84 : 60)*H); Object.keys(m).forEach(x => { for (let i = Math.max(0, lim); i < TL.n; i++) m[x][i] = null; }); m.pp = new Array(TL.n).fill(null); m.gap = 3; ms.push(deriveMember(m, TL.n)); }
+        const tl = /tl$/.test(d.id), n = d.id === "refsm" ? 5 : tl ? 6 : 1, ms = [];
+        for (let k = 0; k < n; k++){ const m = demoSeries(TL, r, (r() - 0.5)*3); const lim = TL.idx(run + (d.id === "rrfs" ? 84 : tl ? 18 : 60)*H); if (tl) m.lw = Math.round(Math.pow(0.8, k)*1000)/1000; Object.keys(m).forEach(x => { for (let i = Math.max(0, lim); i < TL.n; i++) m[x][i] = null; }); m.pp = new Array(TL.n).fill(null); m.gap = 3; ms.push(deriveMember(m, TL.n)); }
         per[s.id] = { members: ms, iv:null };
       }
     });

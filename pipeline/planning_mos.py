@@ -30,6 +30,9 @@ KP = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.js
 PROTONS = "https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json"
 THREEDAY = "https://services.swpc.noaa.gov/text/3-day-forecast.txt"
 UA = {"User-Agent": "planning-forecast-mirror (GitHub Actions)"}
+# ECMWF IFS MOS (N. Luchetti): a text bulletin in the GFS MOS layout for KXMR, KTTS, KMLB and KCOF,
+# mirrored here as docs/data/mos/ECM.json in the same row format as IEM's MOS
+ECM_URL = "https://nluchetti1.github.io/ecmwf-mos/"
 
 
 def get(url, tries=3, timeout=60):
@@ -49,6 +52,64 @@ def write(name, obj):
     with open(path + ".tmp", "w") as f:
         json.dump(obj, f, separators=(",", ":"))
     os.replace(path + ".tmp", path)
+
+
+def get_text(url, tries=3, timeout=60):
+    last = None
+    for k in range(tries):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout) as r:
+                return r.read().decode("utf-8", "replace")
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(4 * (k + 1))
+    raise last
+
+
+def parse_ecmwf_mos(text):
+    """ECMWF MOS bulletin -> rows like IEM's MOS JSON: station, runtime, ftime, tmp, dpt, cld, wdr (degrees),
+    wsp (kt), p06, p12, t06, t12. Columns are read at the HR line's positions, so blanks stay empty."""
+    import html as _html
+    import re as _re
+    from datetime import timedelta as _td
+    text = _html.unescape(_re.sub(r"<[^>]+>", "", text or ""))
+    rows = []
+    head = _re.compile(r"^\s*(K[A-Z0-9]{3})\s+ECMWF MOS GUIDANCE\s+(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{2})(\d{2})\s*UTC", _re.M)
+    heads = list(head.finditer(text))
+    for n, h in enumerate(heads):
+        block = text[h.end(): heads[n + 1].start() if n + 1 < len(heads) else len(text)].splitlines()
+        stn = h.group(1)
+        run = datetime(int(h.group(4)), int(h.group(2)), int(h.group(3)), int(h.group(5)), int(h.group(6)), tzinfo=timezone.utc)
+        hr = next((ln for ln in block if ln.strip().startswith("HR")), None)
+        if not hr:
+            continue
+        cols = [(m.start(), m.end(), int(m.group())) for m in _re.finditer(r"\d+", hr)]
+        times, prev = [], run
+        for _, _, hh in cols:
+            t = prev.replace(hour=hh % 24, minute=0)
+            while t <= prev:
+                t += _td(days=1)
+            times.append(t)
+            prev = t
+        lines = {}
+        for ln in block:
+            m = _re.match(r"^\s*([A-Z0-9/]{3})\s", ln)
+            if m and m.group(1) in ("TMP", "DPT", "CLD", "WDR", "WSP", "P06", "P12", "T06", "T12"):
+                lines[m.group(1)] = ln
+        for j, (a, b, _) in enumerate(cols):
+            r = {"station": stn, "runtime": run.strftime("%Y-%m-%d %H:%M"), "ftime": times[j].strftime("%Y-%m-%d %H:%M")}
+            for key, ln in lines.items():
+                cell = ln[max(0, b - 3):b].strip() if len(ln) >= b - 1 else ""
+                if not cell:
+                    continue
+                if key == "CLD":
+                    r["cld"] = cell
+                elif cell.lstrip("-").isdigit():
+                    v = int(cell)
+                    r[key.lower()] = v * 10 if key == "WDR" else v
+            if len(r) > 3:
+                rows.append(r)
+    return rows
 
 
 def rows_of(js):
@@ -145,6 +206,16 @@ def main():
                 print(f"{model}: empty response, keeping previous file")
         except Exception as e:  # noqa: BLE001
             print(f"{model}: failed ({e}), keeping previous file")
+    # ECMWF MOS
+    try:
+        rows = parse_ecmwf_mos(get_text(ECM_URL))
+        if rows:
+            write("ECM.json", {"source": ECM_URL, "data": rows})
+            print(f"ECM: {len(rows)} rows from {len({r['station'] for r in rows})} stations")
+        else:
+            print("ECM: no bulletin found, keeping previous file")
+    except Exception as e:  # noqa: BLE001
+        print(f"ECM: failed ({e}), keeping previous file")
     for d in (1, 2, 3):
         try:
             js = get(SPC.format(d=d))

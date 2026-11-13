@@ -13,6 +13,91 @@ published as Excel or CSV. Static page on GitHub Pages; everything runs in the b
 
 Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days 6 and 7.
 
+## Edition
+This is the **personal edition** (`docs/site.config.json`: `"publicPage": false, "archive": false`): one site, no
+studio and public-page split. Public copies, releases, withdrawals, the GitHub connection and the official archive
+are switched off, and their workflows aren't included, because this repository is public. Nudge mode starts from
+the last forecast you published on this computer. Everything else matches the AFSPC edition.
+
+## Blend by parameter
+Under the source list, **Blend by parameter** sets the sources each parameter group blends: temperature (with dew
+point, humidity and WBGT), sky and visibility, winds (every height, peaks, direction), precipitation (chance and
+amount) and lightning. Choices: all selected sources (default), MOS and LAMP, high resolution, global models,
+ensembles, NBM (gridded and text), the NWS forecast, or a custom list. Your weights and the automatic weights still
+apply among the chosen sources; exceedance and constraint chances follow their parameter's set; a row the chosen
+sources don't cover uses all sources (counted in the panel). Saved per page in this browser
+(`prefs.grpSrc`). The TAF generator keeps its own source list.
+
+
+## ECMWF MOS
+**ECMWF MOS** (`ecm`, MOS family) is N. Luchetti's ECMWF IFS MOS (https://nluchetti1.github.io/ecmwf-mos/, built from
+ECMWF open data, CC-BY-4.0): ridge-regression temperatures, dew points and wind speeds, logistic 6- and 12-hour
+precipitation and thunder chances, raw IFS cloud and wind direction, 3-hourly to about 54 hours then 6-hourly, for
+KXMR, KTTS, KMLB and KCOF. The MOS workflow reads the bulletin and mirrors it as `docs/data/mos/ECM.json` in IEM's MOS
+row format (`parse_ecmwf_mos` in `pipeline/planning_mos.py`); the pages read the mirror, or the bulletin straight from
+the site if the mirror isn't there yet. Its 6-hour precipitation and thunder chances feed the blend like GFS MOS, and
+verification scores it as its own source.
+
+## Official archive
+With a GitHub connection, every issued planning forecast (Save and publish), TAF (Copy TAF), mission weather product
+(PDF or HTML export; page 1 only) and LMEF for a launch marked **Publicly announced launch** (any export; without the
+customer's liftoff limit) opens a compressed `official-archive` issue. `.github/workflows/official-archive.yml` runs
+`pipeline/official_archive.py`, which checks the author's write access and the content (no exposure or burn forecasts,
+no LMEF limits, no drop zone page), files it as `docs/data/archive/<type>/<YYYY>/<MM>/<id>.json.gz`, updates
+`docs/data/archive/index/<YYYY-MM>.json` and `months.json`, commits, and closes the issue with the `archived` label.
+Each product version is sent once however many formats are exported. The Verification page loads the archive's
+planning forecasts (last 100 days) into its official rows, so scores and the case browser are team-wide, and its
+LMEFs into the launch section. The archive is served only with the private studio site.
+
+## Nudge mode (planning forecast)
+**Start from the last issued forecast** (on by default): the newest issued planning forecast in the last 72 hours,
+from this computer's last publish (`erwx:prevpub:v1`) or the official archive, is the starting point. For a cell
+nobody edited: `nudged = previous official + beta x (new guidance - guidance at that issue)` and
+`start = new guidance + fade x (nudged - new guidance)`, `fade = 0.5 ^ (age h / 24)`; beta is 1 for temperature and
+dew point, 0.7 for sky and winds, 0.6 for chances (1-hour chances on hourly rows, 3-hour on 3-hour rows; the linking
+rebuilds the windows). Cells where the guidance moved more than 3 F, 5 kt and 30%, or 25 points since that issue
+get an orange flag and are listed under *Guidance changed a lot since then*. **Clear my edits and start from it**
+clears every hand edit as one undo step, for a new shift.
+
+## Time-lagged HRRR and RRFS
+`pipeline/planning_hires.py` adds two sources, **HRRR time-lagged** (`hrrrtl`, NOAA's `noaa-hrrr-bdp-pds` bucket,
+NOMADS as backup) and **RRFS time-lagged** (`rrfstl`): the last `TL_RUNS` (6) hourly runs to `TL_HOURS` (18) at the
+forecast points, each a member weighted by age, `TL_DECAY` (0.8) per hour older than the newest run. A run fetched in
+an earlier hour is reused from `hires.json`, so each hour normally downloads one new run per model. In the pages each
+source still counts once in the blend; the member weights shape its mean, its spread and the member-based chances
+(precipitation, wind and temperature exceedances). Verification scores them as their own sources with the same
+weights, so the scorecard, reliability diagram and automatic weights show whether they help. Members of any source may
+carry an `lw` weight; without it they count equally.
+
+## Consistency between products
+* **Forecast of record:** the planning page saves its official forecast (values, and the change from guidance)
+  hour by hour for each point in this browser (`localStorage` key `erwx:for:v1`, kept 48 hours; refreshed on every
+  change and stamped at publish). Exposure, burn and LMEF pages, with **Start from the planning forecast** on (the
+  default), start from it: each cell nobody edited on that page gets the nearest planning point's adjustment (full
+  within 15 km, tapering to 40% at 65 km, none beyond): degrees for temperature and dew point, points for sky and
+  rain and lightning chances, the same percentage for winds (interpolated between 54 and 200 ft by height). RH
+  follows the carried temperature and dew point; exceedance and constraint chances shift with the carried values.
+  Carried cells have a blue underline; edits on the page always win.
+* **Cross-product check:** the exposure and burn publish window, and each LMEF window, list where the product
+  differs from the planning forecast for the same hours (only where the planning forecast is hourly): over 3 F for
+  temperatures, 5 kt and 30% for winds, 25 points for chances, and the LMEF lightning rule against the planning
+  lightning chance. The TAF format checks add thunder against the planning lightning chance at the nearest point.
+
+## Public releases (interim products page)
+The planning forecast (Save and publish → *Public copy*), LMEF (*Public copy* in the export bar), TAF
+(*Public copy* next to Copy TAF) and mission weather products (*Public copy*, page 1 only) open a **release dialog**: copy the release and open the prefilled issue in this
+repository (label `public-release`), paste and submit. `.github/workflows/publish-public.yml` runs
+`pipeline/public_release.py`, which checks the author has write access, the product type is public, the LMEF has
+no recovery, landing or customer criteria, the mission weather product has no drop zone page, and no `needs-review` label is holding it; it then pushes the snapshot
+to the public products repository with the `PRODUCTS_DEPLOY_KEY` deploy key (environment `products-publish`,
+repository variable `PRODUCTS_REPO_SSH`), comments with the link and closes the issue. `docs/site.config.json`
+names this repository for the dialog. *Download ZIP instead* is the manual fallback. **Public page** (end of the
+page bar) lists what's live and opens prefilled `public-withdraw` issues to withdraw a version or a whole product;
+the same workflow removes it with the deploy key. **One-click publishing:** with a GitHub connection (a fine-grained
+token limited to this repository with Issues: Read and write, saved in the browser under *Connect GitHub*), *Publish
+now* and *Withdraw* open the issue through GitHub's API and show the workflow's answer; without one, the GitHub form
+is used. See `DEPLOY.md`.
+
 ## Rows shown, rain and hail
 * **Rows shown** (above the table on the forecast pages): a checkbox for every row, grouped as in the table,
   with Show all and Hide all. Hidden rows leave the table, the graph list and the PDF, Excel and HTML products;
@@ -329,6 +414,12 @@ also rebuilds it on push).
   High: the chance rain exceeds flash flood guidance within 25 mi). The MOS workflow mirrors it from the NWS
   map service (`docs/data/mos/wpc_ero_dayN.json`); the page falls back to the service directly. It is in the
   products, the CSV (`wpc_ero`) and the leadership brief.
+
+**Reliability sources.** Under the planning reliability diagram, *Sources on the diagram* lists every source
+with scored probabilities for the chosen parameter, grouped as official and blends, ensembles, probability
+guidance (NBM, MOS, NWS, calibrated thunder) and single models (whose yes-or-no forecasts give two points).
+Tick any to plot them; the choice is kept, and *Default* returns to the official forecast, the blends and the
+two most skillful sources.
 
 ## Verification: launch forecasts (LMEF)
 **Launch forecasts** on the Verification tab. Every LMEF exported (PDF, HTML, Excel or CSV) keeps a copy in

@@ -67,7 +67,7 @@ OM_DET = [("hrrr", "ncep_hrrr_conus"), ("nbm", "ncep_nbm_conus"), ("gfs", "gfs_s
           ("ifs", "ecmwf_ifs025"), ("aifs", "ecmwf_aifs025_single"), ("icon", "icon_global"), ("gem", "gem_global"),
           ("ukmo", "ukmo_global_deterministic_10km")]
 OM_ENS = [("gefs", "gfs025"), ("eps", "ecmwf_ifs025"), ("aifsens", "ecmwf_aifs025"), ("iconeps", "icon_global"), ("geps", "gem_global")]
-MOS = [("lav", "LAV"), ("mav", "GFS"), ("nbs", "NBS"), ("mex", "GFSX")]
+MOS = [("lav", "LAV"), ("mav", "GFS"), ("nbs", "NBS"), ("mex", "GFSX"), ("ecm", "ECM")]
 MOS_STN = {"ksc-inland": "KTTS", "ksc-pads": "KTTS", "cape-inland": "KXMR", "cape-pad37": "KXMR", "patrick": "KCOF"}
 ISSUE_HOURS = (5, 17)
 LEAD_H = 168
@@ -530,28 +530,39 @@ def derive(m):
 
 
 def summarize(members):
-    """mean of continuous fields and event probabilities across members (0..1)"""
+    """mean of continuous fields and event probabilities across members (0..1); members may carry an
+    age weight "lw" (time-lagged runs), otherwise they count equally"""
     n = LEAD_H + 1
     res = {k: [None] * n for k in CONT + PROB}
+    W = lambda m: m.get("lw", 1) or 1  # noqa: E731
+
+    def wmean(pairs):
+        tw = sum(w for _, w in pairs)
+        return sum(v * w for v, w in pairs) / tw if tw else None
+
+    def wshare(pairs, test):
+        tw = sum(w for _, w in pairs)
+        return sum(w for v, w in pairs if test(v)) / tw if tw else None
+
     for k in range(n):
         for f in ("t", "td", "s54", "g54", "s200", "g200"):
-            v = [m[f][k] for m in members if m[f][k] is not None]
-            res[f][k] = r1(sum(v) / len(v)) if v else None
-        u = [(-math.sin(math.radians(m["d"][k])) * (m["s54"][k] or 1), -math.cos(math.radians(m["d"][k])) * (m["s54"][k] or 1)) for m in members if m["d"][k] is not None]
+            v = [(m[f][k], W(m)) for m in members if m[f][k] is not None]
+            res[f][k] = r1(wmean(v)) if v else None
+        u = [(-math.sin(math.radians(m["d"][k])) * (m["s54"][k] or 1) * W(m), -math.cos(math.radians(m["d"][k])) * (m["s54"][k] or 1) * W(m)) for m in members if m["d"][k] is not None]
         res["d"][k] = round((math.degrees(math.atan2(-sum(a for a, _ in u), -sum(b for _, b in u))) + 360) % 360) if u else None
-        pp = [m["pp"][k] for m in members if m["pp"][k] is not None]
-        prs = [m["pr"][k] for m in members if m["pr"][k] is not None]
+        pp = [(m["pp"][k], W(m)) for m in members if m["pp"][k] is not None]
+        prs = [(m["pr"][k], W(m)) for m in members if m["pr"][k] is not None]
         if pp:
-            res["pp"][k] = round(sum(pp) / len(pp) / 100, 3)
+            res["pp"][k] = round(wmean(pp) / 100, 3)
         elif prs:
-            res["pp"][k] = round(sum(1 for x in prs if x >= 0.01) / len(prs), 3)
-        ss = [max(m["s54"][k] or 0, m["s200"][k] or 0) for m in members if m["s54"][k] is not None]
-        gg = [max(m["g54"][k] or 0, m["g200"][k] or 0) for m in members if m["g54"][k] is not None]
+            res["pp"][k] = round(wshare(prs, lambda x: x >= 0.01), 3)
+        ss = [(max(m["s54"][k] or 0, m["s200"][k] or 0), W(m)) for m in members if m["s54"][k] is not None]
+        gg = [(max(m["g54"][k] or 0, m["g200"][k] or 0), W(m)) for m in members if m["g54"][k] is not None]
         if ss:
-            res["x18"][k] = round(sum(1 for x in ss if x > 18) / len(ss), 3)
+            res["x18"][k] = round(wshare(ss, lambda x: x > 18), 3)
         if gg:
             for thr, key in ((25, "x25"), (35, "x35"), (50, "x50")):
-                res[key][k] = round(sum(1 for x in gg if x > thr) / len(gg), 3)
+                res[key][k] = round(wshare(gg, lambda x, t=thr: x > t), 3)
     return res
 
 
@@ -733,7 +744,10 @@ def hires_sources(issue):
                         for f in ("t", "td", "s10", "d10", "g10", "s80", "pr"):
                             arr = mm.get(f)
                             m[f][k] = arr[i] if arr and i < len(arr) else None
-                mems.append(derive(m))
+                dm = derive(m)
+                if mm.get("lw") is not None:
+                    dm["lw"] = mm["lw"]
+                mems.append(dm)
             mems = [m for m in mems if any(v is not None for v in m["t"])]
             if mems:
                 per[pid] = summarize(mems)

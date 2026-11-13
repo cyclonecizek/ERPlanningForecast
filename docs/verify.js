@@ -25,7 +25,8 @@ const VARS = [
 const SRC_NAME = { official:"Official forecast", blend_auto:"Blend, auto-weighted", blend_equal:"Blend, equal weights", ndfd:"NWS Forecast",
   hrrr:"HRRR", nam3:"NAM 3 km", nbm:"NBM", gfs:"GFS", ifs:"ECMWF IFS", aifs:"ECMWF AIFS", icon:"ICON", gem:"GEM", ukmo:"UKMO",
   gefs:"GEFS", eps:"ECMWF ENS", aifsens:"AIFS ENS", iconeps:"ICON EPS", geps:"GEPS", lav:"LAMP", mav:"GFS MOS", nbs:"NBM text", mex:"GFS MOS ext",
-  rrfs:"RRFS", refsm:"REFS members", hrefct:"HREF cal. thunder", refsct:"REFS cal. thunder" };
+  rrfs:"RRFS", refsm:"REFS members", hrefct:"HREF cal. thunder", refsct:"REFS cal. thunder",
+  ecm:"ECMWF MOS", hrrrtl:"HRRR time-lagged", rrfstl:"RRFS time-lagged" };
 const GROUP_NAME = { t:"Temperature and dew point", s:"Sustained wind", g:"Peak wind", d:"Wind direction", pp:"Precipitation", lt:"Lightning", x:"Wind thresholds" };
 const V = { summary:null, weights:null, status:null, obs:{}, official:[], win:"30", point:"all", band:"all", lvar:"t", rvar:"pp", wgrp:"t", day:null, cpoint:"ksc-inland" };
 
@@ -178,18 +179,45 @@ function renderLead(){
   $("leadSel").innerHTML = VARS.map(x => `<option value="${x.k}" ${x.k === V.lvar ? "selected" : ""}>${x.label}</option>`).join("");
   $("lead").innerHTML = svgLine(series, bands, v.kind === "cont" ? `MAE (${v.unit})` : "Brier skill") + `<p class="mut">${v.kind === "cont" ? `Mean absolute error in ${v.unit}; lower is better.` : "Brier skill score against the observed frequency; higher is better, 0 is no better than climatology."} Top five sources plus the two blends.</p>`;
 }
+/* which kind of probability a source gives: ensembles, probability guidance, or a single model (yes or no) */
+const SRC_FAM = id => { const d = (typeof ALL_SOURCES !== "undefined" ? ALL_SOURCES : []).find(x => x.id === id); return d ? d.fam : null; };
+function relKind(sid){
+  if (/^official|^blend/.test(sid)) return "main";
+  const f = SRC_FAM(sid);
+  if (f === "ens" || sid === "refsm") return "ens";
+  if (f === "mos" || f === "ct" || f === "nws" || f === "blend" || sid === "ndfd" || sid === "nbm") return "prob";
+  return "det";
+}
+/* colors for picked sources, kept clear of the official (gold) and blend (dark, grey) lines */
+const REL_PAL = ["#1F6FB2", "#1B9E77", "#C0392B", "#7B4FA0", "#0E9AA7", "#A0522D", "#D35400", "#2E8B57", "#B03A80", "#4A6FA5"];
+const REL_KINDS = [["main","Official and blends"],["ens","Ensembles"],["prob","Probability guidance (NBM, MOS, NWS, calibrated thunder)"],["det","Single models (yes or no only)"]];
+function relPicker(avail, want, g, v){
+  const box = $("rel"); if (!box) return;
+  const groups = REL_KINDS.map(([k, label]) => [label, avail.filter(sid => relKind(sid) === k).sort((a, b) => (SRC_NAME[a] || a).localeCompare(SRC_NAME[b] || b))]).filter(([, ids]) => ids.length);
+  if (!groups.length) return;
+  box.insertAdjacentHTML("beforeend", `<div class="relpick"><div class="rph"><b>Sources on the diagram</b><button type="button" class="lnk" id="relAuto">Default</button><button type="button" class="lnk" id="relNone">Clear</button></div>${groups.map(([label, ids]) => `<div class="rpg"><span class="mut">${label}</span>${ids.map(sid => `<label class="chip"><input type="checkbox" data-rs="${sid}" ${want.includes(sid) ? "checked" : ""}> ${SRC_NAME[sid] || sid}${g[sid][v.k] ? ` <small>${fmt(metric(g[sid][v.k], v).bss, 2)}</small>` : ""}</label>`).join("")}</div>`).join("")}<p class="mut">The number beside each source is its Brier skill score. Single models forecast only 0% or 100% for an hour, so their curve has two points; ensembles and probability guidance give the full curve.</p></div>`);
+  box.querySelectorAll("[data-rs]").forEach(cb => cb.onchange = () => { const cur = new Set(V.relSrc && V.relSrc.length ? V.relSrc : want); if (cb.checked) cur.add(cb.dataset.rs); else cur.delete(cb.dataset.rs); V.relSrc = [...cur]; try { localStorage.setItem("erwx:relSrc", JSON.stringify(V.relSrc)); } catch (e) { /* ignore */ } renderReliability(); });
+  $("relAuto").onclick = () => { V.relSrc = []; try { localStorage.removeItem("erwx:relSrc"); } catch (e) { /* ignore */ } renderReliability(); };
+  $("relNone").onclick = () => { V.relSrc = ["__none"]; renderReliability(); };
+}
+try { V.relSrc = JSON.parse(localStorage.getItem("erwx:relSrc") || "[]"); } catch (e) { V.relSrc = []; }
 function renderReliability(){
   const v = VARS.find(x => x.k === V.rvar); $("relSel").innerHTML = VARS.filter(x => x.kind === "prob").map(x => `<option value="${x.k}" ${x.k === V.rvar ? "selected" : ""}>${x.label}</option>`).join("");
-  const g = allRows(), want = ["official","blend_auto","blend_equal", ...Object.keys(g).filter(s => !/^blend|official/.test(s) && g[s][v.k] && g[s][v.k].n).sort((a, b) => (metric(g[a][v.k], v).bss ?? -9) > (metric(g[b][v.k], v).bss ?? -9) ? -1 : 1).slice(0, 2)];
+  const g = allRows(), avail = Object.keys(g).filter(sid => g[sid][v.k] && g[sid][v.k].n);
+  const auto = ["official","blend_auto","blend_equal", ...avail.filter(s => !/^blend|official/.test(s)).sort((a, b) => (metric(g[a][v.k], v).bss ?? -9) > (metric(g[b][v.k], v).bss ?? -9) ? -1 : 1).slice(0, 2)];
+  /* the sources to plot: your picks if you've made any, otherwise the official forecast, the blends and the two most skillful */
+  const want = V.relSrc && V.relSrc.length ? V.relSrc.filter(sid => avail.includes(sid)) : auto;
   const W = 340, Hh = 340, L = 44, R = 12, T = 12, B = 40, x = p => L + p*(W - L - R), y = p => T + (1 - p)*(Hh - T - B);
   let s = `<svg viewBox="0 0 ${W} ${Hh}" class="ch sq" role="img" aria-label="Reliability diagram for ${v.label}">`;
   for (let k = 0; k <= 10; k += 2){ s += `<line x1="${x(k/10)}" x2="${x(k/10)}" y1="${T}" y2="${Hh - B}" class="gr"/><line x1="${L}" x2="${W - R}" y1="${y(k/10)}" y2="${y(k/10)}" class="gr"/><text x="${x(k/10)}" y="${Hh - B + 14}" class="ax" text-anchor="middle">${k*10}</text><text x="${L - 6}" y="${y(k/10) + 4}" class="ax" text-anchor="end">${k*10}</text>`; }
   s += `<line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="#7E8A97" stroke-dasharray="4 4"/>`;
   s += `<text x="${(L + W - R)/2}" y="${Hh - 6}" class="ax" text-anchor="middle">Forecast probability (%)</text>`;
   const used = [];
-  want.forEach((sid, i) => { const o = g[sid] && g[sid][v.k]; if (!o || !o.n) return; const pts = o.rel.map((r, b) => r[0] >= 5 ? [r[1]/r[0], r[2]/r[0], r[0]] : null).filter(Boolean); if (pts.length < 2) return; const c = sid === "official" ? "#B5862B" : sid === "blend_auto" ? "#13202E" : sid === "blend_equal" ? "#7E8A97" : PAL[i]; used.push([sid, c, metric(o, v)]); s += `<path d="M${pts.map(p => `${x(p[0])},${y(p[1])}`).join("L")}" fill="none" stroke="${c}" stroke-width="2.5"/>` + pts.map(p => `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="${Math.min(7, 2 + Math.log10(p[2]))}" fill="${c}"/>`).join(""); });
+  let pi = 0;
+  want.forEach((sid, i) => { const o = g[sid] && g[sid][v.k]; if (!o || !o.n) return; const pts = o.rel.map((r, b) => r[0] >= 5 ? [r[1]/r[0], r[2]/r[0], r[0]] : null).filter(Boolean); if (pts.length < 2) return; const c = sid === "official" ? "#B5862B" : sid === "blend_auto" ? "#13202E" : sid === "blend_equal" ? "#7E8A97" : REL_PAL[(pi++) % REL_PAL.length]; used.push([sid, c, metric(o, v)]); s += `<path d="M${pts.map(p => `${x(p[0])},${y(p[1])}`).join("L")}" fill="none" stroke="${c}" stroke-width="2.5"/>` + pts.map(p => `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="${Math.min(7, 2 + Math.log10(p[2]))}" fill="${c}"/>`).join(""); });
   s += `</svg>`;
   $("rel").innerHTML = used.length ? s + `<div class="lg">${used.map(([sid, c, m]) => `<span><i style="background:${c}"></i>${SRC_NAME[sid] || sid} <b>${fmt(m.bss, 2)}</b></span>`).join("")}</div><p class="mut">On the diagonal means a 30% forecast happened about 30% of the time. Above the line: under-forecast; below: over-forecast. Dot size shows how often each probability was used. Needs the 30- or 90-day window.</p>` : `<p class="mut">Not enough forecasts of ${v.label.toLowerCase()} yet (each probability bin needs 5 or more).</p>`;
+  relPicker(avail, want, g, v);
 }
 function renderWeights(){
   const w = V.weights; $("wSel").innerHTML = Object.entries(GROUP_NAME).map(([k, l]) => `<option value="${k}" ${k === V.wgrp ? "selected" : ""}>${l}</option>`).join("");
@@ -248,7 +276,7 @@ async function renderCase(){
 function renderStatus(){
   const s = V.summary, st = V.status, w = V.weights;
   const obsDays = s && s.days ? s.days.length : 0;
-  $("vStatus").innerHTML = s ? `Scores updated <b>${new Date(s.updated).toISOString().slice(0, 16).replace("T", " ")}Z</b> · ${obsDays} days of observations · ${V.official.length.toLocaleString()} official forecast rows loaded${st && st.obs ? ` · last run: towers ${st.obs.winds ? "✓" : "–"}, MERLIN ${st.obs.ltg ? "✓" : "–"}, MRMS ${st.obs.mrms ? "✓" : "–"}, METAR ${st.obs.metar && st.obs.metar.ok ? "✓" : "–"}` : ""}` : `No verification data yet. The <b>Verification and model weights</b> workflow starts building it on its first run.`;
+  $("vStatus").innerHTML = (V.archNote ? `${V.archNote} ` : "") + (s ? `Scores updated <b>${new Date(s.updated).toISOString().slice(0, 16).replace("T", " ")}Z</b> · ${obsDays} days of observations · ${V.official.length.toLocaleString()} official forecast rows loaded${st && st.obs ? ` · last run: towers ${st.obs.winds ? "✓" : "–"}, MERLIN ${st.obs.ltg ? "✓" : "–"}, MRMS ${st.obs.mrms ? "✓" : "–"}, METAR ${st.obs.metar && st.obs.metar.ok ? "✓" : "–"}` : ""}` : `No verification data yet. The <b>Verification and model weights</b> workflow starts building it on its first run.`);
   $("vPoint").innerHTML = `<option value="all">All points</option>` + Object.entries(PNAME).map(([k, l]) => `<option value="${k}" ${k === V.point ? "selected" : ""}>${l}</option>`).join("");
   $("vBand").innerHTML = `<option value="all">All lead times</option>` + ((s && s.bands) || []).map(b => `<option ${b === V.band ? "selected" : ""}>${b}</option>`).join("");
   document.querySelectorAll("#vWin button").forEach(b => b.setAttribute("aria-pressed", b.dataset.w === V.win));
@@ -291,7 +319,31 @@ function bind(){
   $("vRefresh").onclick = () => { V.obs = {}; loadAll(); };
 }
 bind();
-loadAll().then(prefetchOfficialObs).then(() => { if (V.official.length) renderAll(); });
+/* the official archive (docs/data/archive, filed by the Official archive workflow): every forecaster's issued
+   planning forecasts join the official rows scored here (team-wide), and archived LMEFs join the launch
+   section. Entries already read are remembered, so each loads once. */
+async function loadArchive(){
+  if (typeof archiveEntries !== "function") return 0;
+  let seen; try { seen = new Set(JSON.parse(localStorage.getItem("erwx:arch:loaded") || "[]")); } catch (e) { seen = new Set(); }
+  let n = 0, nl = 0;
+  try {
+    const es = (await archiveEntries(100)).filter(e => !seen.has(e.id) && (e.type === "planning" || e.type === "lmef"));
+    const lm = [];
+    for (const e of es){
+      try {
+        const r = await archiveFile(e.path), d = r && r.data || {};
+        if (e.type === "planning" && d.csv){ n += addOfficial(parseCSV(d.csv)); }
+        if (e.type === "lmef" && d.lmef){ lm.push(d.lmef); nl++; }
+        seen.add(e.id);
+      } catch (err) { /* try again next time */ }
+    }
+    if (lm.length){ try { const db = await idb(); await new Promise(res => { const os = db.transaction(DB.store, "readwrite").objectStore(DB.store), g = os.get("lmef"); g.onsuccess = () => { const arr = (g.result || []).filter(x => !lm.some(y => y.id === x.id)); os.put([...arr, ...lm], "lmef"); res(); }; g.onerror = res; }); } catch (err) { /* storage unavailable */ } }
+    try { localStorage.setItem("erwx:arch:loaded", JSON.stringify([...seen].slice(-6000))); } catch (err) { /* ignore */ }
+  } catch (err) { /* no archive yet */ }
+  V.archNote = n || nl ? `Loaded ${n ? `${n.toLocaleString()} rows of planning forecasts` : ""}${n && nl ? " and " : ""}${nl ? `${nl} LMEF${nl === 1 ? "" : "s"}` : ""} from the official archive.` : V.archNote || "";
+  return n + nl;
+}
+loadAll().then(loadArchive).then(prefetchOfficialObs).then(() => { renderAll(); });
 
 /* ============================================================
    Exposure forecast verification

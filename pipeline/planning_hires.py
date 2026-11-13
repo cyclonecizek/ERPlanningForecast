@@ -179,15 +179,16 @@ def is_grib(b):
 class Fetcher:
     """Inventory + byte-range downloads, AWS first."""
 
-    def __init__(self):
+    def __init__(self, aws=None):
         self.aws_ok = True
         self.base = {}
+        self.aws = aws or AWS
 
     def inventory(self, suffix, bases):
         if self.aws_ok:
-            raw = http(f"{AWS}/{suffix}.idx", timeout=30)
+            raw = http(f"{self.aws}/{suffix}.idx", timeout=30)
             if raw:
-                return parse_idx(raw), f"{AWS}/{suffix}", "AWS"
+                return parse_idx(raw), f"{self.aws}/{suffix}", "AWS"
         order = sorted(bases, key=lambda b: b != self.base.get(tuple(bases)))   # last good base first
         for b in order:
             raw = http(f"{b}/{suffix}.idx", timeout=30)
@@ -199,7 +200,7 @@ class Fetcher:
     def message(self, url, rec, suffix):
         rng = (rec["start"], rec["end"])
         if "nomads" in url and self.aws_ok:  # NOMADS inventory: try the same bytes on AWS first
-            b = http(f"{AWS}/{suffix}", rng=rng, timeout=60)
+            b = http(f"{self.aws}/{suffix}", rng=rng, timeout=60)
             if is_grib(b):
                 return b
             if b is not None:
@@ -344,6 +345,141 @@ def assemble(cyc, hours, raw):
                     m["pacc"][i] = val
         per_site.append(m)
     return t0, per_site
+
+
+# --------------------------------------------------------------------------- time-lagged HRRR and RRFS
+# The last TL_RUNS hourly runs of each model become members of one source ("HRRR time-lagged",
+# "RRFS time-lagged"), each weighted by age: TL_DECAY ** (hours older than the newest run). The pages
+# and verification use the weights; HRRR and RRFS stay one source each in the blend. A run already
+# fetched in an earlier hour is reused from hires.json, so each hour normally adds one new run.
+HRRR_AWS = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
+HRRR_BASES = [f"{NOMADS}/hrrr/prod"]
+TL_RUNS = int(os.environ.get("TL_RUNS", "6"))
+TL_HOURS = int(os.environ.get("TL_HOURS", "18"))
+TL_DECAY = float(os.environ.get("TL_DECAY", "0.8"))
+
+
+def hrrr_suffix(cyc, fh, member=None):
+    return f"hrrr.{cyc:%Y%m%d}/conus/hrrr.t{cyc:%H}z.wrfsfcf{fh:02d}.grib2"
+
+
+def tl_spec(kind):
+    if kind == "hrrrtl":
+        return "HRRR time-lagged", hrrr_suffix, HRRR_BASES, HRRR_AWS
+    return "RRFS time-lagged", rrfs_suffix, RRFS_BASES, AWS
+
+
+def tl_newest(fx, kind, now):
+    """Newest hourly cycle (within 6 h) with its last needed hour out."""
+    _, suffix, bases, _ = tl_spec(kind)
+    c0 = now.replace(minute=0, second=0, microsecond=0)
+    for back in range(1, 7):
+        cyc = c0 - timedelta(hours=back)
+        recs, _, where = fx.inventory(suffix(cyc, TL_HOURS), bases)
+        if recs:
+            return cyc, where
+    return None, None
+
+
+def tl_run(fx, kind, cyc, stop_at=60):
+    """One run, f01 to TL_HOURS, member fields only."""
+    _, suffix, bases, _ = tl_spec(kind)
+    hours = list(range(1, TL_HOURS + 1))
+    raw = {h: {} for h in hours}
+    jobs = []
+    for h in hours:
+        if time_left() < stop_at:
+            break
+        recs, url, _ = fx.inventory(suffix(cyc, h), bases)
+        if not recs:
+            continue
+        for key, var, lev in MEMBER_FIELDS:
+            r = pick(recs, var, lev, fh=h)
+            if r:
+                jobs.append((h, key, r, url, suffix(cyc, h)))
+
+    def work(j):
+        h, key, r, url, sfx = j
+        b = fx.message(url, r, sfx)
+        return j, (site_values(b) if b else None)
+
+    with ThreadPoolExecutor(max_workers=8 if fx.aws_ok else 2) as ex:
+        for (h, key, r, url, sfx), vals in ex.map(work, jobs):
+            if vals is not None:
+                raw[h][key] = (vals, r.get("acc"))
+    return assemble(cyc, hours, raw)
+
+
+def time_lagged(kind, now, old, status):
+    """The last TL_RUNS runs as one source; reuse runs already in hires.json."""
+    name, _, _, aws = tl_spec(kind)
+    fx = Fetcher(aws)
+    newest, where = tl_newest(fx, kind, now)
+    if not newest:
+        s = keep_or_drop(old, kind, now)
+        status[kind] = "no recent run found" + ("; showing the previous one" if s else "")
+        return s
+    runs = [newest - timedelta(hours=i) for i in range(TL_RUNS)]
+    # members already fetched, by run and point
+    cached = {}
+    for sid, site in ((old.get(kind) or {}).get("sites") or {}).items():
+        ot0 = (old.get(kind) or {}).get("t0")
+        for mm in site.get("members", []):
+            cached.setdefault(mm.get("run"), {})[sid] = (ot0, mm)
+    got = {}   # run iso -> (t0, per_site list) or cached dict
+    fetched, reused = 0, 0
+    for cyc in runs:
+        iso = cyc.isoformat()
+        if iso in cached and len(cached[iso]) >= len(SITES) - 2:
+            got[iso] = ("cached", cached[iso]); reused += 1
+            continue
+        if time_left() < 150:
+            LOG(f"{kind}: time budget reached before the {cyc:%HZ} run")
+            continue
+        LOG(f"{kind}: fetching {cyc:%HZ %Y%m%d}")
+        t0, per_site = tl_run(fx, kind, cyc, stop_at=90)
+        if any(v is not None for v in per_site[0]["t"]):
+            got[iso] = ("new", (t0, per_site)); fetched += 1
+    if not got:
+        s = keep_or_drop(old, kind, now)
+        status[kind] = "runs found but none could be read" + ("; showing the previous one" if s else "")
+        return s
+    # one timeline from the oldest run used to the newest run's last hour
+    oldest = min(datetime.fromisoformat(r) for r in got)
+    T0 = int((oldest + timedelta(hours=1)).timestamp() * 1000)
+    n = int(((newest + timedelta(hours=TL_HOURS)) - (oldest + timedelta(hours=1))).total_seconds() // 3600) + 1
+    sites = {sid: {"members": []} for sid, _, _ in SITES}
+    for iso, (how, data) in sorted(got.items(), reverse=True):
+        cyc = datetime.fromisoformat(iso)
+        age = (newest - cyc).total_seconds() / 3600
+        lw = round(TL_DECAY ** age, 3)
+        for si, (sid, _, _) in enumerate(SITES):
+            if how == "cached":
+                if sid not in data:
+                    continue
+                t0m, mm = data[sid]
+                mt0 = t0m
+            else:
+                mt0, per = data
+                mm = per[si]
+                if not any(v is not None for v in mm["t"]):
+                    continue
+            shift = int(round((mt0 - T0) / 3600e3))
+            m = {"run": iso, "lw": lw, "mem": f"{cyc:%HZ}"}
+            for k, arr in mm.items():
+                if not isinstance(arr, list):
+                    continue
+                out_arr = [None] * n
+                for j, v in enumerate(arr):
+                    if 0 <= j + shift < n:
+                        out_arr[j + shift] = v
+                m[k] = out_arr
+            # keep the member's own start for reuse next hour
+            sites[sid]["members"].append(m)
+    nm = len(got)
+    status[kind] = f"{newest:%HZ} newest of {nm} run{'s' if nm != 1 else ''} ({fetched} fetched, {reused} reused)"
+    LOG(f"{kind}: {status[kind]}")
+    return {"id": kind, "name": name, "fam": "hires", "run": newest.isoformat(), "t0": T0, "gap": 1, "sites": sites}
 
 
 # --------------------------------------------------------------------------- calibrated thunder
@@ -491,6 +627,21 @@ def main():
     else:
         s = keep_or_drop(old, "rrfs", now)
         out += [s] if s else []
+
+    # time-lagged HRRR and RRFS (last TL_RUNS hourly runs, age-weighted members)
+    for kind in ("hrrrtl", "rrfstl"):
+        if time_left() < 180:
+            s = keep_or_drop(old, kind, now); out += [s] if s else []
+            status[kind] = "skipped: time budget" + ("; showing the previous runs" if s else "")
+            continue
+        try:
+            s = time_lagged(kind, now, old, status)
+            if s:
+                out.append(s)
+        except Exception as e:  # noqa: BLE001
+            LOG(f"{kind}: {e}")
+            s = keep_or_drop(old, kind, now); out += [s] if s else []
+            status[kind] = f"failed ({e.__class__.__name__})" + ("; showing the previous runs" if s else "")
 
     # SPC calibrated thunder
     for sid, name in (("refsct", "REFS calibrated thunder"),):   # HREF retired 3 Nov 2026

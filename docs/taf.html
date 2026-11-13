@@ -180,7 +180,7 @@ document.addEventListener("DOMContentLoaded", function(){
   <div class="actions">
     <button class="btn" id="regen">Regenerate from guidance</button>
     <button class="btn" id="download">Download .txt</button>
-    <button class="btn primary" id="copy">Copy TAF</button>
+    <button class="btn primary" id="copy">Copy TAF</button><button class="btn" id="tafPublic" title="A public copy for the products page">Public copy</button>
   </div>
 </header>
 <div class="statusline stnline">
@@ -229,7 +229,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=3369124b01"></script>
+<script src="guidance.js?v=0bebdc243a"></script>
 <script>
 "use strict";
 /* ============================================================
@@ -554,7 +554,36 @@ function lint(txt){
    UI
    ============================================================ */
 function fitTaf(){ const ta = $("taf"); ta.rows = Math.max(6, ta.value.split("\n").length + 1); }
-function renderLint(){ fitTaf(); $("lint").innerHTML = lint($("taf").value).map(x => `<li class="${x.lvl === "ok" ? "ok" : x.lvl === "err" ? "err" : x.lvl === "info" ? "info" : ""}">${x.msg}</li>`).join(""); }
+/* consistency with the planning forecast: thunder in the TAF against the planning lightning chance at the
+   nearest planning point (from this browser's planning forecast, saved in the last 48 hours) */
+function tafCross(txt){
+  let rec = null; try { rec = JSON.parse(localStorage.getItem("erwx:for:v1") || "null"); } catch (e) { rec = null; }
+  if (!rec || rec.v !== 1 || Date.now() - rec.saved > 48*H || !SITE) return [];
+  let near = null; for (const [id, p] of Object.entries(rec.sites || {})){ const d = kmBetween(SITE.lat, SITE.lon, p.lat, p.lon); if (!near || d < near.d) near = { p, d }; }
+  if (!near || near.d > 65) return [];
+  const lines = String(txt || "").toUpperCase().split(/\n/).map(x => x.trim()).filter(Boolean); if (!lines.length) return [];
+  const now = new Date(), when = (dd, hh) => { let t = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), +dd, +hh); if (+dd < now.getUTCDate() - 15) t = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, +dd, +hh); return t; };
+  const vm = lines[0].match(/\b(\d{2})(\d{2})\/(\d{2})(\d{2})\b/); if (!vm) return [];
+  const A = when(vm[1], vm[2]), B = when(vm[3], vm[4]) + (vm[4] === "24" ? 0 : 0); if (!(B > A)) return [];
+  const n = Math.round((B - A)/H), prev = new Array(n).fill(false), tempo = new Array(n).fill(false);
+  const hasTS = s => /\b(\+|-|VC)?TS[A-Z]*\b/.test(s);
+  const setFrom = (t, v) => { for (let j = Math.max(0, Math.round((t - A)/H)); j < n; j++) prev[j] = v; };
+  setFrom(A, hasTS(lines[0].replace(/^TAF\s+(AMD\s+|COR\s+)?\w{4}\s+\d{6}Z\s+\d{4}\/\d{4}/, "")));
+  for (const ln of lines.slice(1)){
+    let m;
+    if ((m = ln.match(/^FM(\d{2})(\d{2})(\d{2})\b/))) setFrom(when(m[1], m[2]), hasTS(ln.slice(8)));
+    else if ((m = ln.match(/^BECMG\s+(\d{2})(\d{2})\/(\d{2})(\d{2})/))) setFrom(when(m[3], m[4]), hasTS(ln.slice(m[0].length)));
+    else if ((m = ln.match(/^(TEMPO|PROB\d{2})\s+(\d{2})(\d{2})\/(\d{2})(\d{2})/))){ const a = when(m[2], m[3]), b = when(m[4], m[5]); if (hasTS(ln.slice(m[0].length))) for (let j = Math.max(0, Math.round((a - A)/H)); j < Math.min(n, Math.round((b - A)/H)); j++) tempo[j] = true; }
+  }
+  const lt = j => { const k = Math.round((A + j*H - rec.t0)/H); return k >= 0 && k < rec.n ? near.p.v.lt[k] : null; };
+  const out = [], hz = t => new Date(t).toISOString().slice(11, 13) + "Z";
+  const group = (test, msg) => { let i0 = null; for (let j = 0; j <= n; j++){ const hit = j < n && test(j); if (hit && i0 == null) i0 = j; if (!hit && i0 != null){ const v = []; for (let k = i0; k < j; k++) if (lt(k) != null) v.push(lt(k)); out.push({ lvl:"info", msg: msg(hz(A + i0*H), hz(A + j*H), v.length ? Math.round(Math.max(...v)) : null) }); i0 = null; } } };
+  group(j => prev[j] && lt(j) != null && lt(j) < 20, (a, b, v) => `Planning forecast (${near.p.name}): prevailing thunder ${a}–${b}, but the planning lightning chance is only up to ${v}%.`);
+  group(j => !prev[j] && tempo[j] && lt(j) != null && lt(j) < 10, (a, b, v) => `Planning forecast (${near.p.name}): TEMPO thunder ${a}–${b}, but the planning lightning chance is only up to ${v}%.`);
+  group(j => !prev[j] && !tempo[j] && lt(j) != null && lt(j) >= 50, (a, b, v) => `Planning forecast (${near.p.name}): lightning chance up to ${v}% ${a}–${b}, but the TAF has no thunder then.`);
+  return out;
+}
+function renderLint(){ fitTaf(); $("lint").innerHTML = [...lint($("taf").value), ...tafCross($("taf").value)].map(x => `<li class="${x.lvl === "ok" ? "ok" : x.lvl === "err" ? "err" : x.lvl === "info" ? "info" : ""}">${x.msg}</li>`).join(""); }
 function edited(){ return $("taf").value.trim() !== S.gen.trim(); }
 function renderNote(){ const n = $("tafnote"); if (edited()){ n.textContent = "Edited by hand. Regenerate to start over from guidance."; n.classList.add("edited"); } else { n.textContent = "Generated from guidance. Edit freely; the checks below update as you type."; n.classList.remove("edited"); } }
 function saveDraft(){ store.set(LSD(), { text:$("taf").value, gen:S.gen, start:S.start, issue:S.issue, kind:T.kind, saved:Date.now() }); }
@@ -725,7 +754,19 @@ function init(){
   $("vlen").value = String(T.vlen || 30);
   $("vlen").onchange = e => { T.vlen = +e.target.value; saveT(); applyStation(T.station); renderStatus(); generate(false); };
   $("refresh").onclick = () => { if (!S.loading) loadAll(); };
-  $("copy").onclick = async () => { const v = $("taf").value; try { await navigator.clipboard.writeText(v); } catch (e) { $("taf").select(); document.execCommand("copy"); } toast("TAF copied"); };
+  $("tafPublic").onclick = async () => {
+    const txt = $("taf").value.trim(); if (!txt){ toast("No TAF to publish"); return; }
+    if (!confirm("Make a public copy of this TAF for the products page?\n\nOK confirms it's cleared for public release.")) return;
+    const icao = (SITE && (SITE.icao || SITE.stn)) || (txt.match(/\b([A-Z]{4})\b/) || [])[1] || "TAF";
+    const esc2 = x => String(x).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TAF ${esc2(icao)}</title><style>body{font:15px/1.5 system-ui,sans-serif;margin:24px;color:#111;background:#fff}pre{font:14px/1.6 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;border:1px solid #ccc;border-radius:8px;padding:14px}@media (prefers-color-scheme:dark){body{background:#111;color:#eee}pre{border-color:#444}}</style></head><body><h1>TAF ${esc2(icao)}</h1><p>${esc2(SITE && SITE.name || "")}</p><pre>${esc2(txt)}</pre></body></html>`;
+    const meta = { type:"taf", key:`taf:${icao}`, title:`TAF ${icao}`, subtitle: SITE && SITE.name || "", issued: Date.now(), forecaster: "", headline: txt.split("\n")[0].slice(0, 120), text: txt };
+    const zipFn = async () => { const snap = await publicSnapshot(meta, { html }); const a = document.createElement("a"); a.href = URL.createObjectURL(snap.blob); a.download = snap.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); };
+    await showReleaseDialog(meta, { kind:"text", text: txt }, "", zipFn);
+  };
+  $("copy").onclick = async () => { const v = $("taf").value;
+    /* the official archive: the TAF as copied for issue */
+    if (v.trim() && typeof archiveOnce === "function"){ const icao = (SITE && (SITE.icao || SITE.stn)) || (v.match(/\b([A-Z]{4})\b/) || [])[1] || "TAF"; archiveOnce(`taf|${icao}`, { type:"taf", title:`TAF ${icao}`, subtitle: SITE && SITE.name || "", issued: Date.now(), forecaster: "" }, { station: icao, text: v.trim() }); } try { await navigator.clipboard.writeText(v); } catch (e) { $("taf").select(); document.execCommand("copy"); } toast("TAF copied"); };
   $("download").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([$("taf").value.trim() + "\n"], { type:"text/plain" })); a.download = `${SITE.stn}_TAF_${ddhhmm(S.issue)}Z.txt`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
   document.querySelector(".seg:has(button[data-k])").addEventListener("click", ev => { const b = ev.target.closest("[data-k]"); if (!b) return; T.kind = b.dataset.k; saveT(); if (T.kind === "AMD"){ S.issue = Date.now(); S.start = Math.floor(S.issue/H)*H; } renderStatus(); generate(false); });
   $("issue").addEventListener("change", e => { const m = e.target.value.trim().match(/^(\d{2})(\d{2})(\d{2})Z?$/); if (!m){ toast("Issue time is ddhhmmZ"); renderStatus(); return; } const t = fromDdhh(m[1] + m[2], Date.now()); if (t != null){ S.issue = t + (+m[3])*60e3; generate(false); } renderStatus(); });

@@ -319,6 +319,10 @@ body[data-vmode="launch"] .planmode,body[data-vmode="launch"] .exmode,body[data-
 .lmrelwrap{ display:flex; flex-wrap:wrap; gap:14px; align-items:flex-start; margin:4px 0 10px; } .lmrel{ width:min(100%,560px); height:auto; }
 .lmrel .gr{ stroke:var(--rule); stroke-width:1; } .lmrel .perfect{ stroke:var(--ink-3); stroke-width:1.4; stroke-dasharray:5 4; } .lmrel .tk{ fill:var(--ink-3); font-size:11px; } .lmrel .ax{ fill:var(--ink-2,var(--ink)); font-size:12px; font-weight:600; }
 .lmleg{ display:flex; flex-direction:column; gap:6px; font-size:13px; padding-top:8px; } .lmleg i{ display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:6px; vertical-align:-1px; } .lmleg i.dash{ border-radius:0; height:0; border-top:2px dashed var(--ink-3); width:16px; vertical-align:3px; }
+.relpick{ margin-top:10px; border-top:1px solid var(--rule); padding-top:10px; font-size:13px; }
+.relpick .rph{ display:flex; gap:10px; align-items:center; margin-bottom:6px; } .relpick .lnk{ background:none; border:0; color:var(--accent); cursor:pointer; padding:0; font:inherit; text-decoration:underline; }
+.relpick .rpg{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; } .relpick .rpg > .mut{ flex-basis:100%; font-size:12px; }
+.relpick .chip{ display:inline-flex; gap:5px; align-items:center; border:1px solid var(--rule); border-radius:999px; padding:3px 9px; cursor:pointer; } .relpick .chip small{ color:var(--ink-3); }
 .lmcards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin:4px 0 12px; } .lmc{ border:1px solid var(--rule); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
 .lmc b{ font:700 24px var(--cond); } .lmc span{ font-weight:600; font-size:13px; } .lmc small{ color:var(--ink-3); font-size:12px; }
 .lmt td small{ display:block; color:var(--ink-3); font-size:11.5px; } .lmt td.bad{ color:#B4231A; font-weight:700; } .lmt td.good{ color:#2F7A4A; font-weight:600; } .lmt select{ border:1px solid var(--rule); border-radius:6px; padding:3px 5px; background:var(--panel); color:var(--ink); }
@@ -436,7 +440,7 @@ body[data-vmode="exposure"] .planmode,body[data-vmode="exposure"] #vPoint,body[d
   </div>
 </main>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=3369124b01"></script>
-<script src="verify.js?v=e9630906ce"></script>
+<script src="guidance.js?v=0bebdc243a"></script>
+<script src="verify.js?v=d9dbd3a63a"></script>
 </body>
 </html>

@@ -65,15 +65,21 @@ const MOS = [
   { id:"mex", name:"GFS MOS extended",model:"GFSX", fam:"mos" },
   { id:"nbs", name:"NBM text",        model:"NBS",  fam:"mos" },
   { id:"nbe", name:"NBM text extended",model:"NBE", fam:"mos" },
+  /* ECMWF IFS MOS (N. Luchetti, nluchetti1.github.io/ecmwf-mos): ridge-regression temperatures, dew points and
+     winds, logistic 6/12-hour precipitation and thunder chances; cloud and wind direction are raw IFS */
+  { id:"ecm", name:"ECMWF MOS",       model:"ECM",  fam:"mos" },
 ];
 /* written by pipeline/planning_hires.py into data/hires.json */
 const PIPE = [
   { id:"rrfs",   name:"RRFS",                    fam:"hires" },
   { id:"refsm",  name:"REFS members",            fam:"hires" },
+  /* the last six hourly runs as age-weighted members (newest 1, then ×0.8 per hour older) */
+  { id:"hrrrtl", name:"HRRR time-lagged",        fam:"hires" },
+  { id:"rrfstl", name:"RRFS time-lagged",        fam:"hires" },
   { id:"refsct", name:"REFS calibrated thunder", fam:"ct", w:2 },
 ];
 /* HREF, the NAM and NAM MOS were retired by NCEP on 3 November 2026 and are no longer sources */
-const ALL_SOURCES = [NDFD, OM_DET[0], PIPE[0], PIPE[1], ...OM_DET.slice(1), ...OM_ENS, ...MOS, PIPE[2]];
+const ALL_SOURCES = [NDFD, OM_DET[0], PIPE[2], PIPE[0], PIPE[3], PIPE[1], ...OM_DET.slice(1), ...OM_ENS, ...MOS, PIPE[4]];
 
 /* ---------- parameters (matrix columns) ---------- */
 const SKY = [ ["CLR",0,6.25], ["FEW",6.25,31.25], ["SCT",31.25,56.25], ["BKN",56.25,93.75], ["OVC",93.75,101] ];
@@ -407,10 +413,37 @@ async function fetchOM(src, ens, TL){
 }
 
 /* IEM MOS: prefer a same-origin mirror written by the workflow (data/mos/<MODEL>.json), then IEM */
+/* the ECMWF MOS bulletin (GFS MOS layout) -> rows like IEM's MOS JSON; columns read at the HR line's positions */
+function parseEcmMOS(text){
+  text = String(text || "").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  const rows = [], re = /^\s*(K[A-Z0-9]{3})\s+ECMWF MOS GUIDANCE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{2})(\d{2})\s*UTC/gm, heads = [];
+  let m; while ((m = re.exec(text))) heads.push({ m, end: re.lastIndex });
+  heads.forEach((h, n) => {
+    const block = text.slice(h.end, n + 1 < heads.length ? heads[n + 1].m.index : text.length).split("\n");
+    const stn = h.m[1], run = Date.UTC(+h.m[4], +h.m[2] - 1, +h.m[3], +h.m[5], +h.m[6]);
+    const hr = block.find(l => l.trim().startsWith("HR")); if (!hr) return;
+    const cols = []; const rx = /\d+/g; let c2; while ((c2 = rx.exec(hr))) cols.push({ b: c2.index + c2[0].length, h: +c2[0] });
+    let prev = run; const times = cols.map(c3 => { const d = new Date(prev); let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), c3.h % 24); while (t <= prev) t += 24*H; prev = t; return t; });
+    const lines = {}; for (const l of block){ const k = (l.match(/^\s*([A-Z0-9/]{3})\s/) || [])[1]; if (["TMP","DPT","CLD","WDR","WSP","P06","P12","T06","T12"].includes(k)) lines[k] = l; }
+    cols.forEach((c3, j) => {
+      const r = { station: stn, runtime: new Date(run).toISOString(), ftime: new Date(times[j]).toISOString() };
+      for (const [k, l] of Object.entries(lines)){ const cell = l.slice(Math.max(0, c3.b - 3), c3.b).trim(); if (!cell) continue;
+        if (k === "CLD") r.cld = cell; else if (/^-?\d+$/.test(cell)) r[k.toLowerCase()] = k === "WDR" ? +cell*10 : +cell; }
+      if (Object.keys(r).length > 3) rows.push(r);
+    });
+  });
+  return rows;
+}
 async function fetchMOS(src, TL){
   let js = null, from = "";
   try { js = await getJSON(`${DATA_BASE}data/mos/${src.model}.json?ts=${Date.now()}`, 8000); from = "mirror"; } catch (e) { js = null; }
+  /* ECMWF MOS isn't on IEM: without the mirror, read the bulletin straight from its site */
+  if (src.model === "ECM" && (!js || !rowsOf(js).length)){
+    const r = await fetch(`https://nluchetti1.github.io/ecmwf-mos/?ts=${Date.now()}`, { cache:"no-store" }); if (!r.ok) throw new Error("ECMWF MOS not reachable");
+    js = { data: parseEcmMOS(await r.text()) }; from = "ecmwf-mos";
+  }
   if (!js || !rowsOf(js).length){
+    if (src.model === "ECM") throw new Error("no ECMWF MOS bulletin");
     const st = stationsNow().map(s => "station=" + s).join("&");
     js = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?${st}&model=${src.model}`, 30000); from = "IEM";
   }
@@ -419,7 +452,7 @@ async function fetchMOS(src, TL){
   for (const r of rows){ const k = String(pick(r, ["station"]) || "").toUpperCase(); (byStn[k] = byStn[k] || []).push(r); }
   /* stations the mirror doesn't carry (a custom TAF site, say) come straight from IEM */
   const missing = stationsNow().filter(s => !byStn[s] && !byStn[s.slice(1)]);
-  if (from === "mirror" && missing.length){
+  if (from === "mirror" && missing.length && src.model !== "ECM"){
     try {
       const j2 = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?${missing.map(s => "station=" + s).join("&")}&model=${src.model}`, 30000);
       for (const r of rowsOf(j2)){ const k = String(pick(r, ["station"]) || "").toUpperCase(); (byStn[k] = byStn[k] || []).push(r); }
@@ -481,6 +514,7 @@ function parseMOS(rs, src, TL){
     if (src.model === "NBE"){ addI("pop", ["p12"], 12); addI("tst", ["t12"], 12); }
     if (src.model === "GFS" || src.model === "NAM"){ addI("pop", ["p06"], 6); addI("tst", ["t06_1","t06"], 6); }
     if (src.model === "GFSX"){ addI("pop", ["p12"], 12); addI("tst", ["t12_1","t12"], 12); }
+    if (src.model === "ECM"){ addI("pop", ["p06"], 6); addI("tst", ["t06"], 6); }
   }
   m.gap = src.model === "GFSX" || src.model === "NBE" ? 12 : 3;
   deriveMember(m, TL.n);
@@ -562,7 +596,7 @@ async function fetchNDFD(sites, TL){
   }
   return out;
 }
-/* High-res pipeline output: RRFS, REFS members, REFS calibrated thunder */
+/* High-res pipeline output: RRFS, REFS members, time-lagged HRRR and RRFS, REFS calibrated thunder */
 async function fetchPipeline(TL){
   const js = await getJSON(`${DATA_BASE}data/hires.json?ts=${Date.now()}`, 15000);
   const out = {};
@@ -747,7 +781,7 @@ function intervalProb(list, A, B){
 class SiteGuidance {
   constructor(site, TL, rows){ this.site = site; this.TL = TL; this.rows = rows; this.src = []; this.sev = []; this.ero = []; this.hail = []; }
   addSource(def, members, extra){
-    const s = { def, members, iv: extra && extra.iv, run: extra && extra.run, blocks: members.map(m => this.rows.map(r => blockOf(m, r, this.TL))), win: new Map() };
+    const s = { def, members, iv: extra && extra.iv, run: extra && extra.run, blocks: members.map(m => this.rows.map(r => { const b = blockOf(m, r, this.TL); if (b && m.lw != null) b.lw = m.lw; return b; })), win: new Map() };
     this.src.push(s); return s;
   }
   /* probability of event (pop/tst) in window [A,B) from one source, memoized */
@@ -765,7 +799,7 @@ class SiteGuidance {
     }
     else if (ev === "pop"){
       if (s.def.id === "nbm" && s.members[0] && s.members[0].pp.some(v => v != null)) p = nbmPop(s.members[0], A, B, this.TL);
-      else { let h = 0, n = 0; for (const m of s.members){ const o = memberPrecip(m, A, B, this.TL); if (o == null) continue; h += o; n++; } p = n ? h/n : null; }
+      else { let h = 0, n = 0; for (const m of s.members){ const o = memberPrecip(m, A, B, this.TL); if (o == null) continue; const lw = m.lw ?? 1; h += o*lw; n += lw; } p = n ? h/n : null; }
     }
     s.win.set(key, p); return p;
   }
@@ -796,6 +830,40 @@ function autoFactor(G, prefs, sid, key, startMs){
 /* the NBM family (gridded NBM, NBM text, NBM text extended) shares one weight: the sources with data at
    a time split it, except for thunder, which only the text products carry */
 const NBM_FAMILY = new Set(["nbm", "nbs", "nbe"]);
+/* ---------- blend by parameter ----------
+   prefs.grpSrc = { temp | sky | wind | precip | thunder: { mode:"all"|"mos"|"hires"|"global"|"ens"|"nbm"|"nws"|"custom", ids:[...] } }
+   Each parameter group blends only its chosen sources (automatic and your weights still apply among them);
+   a row where the chosen sources have no value falls back to all sources. */
+const BLEND_GROUPS = [
+  ["temp",    "Temperature, dew point, humidity, WBGT"],
+  ["sky",     "Sky cover and visibility"],
+  ["wind",    "Winds (every height, peaks and direction)"],
+  ["precip",  "Precipitation chance and rain amount"],
+  ["thunder", "Lightning chance"],
+];
+const BLEND_PRESETS = [["all", "All selected sources"], ["mos", "MOS and LAMP"], ["hires", "High resolution"], ["global", "Global models"], ["ens", "Ensembles"], ["nbm", "NBM (gridded and text)"], ["nws", "NWS forecast"], ["custom", "Choose sources…"]];
+function blendGroupOf(k){
+  if (/^(t|td|wbgt|rh|tmax|tmin|hix)$/.test(k)) return "temp";
+  if (/^(sky|vis|vmin|cig)$/.test(k)) return "sky";
+  if (/^([sg]\d+|smax|gmax|dir|du|dv)$/.test(k)) return "wind";
+  if (/^(qpf|prmax|pop|pp\d?)$/.test(k)) return "precip";
+  if (/^(tst|lt\d?)$/.test(k)) return "thunder";
+  return null;
+}
+function blendAllows(prefs, grp, s){
+  const c = grp && prefs.grpSrc && prefs.grpSrc[grp]; if (!c || !c.mode || c.mode === "all") return true;
+  const id = s.def.id, fam = s.def.fam;
+  switch (c.mode){
+    case "mos": return fam === "mos";
+    case "hires": return fam === "hires";
+    case "global": return fam === "global";
+    case "ens": return fam === "ens";
+    case "nbm": return NBM_FAMILY.has(id);
+    case "nws": return fam === "nws";
+    case "custom": return (c.ids || []).includes(id);
+  }
+  return true;
+}
 function aggregate(G, prefs){
   const rows = G.rows, on = G.src.filter(s => prefs.enabled[s.def.id] !== false && (prefs.weight[s.def.id] ?? s.def.w ?? 1) > 0);
   const W0 = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
@@ -807,25 +875,33 @@ function aggregate(G, prefs){
   const scal = ["t","td","wbgt","sky","qpf", ...hkeys(), ...(FIRE ? FIRE_KEYS : []), ...(PERS ? ["rh", ...MARINE_KEYS] : RHROW ? ["rh"] : [])];
   for (const k of [...scal, "dir", ...(FIRE ? ["tdir"] : [])]){ val[k] = []; srcv[k] = {}; band[k] = []; }
   for (const k of new Set(["tmax","tmin","smax","gmax","vmin", ...PARAMS.filter(p => p.ex).map(p => p.ex)])) mem[k] = [];
+  /* the sources each parameter blends (see blend by parameter) */
+  const onCache = {};
+  const onFor = k => { const g = blendGroupOf(k); if (!g) return on; if (onCache[g]) return onCache[g]; return (onCache[g] = on.filter(s => blendAllows(prefs, g, s))); };
+  const hasVal = (list, k, ri) => list.some(s => s.blocks.some(b => b[ri] && b[ri][k] != null));
+  G.blendFallback = {};
   rows.forEach((r, ri) => {
     for (const k of scal){
       const pairs = [], vals = [], wts = [];
-      for (const s of on){
+      let useOn = onFor(k); if (useOn !== on && !hasVal(useOn, k, ri)){ useOn = on; (G.blendFallback[blendGroupOf(k)] = G.blendFallback[blendGroupOf(k)] || new Set()).add(ri); }
+      for (const s of useOn){
         const bs = s.blocks.map(b => b[ri]).filter(b => b && b[k] != null);
         if (!bs.length) continue;
-        const mean = bs.reduce((a, b) => a + b[k], 0)/bs.length;
+        const lwSum = bs.reduce((a, b) => a + (b.lw ?? 1), 0);
+        const mean = bs.reduce((a, b) => a + b[k]*(b.lw ?? 1), 0)/lwSum;
         (srcv[k][s.def.id] = srcv[k][s.def.id] || [])[ri] = mean;
         const w = WK(s, k, ri);
         pairs.push([mean, w]);
-        bs.forEach(b => { vals.push(b[k]); wts.push(w/bs.length); });
+        bs.forEach(b => { vals.push(b[k]); wts.push(w*(b.lw ?? 1)/lwSum); });
       }
       val[k][ri] = wmean(pairs);
       band[k][ri] = vals.length >= 6 ? wquant(vals, wts, [0.1, 0.9]) : null;
     }
     let U = 0, V = 0, ww = 0;
-    for (const s of on){
+    let onDir = onFor("dir"); if (onDir !== on && !onDir.some(s => s.blocks.some(b => b[ri] && b[ri].du != null))) onDir = on;
+    for (const s of onDir){
       const bs = s.blocks.map(b => b[ri]).filter(b => b && b.du != null); if (!bs.length) continue;
-      const u = bs.reduce((a, b) => a + b.du, 0)/bs.length, v = bs.reduce((a, b) => a + b.dv, 0)/bs.length;
+      const lws = bs.reduce((a, b) => a + (b.lw ?? 1), 0), u = bs.reduce((a, b) => a + b.du*(b.lw ?? 1), 0)/lws, v = bs.reduce((a, b) => a + b.dv*(b.lw ?? 1), 0)/lws;
       (srcv.dir[s.def.id] = srcv.dir[s.def.id] || [])[ri] = (Math.atan2(-u, -v)*180/Math.PI + 360) % 360;
       const w = WK(s, "dir", ri); U += u*w; V += v*w; ww += w;
     }
@@ -837,7 +913,10 @@ function aggregate(G, prefs){
     }
     for (const k of Object.keys(mem)){
       const list = [];
-      for (const s of on){ const bs = s.blocks.map(b => b[ri]).filter(b => b && b[k] != null); const w = WK(s, k, ri); bs.forEach(b => list.push([b[k], w/bs.length, s.def.id])); }
+      /* member keys: tmax/tmin, smax/gmax, vmin, a height (g60), rain (qpf, prmax), prescription limits (rhLo, tHi), dirm */
+      const exG = blendGroupOf(k) || blendGroupOf(k.replace(/(Lo|Hi)$/, "")) || (k === "dirm" ? "wind" : null);
+      let memOn = exG ? on.filter(s => blendAllows(prefs, exG, s)) : on; if (memOn.length !== on.length && !hasVal(memOn, k, ri)) memOn = on;
+      for (const s of memOn){ const bs = s.blocks.map(b => b[ri]).filter(b => b && b[k] != null); const w = WK(s, k, ri), lws = bs.reduce((a, b) => a + (b.lw ?? 1), 0); bs.forEach(b => list.push([b[k], w*(b.lw ?? 1)/lws, s.def.id])); }
       mem[k][ri] = list;
     }
   });
@@ -845,7 +924,10 @@ function aggregate(G, prefs){
   const winP = (ev, A, B, per) => {
     const pairs = [];
     const fams = [];
-    for (const s of on){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W0(s)*autoFactor(G, prefs, s.def.id, ev, A)]); if (NBM_FAMILY.has(s.def.id)) fams.push(pairs.length - 1); if (per) per[s.def.id] = p; }
+    const grp = ev === "tst" ? "thunder" : "precip";
+    let wOn = on.filter(s => blendAllows(prefs, grp, s));
+    if (wOn.length !== on.length && !wOn.some(s => G.srcWin(s, ev, A, B) != null)) wOn = on;
+    for (const s of wOn){ const p = G.srcWin(s, ev, A, B); if (p == null) continue; pairs.push([p, W0(s)*autoFactor(G, prefs, s.def.id, ev, A)]); if (NBM_FAMILY.has(s.def.id)) fams.push(pairs.length - 1); if (per) per[s.def.id] = p; }
     /* precipitation: the NBM sources with a value split one weight (thunder keeps full weight) */
     if (ev !== "tst" && fams.length > 1) fams.forEach(i => pairs[i][1] /= fams.length);
     return wmean(pairs);
@@ -908,6 +990,306 @@ function exceed(G, pk, ri, delta, hot){
   return { v: w ? 100*s/w : null, per };
 }
 
+/* ---------- public copies for the products page (interim, GitHub Pages) ----------
+   A public copy is a ZIP holding docs/products/<type>/<id>.json (what the products page lists) plus the
+   product's HTML and PDF. The forecaster unzips it and uploads the docs folder to the products
+   repository; a workflow there rebuilds the index. Only planning forecasts, TAFs, mission weather products
+   (page 1) and LMEFs for publicly announced launches can be made public, and only after the forecaster confirms they are cleared. */
+const PUBLIC_TYPES = ["planning", "taf", "lmef", "mwp"];
+const _crcT = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function storeZip(files){
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  const crc = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = _crcT[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+  for (const [name, body] of files){
+    const nb = enc.encode(name), data = typeof body === "string" ? enc.encode(body) : body, c = crc(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, dt, true); lh.setUint16(12, dd, true);
+    lh.setUint32(14, c, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, nb.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), nb, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, dt, true); ch.setUint16(14, dd, true);
+    ch.setUint32(16, c, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, nb.length, true); ch.setUint32(42, off, true);
+    central.push(new Uint8Array(ch.buffer), nb);
+    off += 30 + nb.length + data.length;
+  }
+  const csz = central.reduce((s, x) => s + x.length, 0), end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, csz, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type:"application/zip" });
+}
+/* meta: { type, key, title, issued (ms), forecaster, headline, ...type-specific summary };
+   files: { html?: string, pdf?: Blob }. Returns the ZIP and its file name. */
+async function publicSnapshot(meta, files){
+  if (!PUBLIC_TYPES.includes(meta.type)) throw new Error("This product type isn't cleared for the public page");
+  const p = new Date(meta.issued), stamp = p.toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "_");
+  const slug = String(meta.key || meta.type).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const id = `${slug}-${stamp}`, dir = `docs/products/${meta.type}/`;
+  const rec = { schema:1, id, ...meta, issued: new Date(meta.issued).toISOString(), audience:"public", files:{} };
+  const out = [];
+  if (files.html){ rec.files.html = `${meta.type}/${id}.html`; out.push([dir + id + ".html", files.html]); }
+  if (files.pdf){ rec.files.pdf = `${meta.type}/${id}.pdf`; out.push([dir + id + ".pdf", new Uint8Array(await files.pdf.arrayBuffer())]); }
+  out.unshift([dir + id + ".json", JSON.stringify(rec, null, 1)]);
+  return { blob: storeZip(out), name: `public_${id}.zip`, id };
+}
+/* ---------- public release through a GitHub issue (like the WWA board) ----------
+   The studio packs the product (its summary for the products page plus what the public viewer needs)
+   as gzip + base64 in a fenced block. The forecaster opens a prefilled issue in the private studio
+   repository, pastes the release and submits; the "Publish public product" workflow checks it and
+   pushes it to the public products repository with a deploy key. site.config.json names the repository. */
+let SITE_CFG = null;
+async function siteConfig(){
+  if (SITE_CFG) return SITE_CFG;
+  if (typeof window !== "undefined" && window.ERWX_SITE_CONFIG){ SITE_CFG = window.ERWX_SITE_CONFIG; return SITE_CFG; }
+  try { SITE_CFG = await getJSON(`${typeof DATA_BASE !== "undefined" ? DATA_BASE : ""}site.config.json?ts=${Date.now()}`, 8000); } catch (e) { SITE_CFG = {}; }
+  return SITE_CFG;
+}
+async function gzipB64(text){
+  const s = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buf = new Uint8Array(await new Response(s).arrayBuffer()); let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(bin).replace(/(.{76})/g, "$1\n");
+}
+/* meta as for publicSnapshot; view: { kind:"planning-data", data } | { kind:"html", html } | { kind:"text", text } */
+async function releaseBody(meta, view, by){
+  if (!PUBLIC_TYPES.includes(meta.type)) throw new Error("This product type isn't cleared for the public page");
+  const rel = { schema:2, ...meta, issued: new Date(meta.issued).toISOString(), audience:"public", releasedBy: by || meta.forecaster || "", view };
+  const b64 = await gzipB64(JSON.stringify(rel));
+  const when = new Date(meta.issued).toISOString().slice(0, 16).replace("T", " ") + "Z";
+  return [`### Public release`, ``, `**Product:** ${meta.title}${meta.subtitle ? " (" + meta.subtitle + ")" : ""}`, `**Issued:** ${when}`,
+    `**Released by:** ${by || meta.forecaster || "—"}, confirmed cleared for public release`, meta.headline ? `**Headline:** ${meta.headline}` : "", ``,
+    `The studio wrote everything below; please don't edit it.`, ``, "```public-release", b64, "```", ``].filter(x => x !== null).join("\n");
+}
+/* ---------- GitHub connection (one-click publishing) ----------
+   A fine-grained token limited to the studio repository with "Issues: Read and write" only lets the
+   studio open the release or withdraw issue itself and watch for the workflow's answer. The token can't
+   change code, data or the public site; the workflow still checks and publishes. Kept in this browser
+   (localStorage when "remember" is ticked, otherwise for the session). */
+const GH_KEY = "erwx:gh";
+function ghToken(){ try { return (JSON.parse(localStorage.getItem(GH_KEY) || sessionStorage.getItem(GH_KEY) || "null") || {}).token || ""; } catch (e) { return ""; } }
+function ghSave(token, remember, login){ const v = JSON.stringify({ token, login: login || "", saved: Date.now() }); try { localStorage.removeItem(GH_KEY); sessionStorage.removeItem(GH_KEY); (remember ? localStorage : sessionStorage).setItem(GH_KEY, v); } catch (e) { /* storage unavailable */ } }
+function ghClear(){ try { localStorage.removeItem(GH_KEY); sessionStorage.removeItem(GH_KEY); } catch (e) { /* ignore */ } }
+function ghRepo(cfg){ const m = String((cfg || {}).studioRepo || "").match(/github\.com\/([^/]+)\/([^/#?]+)/); return m && m[1] !== "ORG" ? { owner:m[1], repo:m[2].replace(/\.git$/, "") } : null; }
+async function ghApi(path, opts = {}){
+  const t = ghToken(); if (!t) throw Object.assign(new Error("Not connected to GitHub"), { status:0 });
+  const r = await fetch(`https://api.github.com${path}`, { method: opts.method || "GET", headers:{ "Authorization":`Bearer ${t}`, "Accept":"application/vnd.github+json", "X-GitHub-Api-Version":"2022-11-28", ...(opts.body ? { "Content-Type":"application/json" } : {}) }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (!r.ok){ let msg = ""; try { msg = (await r.json()).message || ""; } catch (e) { /* ignore */ } throw Object.assign(new Error(msg || `GitHub answered ${r.status}`), { status:r.status }); }
+  return { data: r.status === 204 ? null : await r.json(), expires: r.headers.get("github-authentication-token-expiration") };
+}
+const ghWhy = e => e.status === 401 ? "GitHub didn't accept the token (it may have expired). Update it under GitHub connection."
+  : e.status === 403 || e.status === 404 ? "The token can't open issues in the studio repository. Check it has access to that repository with Issues: Read and write, and that the organization approved it."
+  : e.status === 0 ? e.message : `GitHub: ${e.message}`;
+/* open a release or withdraw issue, then watch for the workflow's comment */
+async function ghOpenIssue(title, body, labels){ const cfg = await siteConfig(), R = ghRepo(cfg); if (!R) throw Object.assign(new Error("Set studioRepo in docs/site.config.json"), { status:0 }); return (await ghApi(`/repos/${R.owner}/${R.repo}/issues`, { method:"POST", body:{ title, body, labels } })).data; }
+async function ghWatch(issue, onStep, kind){
+  const cfg = await siteConfig(), R = ghRepo(cfg), done = kind === "withdraw" ? /Withdrawn from the public page|Nothing to withdraw|Not withdrawn:|couldn't be updated/ : /Published to the public page|Not published:|couldn't be pushed/;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 5*60e3){
+    await new Promise(r => setTimeout(r, 5000));
+    let cs = []; try { cs = (await ghApi(`/repos/${R.owner}/${R.repo}/issues/${issue.number}/comments?per_page=50`)).data || []; } catch (e) { onStep({ state:"error", text: ghWhy(e) }); return; }
+    const last = cs.filter(c => /Published to the public page|Not published:|couldn't be pushed|Withdrawn from the public page|Nothing to withdraw|Not withdrawn:|couldn't be updated|Waiting for review/.test(c.body || "")).pop();
+    if (last && /Waiting for review/.test(last.body)) onStep({ state:"wait", text:"Waiting for a second forecaster's review: it goes out when they remove the needs-review label." });
+    else if (last && done.test(last.body)){ const ok = /^(Published|Withdrawn|Nothing to withdraw)/.test(last.body.trim()); const link = (last.body.match(/https?:\/\/\S+?(?=[\s)]|$)/) || [])[0]; onStep({ state: ok ? "done" : "error", text: last.body.replace(/\s*Note:.*$/s, "").replace(link || "\u0000", "").replace(/[:\s]+$/, ".").replace(/\.\.$/, "."), link }); return; }
+    else onStep({ state:"run", text:`The workflow is checking it (${Math.round((Date.now() - t0)/1000)} s)…` });
+  }
+  onStep({ state:"slow", text:"It's taking longer than usual: follow it on the issue." });
+}
+/* the connection dialog */
+async function showGitHubConnection(after){
+  const cfg = await siteConfig(), R = ghRepo(cfg);
+  let d = document.getElementById("ghDlg"); if (d) d.remove();
+  d = document.createElement("dialog"); d.id = "ghDlg";
+  d.style.cssText = "width:min(560px,94vw);border:1px solid #ccd;border-radius:12px;padding:20px 22px;font:14px/1.5 system-ui,sans-serif;color:inherit;background:var(--panel,#fff)";
+  const saved = (() => { try { return JSON.parse(localStorage.getItem(GH_KEY) || sessionStorage.getItem(GH_KEY) || "null"); } catch (e) { return null; } })();
+  d.innerHTML = `<h2 style="margin:0 0 6px;font-size:18px">GitHub connection</h2>
+    <p style="margin:0 0 10px">With a connection, <b>Public copy</b> and <b>Withdraw</b> publish in one click: the studio opens the issue for you and shows when the workflow is done.</p>
+    ${R ? `<ol style="margin:0 0 12px;padding-left:20px;font-size:13.5px">
+      <li>On GitHub: <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">create a fine-grained token</a>. Resource owner <b>${R.owner}</b>; repository access <b>Only select repositories → ${R.repo}</b>; permissions <b>Issues: Read and write</b> (nothing else); expiry 90 days or your policy.</li>
+      <li>If the organization approves tokens, wait for the approval.</li>
+      <li>Paste it below and press <b>Test and save</b>.</li></ol>` : `<p>Set <code>studioRepo</code> in <code>docs/site.config.json</code> first.</p>`}
+    <label style="display:block;font-weight:600;margin:6px 0 4px">Token</label>
+    <input id="ghTok" type="password" autocomplete="off" spellcheck="false" placeholder="${saved && saved.token ? "saved (paste a new one to replace it)" : "github_pat_…"}" style="width:100%;padding:8px 10px;border:1px solid #bbc;border-radius:8px;font:13px ui-monospace,Menlo,monospace">
+    <label style="display:flex;gap:6px;align-items:center;margin:8px 0"><input type="checkbox" id="ghRem" ${!saved || localStorage.getItem(GH_KEY) ? "checked" : ""}> Remember on this computer (otherwise until the browser closes)</label>
+    <p id="ghMsg" style="min-height:1.4em;margin:6px 0 12px;font-size:13.5px">${saved && saved.token ? `Connected${saved.login ? " as @" + saved.login : ""}.` : "Not connected."}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn primary" id="ghTest">Test and save</button><button type="button" class="btn" id="ghRemove">Remove</button><button type="button" class="btn" id="ghClose">Close</button></div>`;
+  document.body.appendChild(d); d.showModal();
+  const msg = t => d.querySelector("#ghMsg").textContent = t;
+  d.querySelector("#ghClose").onclick = () => { d.close(); if (after) after(); };
+  d.querySelector("#ghRemove").onclick = () => { ghClear(); msg("Removed. Releases use the copy-and-paste form."); };
+  d.querySelector("#ghTest").onclick = async () => {
+    const t = d.querySelector("#ghTok").value.trim() || ghToken(); if (!t){ msg("Paste a token first."); return; }
+    if (!R){ msg("Set studioRepo in docs/site.config.json first."); return; }
+    ghSave(t, d.querySelector("#ghRem").checked); msg("Testing…");
+    try {
+      const u = (await ghApi("/user")).data, rp = await ghApi(`/repos/${R.owner}/${R.repo}`);
+      await ghApi(`/repos/${R.owner}/${R.repo}/issues?per_page=1&labels=public-release&state=all`);
+      ghSave(t, d.querySelector("#ghRem").checked, u.login);
+      msg(`Connected as @${u.login} to ${R.owner}/${R.repo}${rp.expires ? `; the token expires ${rp.expires.slice(0, 10)}` : ""}.`); d.querySelector("#ghTok").value = "";
+    } catch (e) { ghClear(); msg(ghWhy(e)); }
+  };
+}
+/* ---------- the official archive ----------
+   With a GitHub connection, every issued planning forecast, TAF, mission weather product (page 1) and LMEF for
+   a publicly announced launch is sent, compressed, as an "official-archive" issue to the studio repository;
+   the Official archive workflow files it under docs/data/archive/<type>/<YYYY>/<MM>/ and closes the issue.
+   Exposure and burn forecasts are never archived on GitHub (operation names and constraints). Without a
+   connection nothing is sent; the browser's own copy stays as before. */
+const ARCHIVE_TYPES = ["planning", "taf", "mwp", "lmef"];
+async function archiveOfficial(meta, data){
+  if (!ARCHIVE_TYPES.includes(meta.type) || typeof ghToken !== "function" || !ghToken()) return null;
+  { const cfg = await siteConfig(); if (cfg.publicPage === false || cfg.archive === false) return null; }
+  const say = m => { if (typeof toast === "function") toast(m); };
+  try {
+    const rec = { schema:1, type:meta.type, title:meta.title, subtitle:meta.subtitle || "", issued: new Date(meta.issued).toISOString(), forecaster: meta.forecaster || "", data };
+    let b64 = await gzipB64(JSON.stringify(rec));
+    if (b64.length > 60000 && data && data.for){ rec.data = { ...data, for:null, forTrimmed:true }; b64 = await gzipB64(JSON.stringify(rec)); }
+    if (b64.length > 64000){ say("Not archived: the forecast is too large for the archive"); return null; }
+    const when = rec.issued.slice(0, 16).replace("T", " ") + "Z";
+    const body = [`### Official archive`, ``, `**Product:** ${meta.title}${meta.subtitle ? " (" + meta.subtitle + ")" : ""}`, `**Issued:** ${when}${meta.forecaster ? ` by ${meta.forecaster}` : ""}`, ``, "The studio wrote everything below; please don't edit it.", ``, "```official-archive", b64, "```", ``].join("\n");
+    const iss = await ghOpenIssue(`Official archive: ${meta.title} ${when}${meta.forecaster ? " " + meta.forecaster : ""}`, body, ["official-archive"]);
+    say("Sent to the official archive");
+    return iss;
+  } catch (e) { say("Not archived: " + ghWhy(e)); return null; }
+}
+/* send once per product version: exporting the same forecast as PDF, CSV and HTML archives it once */
+const _archived = new Map();
+function archiveOnce(key, meta, data, same){
+  let h = 0; const s = JSON.stringify(same !== undefined ? same : data); for (let i = 0; i < s.length; i++) h = (h*31 + s.charCodeAt(i)) | 0;
+  if (_archived.get(key) === h) return null; _archived.set(key, h);
+  return archiveOfficial(meta, data);
+}
+/* reading the archive (served with the studio site): months.json lists the months; index/<YYYY-MM>.json
+   lists that month's entries; each entry's file is gzip JSON */
+async function archiveMonths(){ try { return await getJSON(`${DATA_BASE}data/archive/months.json?ts=${Date.now()}`, 10000); } catch (e) { return []; } }
+async function archiveIndex(month){ try { return await getJSON(`${DATA_BASE}data/archive/index/${month}.json?ts=${Date.now()}`, 10000); } catch (e) { return []; } }
+async function archiveFile(path){
+  const r = await fetch(`${DATA_BASE}data/archive/${path}`, { cache:"force-cache" }); if (!r.ok) throw new Error(r.status);
+  const s = r.body.pipeThrough(new DecompressionStream("gzip")); return JSON.parse(await new Response(s).text());
+}
+/* entries issued in the last `days`, optionally of one type, newest first */
+async function archiveEntries(days, type){
+  const months = (await archiveMonths()).slice().sort().reverse(), from = Date.now() - days*86400e3, out = [];
+  for (const m of months){
+    const [y, mo] = m.split("-").map(Number); if (Date.UTC(y, mo, 1) < from) break;
+    for (const e of await archiveIndex(m)) if ((!type || e.type === type) && Date.parse(e.issued) >= from) out.push(e);
+  }
+  return out.sort((a, b) => Date.parse(b.issued) - Date.parse(a.issued));
+}
+/* the release dialog: copy the release, open the issue form, paste and submit (or download the ZIP instead) */
+async function showReleaseDialog(meta, view, by, zipFn){
+  const cfg = await siteConfig(), repo = (cfg.studioRepo || "").replace(/\/$/, ""), ok = repo && !/\/ORG\//.test(repo);
+  const body = await releaseBody(meta, view, by);
+  const when = new Date(meta.issued).toISOString().slice(0, 16).replace("T", " ") + "Z";
+  const title = `Public release: ${meta.title} ${when}`;
+  const direct = `${repo}/issues/new?labels=public-release&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+  const short = direct.length < 7000;
+  const url = short ? direct : `${repo}/issues/new?labels=public-release&title=${encodeURIComponent(title)}&body=${encodeURIComponent("Paste the release from the studio here (Ctrl+V or Cmd+V), replacing this line, then Submit.")}`;
+  let d = document.getElementById("relDlg"); if (d) d.remove();
+  d = document.createElement("dialog"); d.id = "relDlg";
+  d.style.cssText = "max-width:560px;border:1px solid #ccd;border-radius:12px;padding:20px 22px;font:14px/1.5 system-ui,sans-serif;color:inherit;background:var(--panel,#fff)";
+  const e2 = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  d.innerHTML = `<h2 style="margin:0 0 6px;font-size:18px">Release to the public page</h2><p style="margin:0 0 12px;color:var(--ink-2,#555)">${e2(meta.title)}${meta.subtitle ? " · " + e2(meta.subtitle) : ""}</p>
+    ${ok ? `<ol style="margin:0 0 14px;padding-left:20px">${short ? `<li><b>Open the release form</b>: it opens on GitHub with everything filled in.</li><li>Check it and press <b>Submit new issue</b>.</li>` : `<li><b>Copy the release</b>.</li><li><b>Open the release form</b> on GitHub.</li><li>Click in the description, select its text and paste (Ctrl+V or Cmd+V), then press <b>Submit new issue</b>.</li>`}</ol>
+      <p style="margin:0 0 14px;font-size:13px;color:var(--ink-3,#777)">The <i>Publish public product</i> workflow checks the release and puts it on the public page within a couple of minutes; it comments on the issue with the link.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${short ? "" : `<button type="button" class="btn" id="relCopy">Copy the release</button>`}<a class="btn primary" id="relOpen" href="${e2(url)}" target="_blank" rel="noopener">Open the release form</a><button type="button" class="btn" id="relZip">Download ZIP instead</button><button type="button" class="btn" id="relClose">Close</button></div>`
+    : `<p>The studio doesn't know the GitHub repository yet: set <code>studioRepo</code> in <code>docs/site.config.json</code>. Until then, download the public copy as a ZIP and upload it to the products repository.</p><div style="display:flex;gap:8px"><button type="button" class="btn primary" id="relZip">Download ZIP</button><button type="button" class="btn" id="relClose">Close</button></div>`}`;
+  document.body.appendChild(d); d.showModal();
+  /* connected: publish in one click, then follow the workflow */
+  if (ok && ghToken()){
+    const ol = d.querySelector("ol"); if (ol) ol.remove();
+    d.querySelector("p").insertAdjacentHTML("afterend", `<div id="relOne" style="border:1px solid var(--rule,#dde);border-radius:10px;padding:12px 14px;margin:0 0 12px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="btn primary" id="relNow">Publish now</button><label style="display:flex;gap:6px;align-items:center;font-size:13.5px"><input type="checkbox" id="relRev"> Hold for a second forecaster's review</label></div><p id="relState" style="margin:8px 0 0;font-size:13.5px;color:var(--ink-2,#555)">The studio opens the release issue for you and shows when it's on the public page.</p></div>`);
+    const open = d.querySelector("#relOpen"); if (open){ open.classList.remove("primary"); open.textContent = "Use the GitHub form instead"; }
+    const cpy = d.querySelector("#relCopy"); if (cpy) cpy.hidden = true;
+    d.querySelector("#relNow").onclick = async () => {
+      const btn = d.querySelector("#relNow"), st = d.querySelector("#relState"); btn.disabled = true; st.textContent = "Opening the release issue…";
+      const say = s => { st.innerHTML = `${s.state === "done" ? "✓ " : s.state === "error" ? "✗ " : ""}${e2(s.text)}${s.link ? ` <a href="${e2(s.link)}" target="_blank" rel="noopener">Open it</a>` : ""}`; st.style.color = s.state === "done" ? "var(--ok,#2F7D52)" : s.state === "error" ? "var(--bad,#B23A2E)" : ""; if (s.state === "error") btn.disabled = false; };
+      try {
+        const iss = await ghOpenIssue(title, body, d.querySelector("#relRev").checked ? ["public-release", "needs-review"] : ["public-release"]);
+        st.innerHTML = `Release issue <a href="${e2(iss.html_url)}" target="_blank" rel="noopener">#${iss.number}</a> opened. The workflow is checking it…`;
+        ghWatch(iss, s => { say(s); if (s.state !== "done" && s.state !== "error") st.insertAdjacentHTML("beforeend", ` <a href="${e2(iss.html_url)}" target="_blank" rel="noopener">issue #${iss.number}</a>`); }, "release");
+      } catch (e) { say({ state:"error", text: ghWhy(e) }); }
+    };
+  } else if (ok){
+    d.querySelector("#relClose").insertAdjacentHTML("beforebegin", `<button type="button" class="btn" id="relConnect" title="Publish in one click from now on">Connect GitHub</button>`);
+    d.querySelector("#relConnect").onclick = () => { d.close(); showGitHubConnection(() => showReleaseDialog(meta, view, by, zipFn)); };
+  }
+  const copy = async () => { try { await navigator.clipboard.writeText(body); return true; } catch (e) { const ta = document.createElement("textarea"); ta.value = body; document.body.appendChild(ta); ta.select(); const r = document.execCommand("copy"); ta.remove(); return r; } };
+  if (d.querySelector("#relCopy")) d.querySelector("#relCopy").onclick = async () => { const r = await copy(); d.querySelector("#relCopy").textContent = r ? "Copied" : "Copy failed: use the ZIP"; };
+  if (d.querySelector("#relOpen") && !short) d.querySelector("#relOpen").addEventListener("click", () => { copy(); });
+  d.querySelector("#relZip").onclick = () => { zipFn && zipFn(); d.close(); };
+  d.querySelector("#relClose").onclick = () => d.close();
+  return { body, url };
+}
+/* ---------- the public page manager: what's live, and withdrawing it ----------
+   Lists the public page's products (read from its index) and opens a prefilled issue labelled
+   "public-withdraw" for a version or a whole product; the workflow removes it with the deploy key. */
+async function showPublicManager(){
+  const cfg = await siteConfig(), repo = (cfg.studioRepo || "").replace(/\/$/, ""), page = (cfg.productsPage || "").replace(/\/?$/, "/");
+  const ok = repo && !/\/ORG\//.test(repo) && page && !/\/\/ORG\./.test(page);
+  let d = document.getElementById("pubMgr"); if (d) d.remove();
+  d = document.createElement("dialog"); d.id = "pubMgr";
+  d.style.cssText = "width:min(720px,94vw);max-height:86vh;border:1px solid #ccd;border-radius:12px;padding:20px 22px;font:14px/1.5 system-ui,sans-serif;color:inherit;background:var(--panel,#fff)";
+  const e2 = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  d.innerHTML = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0;font-size:18px;flex:1">Public page</h2>${ok ? `<a class="btn" href="${e2(page)}" target="_blank" rel="noopener">Open the public page</a>` : ""}<button type="button" class="btn" id="pmGh">${ghToken() ? "GitHub connection" : "Connect GitHub"}</button><button type="button" class="btn" id="pmClose">Close</button></div><div id="pmBody" style="margin-top:12px"><p>Loading…</p></div>`;
+  document.body.appendChild(d); d.showModal();
+  d.querySelector("#pmClose").onclick = () => d.close();
+  d.querySelector("#pmGh").onclick = () => { d.close(); showGitHubConnection(() => showPublicManager()); };
+  /* connected: withdraw in one click and follow the workflow; otherwise the links open GitHub's form */
+  d.addEventListener("click", async ev => {
+    const a = ev.target.closest("a[data-wd]"); if (!a || !ghToken()) return;
+    ev.preventDefault();
+    if (!confirm(a.dataset.scope === "product" ? "Withdraw every version of this product from the public page?" : "Withdraw this version from the public page?")) return;
+    const q = new URLSearchParams(a.getAttribute("href").split("?")[1]), row = a.closest("[data-wrow]") || a.parentElement;
+    let st = row.querySelector(".wdst"); if (!st){ st = document.createElement("div"); st.className = "wdst"; st.style.cssText = "font-size:13px;margin-top:4px"; row.appendChild(st); }
+    st.textContent = "Opening the withdraw issue…";
+    try {
+      const iss = await ghOpenIssue(q.get("title"), q.get("body"), ["public-withdraw"]);
+      ghWatch(iss, s => { st.innerHTML = `${s.state === "done" ? "✓ " : s.state === "error" ? "✗ " : ""}${e2(s.text)} <a href="${e2(iss.html_url)}" target="_blank" rel="noopener">issue #${iss.number}</a>`; st.style.color = s.state === "done" ? "var(--ok,#2F7D52)" : s.state === "error" ? "var(--bad,#B23A2E)" : ""; }, "withdraw");
+    } catch (e) { st.textContent = "✗ " + ghWhy(e); st.style.color = "var(--bad,#B23A2E)"; }
+  });
+  const body = d.querySelector("#pmBody");
+  if (!ok){ body.innerHTML = `<p>Set <code>studioRepo</code> and <code>productsPage</code> in <code>docs/site.config.json</code> to manage the public page from here.</p>`; return; }
+  /* the public site's own list first; if it can't be read from here (a private Pages site only answers its own
+     signed-in visitors), the studio's copy, kept current by the "Mirror public list" workflow job */
+  let idx = null, fromCopy = false;
+  try { idx = await getJSON(`${page}products/index.json?ts=${Date.now()}`, 12000); } catch (e) { idx = null; }
+  if (!idx || !Array.isArray(idx.products)){
+    try { idx = await getJSON(`${typeof DATA_BASE !== "undefined" ? DATA_BASE : ""}data/public_index.json?ts=${Date.now()}`, 10000); fromCopy = true; } catch (e) { idx = null; }
+  }
+  if (!idx || !Array.isArray(idx.products)){ body.innerHTML = "<p>The public page's product list couldn't be read, and the studio has no copy yet. Run <b>Actions → Publish public product → Run workflow</b> once to make the copy, or release a product.</p>"; return; }
+  const ps = idx.products || [];
+  if (!ps.length){ body.innerHTML = "<p>Nothing is on the public page.</p>"; return; }
+  const when = iso => { const t = new Date(iso); return isNaN(t) ? "" : t.toISOString().slice(0, 16).replace("T", " ") + "Z"; };
+  const withdrawUrl = (p, scope, id, iss) => {
+    const req = { action:"withdraw", scope, type:p.type, key:p.key, id: id || p.id };
+    const title = scope === "product" ? `Withdraw from public page: ${p.title} (all versions)` : `Withdraw from public page: ${p.title} ${when(iss)}`;
+    const b = [`### Withdraw from the public page`, ``, `**Product:** ${p.title}${p.subtitle ? " (" + p.subtitle + ")" : ""}`, scope === "product" ? `**Remove:** every version` : `**Remove:** the version issued ${when(iss)}`, `**Reason:** (optional, type it here)`, ``, `The studio wrote the block below; please don't edit it.`, ``, "```public-withdraw", JSON.stringify(req), "```"].join("\n");
+    return `${repo}/issues/new?labels=public-withdraw&title=${encodeURIComponent(title)}&body=${encodeURIComponent(b)}`;
+  };
+  body.innerHTML = `<p style="margin:0 0 10px;color:var(--ink-2,#555)">${ghToken() ? "Withdrawing opens the withdraw issue for you and shows when the product is gone (a couple of minutes)." : "Withdrawing opens a prefilled issue in the studio repository; submit it and the workflow removes the product within a couple of minutes."} Removing the current version brings back the previous one.</p>${fromCopy ? `<p style="margin:0 0 10px;font-size:13px;color:var(--ink-3,#777)">From the studio's copy of the list, updated ${e2(when(idx.updated))}; changes in the last few minutes may not show yet.</p>` : ""}` + ps.map(p => `
+    <div style="border:1px solid var(--rule,#dde);border-radius:10px;padding:10px 12px;margin:8px 0">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b>${e2(p.title)}</b><span style="color:var(--ink-3,#777)">${e2(p.subtitle || "")}</span><span style="flex:1"></span><a class="btn" data-wd="1" data-scope="product" href="${e2(withdrawUrl(p, "product"))}" target="_blank" rel="noopener">Withdraw the whole product</a></div>
+      <table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:13px">
+        <tr data-wrow="1"><td style="padding:3px 0">Current: ${e2(when(p.issued))}${p.forecaster ? " by " + e2(p.forecaster) : ""}</td><td style="text-align:right"><a data-wd="1" data-scope="version" href="${e2(withdrawUrl(p, "version", p.id, p.issued))}" target="_blank" rel="noopener">Withdraw this version</a></td></tr>
+        ${(p.history || []).map(h => `<tr data-wrow="1"><td style="padding:3px 0;color:var(--ink-2,#555)">Earlier: ${e2(when(h.issued))}${h.forecaster ? " by " + e2(h.forecaster) : ""}</td><td style="text-align:right"><a data-wd="1" data-scope="version" href="${e2(withdrawUrl(p, "version", h.id, h.issued))}" target="_blank" rel="noopener">Withdraw this version</a></td></tr>`).join("")}
+      </table></div>`).join("");
+}
+/* editions: site.config.json { "publicPage": false } is the personal edition: no public page, releases,
+   withdrawals, GitHub connection or official archive (the controls are hidden, the archive never sent) */
+if (typeof document !== "undefined"){
+  const st = document.createElement("style");
+  st.textContent = `.erwx-nopublic #tafPublic, .erwx-nopublic #lmPublic, .erwx-nopublic #pubBtn, .erwx-nopublic .pubpub, .erwx-nopublic #pubMgrLink, .erwx-nopublic label:has(#lmPubLaunch){ display:none !important; }
+    .erwx-noarchive label:has(#lmPubLaunch){ display:none !important; }`;
+  document.head.appendChild(st);
+  siteConfig().then(cfg => { if (cfg.publicPage === false) document.documentElement.classList.add("erwx-nopublic"); if (cfg.archive === false) document.documentElement.classList.add("erwx-noarchive"); });
+}
+/* a "Public page" entry in the studio's page bar */
+if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded", async () => {
+  if ((await siteConfig()).publicPage === false) return;
+  const nav = document.querySelector("nav.pagenav"); if (!nav || document.getElementById("pubMgrLink")) return;
+  const a = document.createElement("a"); a.href = "#"; a.id = "pubMgrLink"; a.textContent = "Public page"; a.title = "What's on the public page, and withdrawing it";
+  a.onclick = ev => { ev.preventDefault(); showPublicManager(); };
+  nav.appendChild(a);
+});
 /* ---------- shared PDF helpers (planning, exposure, burn, LMEF and MWP pages) ---------- */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 const textW = (s, size, bold) => { let w = 0; for (const ch of String(s)){ const c = ch.charCodeAt(0); w += c >= 32 && c <= 126 ? HW[c - 32] : ch === "–" ? 556 : ch === "°" ? 400 : 556; } return w*size/1000*(bold ? 1.06 : 1); };

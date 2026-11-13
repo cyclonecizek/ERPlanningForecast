@@ -36,7 +36,13 @@ def page_html(fname, base, logo_uri, seal_uri=""):
     html = re.sub(r'<script src="([\w.-]+\.js(?:\?v=[0-9a-f]+)?)"></script>', inline, html)
     # logo and data locations
     html = html.replace('src="45ws-logo.png"', f'src="{logo_uri}"')
+    # the edition settings (personal or AFSPC) travel with the offline copy
+    try:
+        site_cfg = json.load(open(os.path.join(DOCS, "site.config.json"), encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        site_cfg = {}
     boot = ("<script>window.DATA_BASE = " + json.dumps(base) + "; window.LOGO_SRC = " + json.dumps(logo_uri) + ("; window.SEAL_SRC = " + json.dumps(seal_uri) if seal_uri else "")
+            + "; window.ERWX_SITE_CONFIG = " + json.dumps(site_cfg)
             + "; window.STANDALONE = true; try { window.FORCE_DEMO = /[?&]demo=1\\b/.test(window.parent.location.search); } catch (e) {}</script>\n"
             + STANDALONE_JS)
     html = html.replace("<head>", "<head>\n" + boot, 1)
