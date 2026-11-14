@@ -1,5 +1,5 @@
 :Product: 3-Day Forecast
-:Issued: 2026 Nov 14 0030 UTC
+:Issued: 2026 Nov 14 1230 UTC
 # Prepared by the U.S. Dept. of Commerce, NOAA, Space Weather Prediction Center
 #
 A. NOAA Geomagnetic Activity Observation and Forecast
@@ -12,9 +12,9 @@ Scale levels).
 NOAA Kp index breakdown Nov 14-Nov 16 2026
 
              Nov 14       Nov 15       Nov 16
-00-03UT       1.67         1.67         3.33         
-03-06UT       1.67         1.33         2.00         
-06-09UT       1.33         1.33         2.00         
+00-03UT       0.33         1.67         3.33         
+03-06UT       0.67         1.33         2.00         
+06-09UT       1.00         1.33         2.00         
 09-12UT       1.33         1.33         3.00         
 12-15UT       1.33         1.33         3.00         
 15-18UT       1.33         1.33         3.33         
@@ -45,8 +45,8 @@ No radio blackouts were observed over the past 24 hours.
 Radio Blackout Forecast for Nov 14-Nov 16 2026
 
               Nov 14        Nov 15        Nov 16
-R1-R2           20%           20%           20%
+R1-R2           25%           25%           25%
 R3 or greater    5%            5%            5%
 
-Rationale: There exists a slight chance for R1-R2 (Minor-Moderate) radio
-blackouts over 14-16 Nov.
+Rationale: There is a chance for R1-R2 (Minor-Moderate) radio blackouts
+over 14-16 Nov.
