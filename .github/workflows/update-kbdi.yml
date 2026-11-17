@@ -1,0 +1,39 @@
+name: Update KBDI
+
+# Saves the Florida Forest Service's Keetch-Byram Drought Index for Brevard County to docs/data/kbdi.json
+# for the Burn planning forecast page. FDACS posts the report each morning.
+on:
+  schedule:
+    - cron: "23 12,15,19 * * *"   # about 0723, 1023 and 1423 Eastern
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-kbdi
+  cancel-in-progress: false
+
+jobs:
+  kbdi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Read the FDACS KBDI report
+        run: python pipeline/update_kbdi.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/kbdi.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "KBDI $(date -u +%Y-%m-%d)"
+          for i in 1 2 3; do
+            git pull --rebase --autostash && git push && exit 0
+            sleep $((i * 10))
+          done
+          exit 1
