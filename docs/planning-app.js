@@ -3967,7 +3967,7 @@ function olHourly(sid){
   if (!s || !raw || !raw.length || !S.TL) return null;
   const wins = olWindows(s); if (!wins.length) return null;
   const from = Math.floor(Date.now()/H)*H, to = Math.ceil(wins[wins.length - 1].b/H)*H;
-  const key = JSON.stringify([sid, S.fetchedAt, raw.length, prefs.enabled, prefs.weight, prefs.grpSrc, prefs.autoW, prefs.exp.constraints, prefs.exp.ol, edits[sid] || {}, from]);
+  const key = JSON.stringify([sid, S.fetchedAt, raw.length, prefs.enabled, prefs.weight, prefs.grpSrc, prefs.autoW, prefs.exp.constraints, prefs.exp.ol, prefs.exp.olKbdi, edits[sid] || {}, from, prefs.exp.start, prefs.exp.end]);
   if (OLC && OLC.key === key) return OLC.res;
   const rows = buildRowsRange(from, to, Infinity), G = new SiteGuidance(s, S.TL, rows);
   for (const [d, members, extra] of raw) G.addSource(d, members, extra);
@@ -3988,6 +3988,25 @@ function olHourly(sid){
       return v;
     });
   }
+  /* every other saved edit (days planned earlier, or typed in the outlook), hour by hour; RH, VPD and LVORI
+     follow edited temperature and dew point there the way the burn day's do */
+  const edAt = (k, t) => {
+    const m = ed[k]; if (!m) return undefined;
+    if (m[t + "_1"] !== undefined) return m[t + "_1"];
+    for (const kk in m){ const [a, len] = kk.split("_").map(Number); if (len > 1 && t >= a && t < a + len*H && m[kk] != null) return k === "qpf" ? m[kk]/len : m[kk]; }
+    return undefined;
+  };
+  rows.forEach((r, i) => {
+    if (offAt[r.a] != null) return;
+    let any = false;
+    for (const k of OL_KEYS){ const x = edAt(k, r.a); if (x != null){ val[k][i] = x; any = true; } }
+    if (!any) return;
+    edited.add(r.a);
+    const tdE = edAt("t", r.a) != null || edAt("td", r.a) != null, g = k => A.val[k] ? A.val[k][i] : null;
+    if (tdE && edAt("rh", r.a) == null && [g("t"), g("td"), g("rh"), val.t[i], val.td[i]].every(v => v != null)) val.rh[i] = Math.max(1, Math.min(100, Math.round(g("rh") + rhFrom(val.t[i], val.td[i]) - rhFrom(g("t"), g("td")))));
+    if (tdE && edAt("vpd", r.a) == null && [g("t"), g("td"), g("vpd"), val.t[i], val.td[i]].every(v => v != null)) val.vpd[i] = Math.max(0, g("vpd") + vpdFrom(val.t[i], val.td[i]) - vpdFrom(g("t"), g("td")));
+    if (edAt("lvori", r.a) == null && val.rh[i] != null && val.di[i] != null && (val.rh[i] !== g("rh") || val.di[i] !== g("di"))) val.lvori[i] = lvori(val.rh[i], val.di[i]);
+  });
   const res = { s, rows, G, A, val, wins, edited };
   OLC = { key, res };
   return res;
@@ -4092,7 +4111,9 @@ function olKBDI(h){
       if (tx == null && !n) break;
       q = kbdiStep(q, tx, n ? rain : null, st, R);
     }
-    days[dayKey(d0 + 12*H, false)] = { v: Math.round(q), obs: k === 0 };
+    const dk = dayKey(d0 + 12*H, false), typed = (prefs.exp.olKbdi || {})[dk];
+    if (typed != null && isFinite(+typed)){ q = Math.max(0, Math.min(800, +typed)); days[dk] = { v: Math.round(q), obs: k === 0, edited: true }; continue; }
+    days[dk] = { v: Math.round(q), obs: k === 0 };
   }
   return { start, days };
 }
@@ -4130,21 +4151,89 @@ const olW = v => v == null ? "–" : Math.round(v*wfac());
 const olRange = (r, f) => r == null ? "–" : f(r[0]) === f(r[1]) ? f(r[0]) : `${f(r[0])}–${f(r[1])}`;
 /* rows of the outlook table: element, label, how the window value shows, the prescription fields it carries */
 const OL_ROWS = [
-  ["sky", "Sky cover", d => d.el.sky == null ? "–" : skyCat(d.el.sky), []],
-  ["t", "Temperature (°F)", d => olRange(d.el.t, Math.round), ["t"]],
-  ["rh", "Relative humidity (%)", d => olRange(d.el.rh, Math.round), ["rh"]],
-  ["vpd", "VPD (kPa)", d => olRange(d.el.vpd, v => (Math.round(v*10)/10).toFixed(1)), ["vpd"]],
-  ["s20", "20 ft wind", d => `${d.el.dir == null ? "" : compass(d.el.dir) + " "}${olRange(d.el.s20, v => String(olW(v)))}`, ["s20", "dir"]],
-  ["g20", "20 ft peak", d => String(olW(d.el.g20)), ["g20"]],
-  ["mixh", "Mixing height (ft)", d => olRange(d.el.mixh, v => (Math.round(v/100)*100).toLocaleString("en-US")), ["mixh"]],
-  ["tw", "Transport wind", d => `${d.el.tdir == null ? "" : compass(d.el.tdir) + " "}${olRange(d.el.tw, v => String(olW(v)))}`, ["tw"]],
-  ["vr", "Ventilation (m²/s)", d => olRange(d.el.vr, v => (Math.round(v/100)*100).toLocaleString("en-US")), ["vr"]],
-  ["di", "Dispersion (LDSI)", d => olRange(d.el.di, Math.round), ["di"]],
-  ["lvori", "LVORI (max)", d => d.el.lvori == null ? "–" : String(Math.round(d.el.lvori)), ["lvori"]],
-  ["pop", "Chance of rain (max %)", d => d.el.pop == null ? "–" : String(Math.round(d.el.pop)), ["pop"]],
-  ["rain", "Rain, whole day (in)", d => d.el.rain == null ? "–" : d.el.rain.toFixed(2), []],
-  ["kbdi", "KBDI", d => d.el.kbdi ? `${d.el.kbdi.v}${d.el.kbdi.obs ? "" : ""}` : "–", ["kbdi"]],
+  ["sky", "Sky cover", d => d.el.sky == null ? "–" : skyCat(d.el.sky), [], null],
+  ["t", "Temperature (°F)", d => olRange(d.el.t, Math.round), ["t"], "t"],
+  ["rh", "Relative humidity (%)", d => olRange(d.el.rh, Math.round), ["rh"], "rh"],
+  ["vpd", "VPD (kPa)", d => olRange(d.el.vpd, v => (Math.round(v*10)/10).toFixed(1)), ["vpd"], null],
+  ["s20", "20 ft wind", d => `${d.el.dir == null ? "" : compass(d.el.dir) + " "}${olRange(d.el.s20, v => String(olW(v)))}`, ["s20", "dir"], "s20"],
+  ["g20", "20 ft peak", d => String(olW(d.el.g20)), ["g20"], "g20"],
+  ["mixh", "Mixing height (ft)", d => olRange(d.el.mixh, v => (Math.round(v/100)*100).toLocaleString("en-US")), ["mixh"], "mixh"],
+  ["tw", "Transport wind", d => `${d.el.tdir == null ? "" : compass(d.el.tdir) + " "}${olRange(d.el.tw, v => String(olW(v)))}`, ["tw"], "tw"],
+  ["vr", "Ventilation (m²/s)", d => olRange(d.el.vr, v => (Math.round(v/100)*100).toLocaleString("en-US")), ["vr"], null],
+  ["di", "Dispersion (LDSI)", d => olRange(d.el.di, Math.round), ["di"], "di"],
+  ["lvori", "LVORI (max)", d => d.el.lvori == null ? "–" : String(Math.round(d.el.lvori)), ["lvori"], "lvori"],
+  ["pop", "Chance of rain (max %)", d => d.el.pop == null ? "–" : String(Math.round(d.el.pop)), ["pop"], "pop"],
+  ["rain", "Rain, whole day (in)", d => d.el.rain == null ? "–" : d.el.rain.toFixed(2), [], "rain"],
+  ["kbdi", "KBDI", d => d.el.kbdi ? `${d.el.kbdi.v}${d.el.kbdi.obs ? "" : ""}` : "–", ["kbdi"], "kbdi"],
 ];
+/* typing over an outlook value: the window's extreme (or the day's rain, or KBDI); the hours of that window shift
+   (temperature, RH, LVORI and chance of rain by the difference; winds, mixing height and LDSI in proportion) and are
+   saved as ordinary edits, so the burn day view, the Fire Weather Forecast and undo all see them. A blank clears them. */
+const OL_EDIT = {
+  t:     { k:"t", how:"max", add:true, lab:"highest temperature in the window (°F)", step:1 },
+  rh:    { k:"rh", how:"min", add:true, lo:1, hi:100, lab:"lowest RH in the window (%)", step:1 },
+  s20:   { k:"s20", how:"max", wind:true, lab:"highest 20 ft wind in the window", step:1 },
+  g20:   { k:"g20", how:"max", wind:true, lab:"highest 20 ft peak in the window", step:1 },
+  mixh:  { k:"mixh", how:"max", lo:0, lab:"highest mixing height in the window (ft)", step:100 },
+  tw:    { k:"tw", how:"max", wind:true, lab:"highest transport wind in the window", step:1 },
+  di:    { k:"di", how:"max", lo:0, lab:"highest LDSI in the window", step:1 },
+  lvori: { k:"lvori", how:"max", add:true, lo:1, hi:10, lab:"highest LVORI in the window", step:1 },
+  pop:   { k:"pp1", how:"max", add:true, lo:0, hi:100, lab:"highest hourly chance of rain in the window (%)", step:1 },
+  rain:  { k:"qpf", how:"sum", day:true, lo:0, lab:"rain for the whole day (in)", step:0.01 },
+  kbdi:  { kbdi:true, lab:"KBDI for the day", step:1 },
+};
+const olRound = (v, step) => step >= 1 ? Math.round(v/step)*step : Math.round(v*100)/100;
+/* the hours an outlook edit covers, and their current values */
+function olEditHours(h, d, e){
+  if (e.day){ const d0 = localMidnight(d.w.day, 0), d1 = localMidnight(d.w.day, 1); return h.rows.map((r, i) => i).filter(i => h.rows[i].a >= d0 && h.rows[i].a < d1); }
+  return d.hrs;
+}
+function olCurrent(h, d, e){
+  if (e.kbdi) return d.el.kbdi ? d.el.kbdi.v : null;
+  const v = olEditHours(h, d, e).map(i => h.val[e.k][i]).filter(x => x != null); if (!v.length) return null;
+  const x = e.how === "sum" ? v.reduce((a, b) => a + b, 0) : e.how === "min" ? Math.min(...v) : Math.max(...v);
+  return e.wind ? x*wfac() : x;
+}
+function olIsEdited(h, d, e){
+  if (e.kbdi) return !!(d.el.kbdi && d.el.kbdi.edited);
+  const m = (edits[h.s.id] || {})[e.k] || {};
+  return olEditHours(h, d, e).some(i => m[h.rows[i].a + "_1"] !== undefined);
+}
+function olApplyEdit(dayIdx, field, text){
+  const O = burnOutlook(), h = O && olHourly(O.s.id), d = O && O.days[dayIdx], e = OL_EDIT[field]; if (!d || !e) return;
+  const txt = String(text).trim();
+  if (e.kbdi){
+    const m = prefs.exp.olKbdi = prefs.exp.olKbdi || {}, dk = dayKey(d.w.day, false);
+    if (txt === "") delete m[dk]; else { const v = parseFloat(txt); if (!isFinite(v)) { toast("Type a number, or clear it to go back to the forecast"); return; } m[dk] = Math.max(0, Math.min(800, Math.round(v))); }
+    savePrefs(); OLC = null; renderOutlook(); return;
+  }
+  const sid = O.s.id, idx = olEditHours(h, d, e), group = [];
+  if (txt === ""){
+    idx.forEach(i => setEdit(sid, e.k, h.rows[i].a + "_1", null, group));
+  } else {
+    let target = parseFloat(txt.replace(/[%,]/g, "")); if (!isFinite(target)){ toast("Type a number, or clear it to go back to guidance"); return; }
+    if (e.wind) target = target/wfac();
+    const cur = olCurrent(h, d, e), curE = cur == null ? null : e.wind ? cur/wfac() : cur;
+    const vals = idx.map(i => h.val[e.k][i]);
+    let nv;
+    if (e.how === "sum"){
+      if (curE != null && curE >= 0.01) nv = vals.map(v => v == null ? null : v*target/curE);
+      else { const win = d.hrs.length ? d.hrs : idx; nv = idx.map(i => win.includes(i) ? target/win.length : 0); }
+    } else if (curE == null) nv = vals.map(() => target);
+    else if (e.add || curE <= 0.01) nv = vals.map(v => v == null ? null : v + (target - curE));
+    else nv = vals.map(v => v == null ? null : v*target/curE);
+    idx.forEach((i, j) => {
+      let v = nv[j]; if (v == null) return;
+      if (e.lo != null) v = Math.max(e.lo, v); if (e.hi != null) v = Math.min(e.hi, v);
+      v = e.wind ? Math.round(v*10)/10 : olRound(v, e.step);
+      setEdit(sid, e.k, h.rows[i].a + "_1", v, group);
+    });
+  }
+  if (!group.length) return;
+  S.undo.push(group); if (S.undo.length > 200) S.undo.shift(); S.redo = [];
+  saveEdits(); OLC = null; renderAll(); renderOutlook();
+  toast(txt === "" ? "Back to guidance for that window" : `${dayLabel(d.w.day, false).wd} edited: the hours in the window moved to match (Ctrl+Z to undo)`);
+}
 function olCellStatus(d, fields){
   const st = [...d.perCrit.filter(p => fields.includes(p.c.f)).map(p => p.status), ...d.kStat.filter(p => fields.includes(p.c.f)).map(p => p.status)].filter(v => v != null);
   return st.length ? Math.max(...st) : null;
@@ -4184,10 +4273,12 @@ function renderOutlook(){
   let h = `<table class="ol"><thead><tr><th class="olh"></th>${O.days.map((d, j) => { const L = dayLabel(d.w.day, false); return `<th class="olday"><b>${L.wd.slice(0, 3)} ${L.dt}</b><small>${olWhen(d.w.A, d.w.b)}${d.w.partial ? " (rest of today)" : ""}</small><button type="button" class="lnk" data-plan="${j}" title="Open this window in the burn day view">Plan this day</button></th>`; }).join("")}</tr></thead><tbody>`;
   h += `<tr class="olsum"><th class="olh">Prescription<small>${hesc(c.minH)} h in a row</small></th>${O.days.map(d => d.status == null ? `<td>–</td>` : `<td class="${OL_CLS[d.status]}"><b>${OL_STAT[d.status]}</b><small>${d.best ? `${olWhen(d.best.a, d.best.b)} · ${d.inRx} of ${d.n} h` : `0 of ${d.n} h`}${d.edited ? " · edited" : ""}</small></td>`).join("")}</tr>`;
   h += `<tr><th class="olh">Chance of a burn window<small>guidance members</small></th>${O.days.map(d => `<td title="The share of the guidance members with ${c.minH} or more hours in a row meeting every hourly criterion">${d.chance == null ? "–" : d.chance + "%"}</td>`).join("")}</tr>`;
-  for (const [k, lab, f, fields] of OL_ROWS){
+  const hh = olHourly(O.s.id);
+  for (const [k, lab, f, fields, ek] of OL_ROWS){
     if (k === "kbdi" && !O.kb) continue;
+    const E = ek ? OL_EDIT[ek] : null;
     const wl = ["s20","g20","tw"].includes(k) ? ` (${wuLabel()})` : "";
-    h += `<tr><th class="olh">${hesc(lab)}${wl}</th>${O.days.map(d => { const st = olCellStatus(d, fields), sp2 = d.spread[k]; const tip = sp2 ? `Across the models: ${k === "rh" ? "lowest" : "highest"} ${olRange(sp2, k === "vpd" ? v => v.toFixed(1) : ["s20","tw"].includes(k) ? v => String(olW(v)) : Math.round)}` : ""; return `<td class="${st == null ? "" : OL_CLS[st]}"${tip ? ` title="${hesc(tip)}"` : ""}>${hesc(f(d))}${k === "kbdi" && d.el.kbdi ? `<small>${d.el.kbdi.obs ? (O.kb.start.src === "entered" ? "entered" : "FFS") : "forecast"}</small>` : ""}</td>`; }).join("")}</tr>`;
+    h += `<tr><th class="olh">${hesc(lab)}${wl}</th>${O.days.map(d => { const st = olCellStatus(d, fields), sp2 = d.spread[k]; const tip = sp2 ? `Across the models: ${k === "rh" ? "lowest" : "highest"} ${olRange(sp2, k === "vpd" ? v => v.toFixed(1) : ["s20","tw"].includes(k) ? v => String(olW(v)) : Math.round)}` : ""; const j = O.days.indexOf(d), edd = E && olIsEdited(hh, d, E), tip2 = E ? `${tip ? tip + ". " : ""}Click to edit the ${E.lab}${edd ? " (edited)" : ""}` : tip; return `<td class="${st == null ? "" : OL_CLS[st]}${E ? " oe" : ""}${edd ? " oed" : ""}"${E ? ` data-oe="${ek}" data-j="${j}"` : ""}${tip2 ? ` title="${hesc(tip2)}"` : ""}>${hesc(f(d))}${k === "kbdi" && d.el.kbdi ? `<small>${d.el.kbdi.obs ? (O.kb.start.src === "entered" ? "entered" : "FFS") : "forecast"}</small>` : ""}</td>`; }).join("")}</tr>`;
   }
   h += `</tbody></table>`;
   $("olTable").innerHTML = h;
@@ -4196,7 +4287,7 @@ function renderOutlook(){
   $("olSub").textContent = `${prefs.exp.op || O.s.name} · ${O.s.lat.toFixed(4)}, ${O.s.lon.toFixed(4)} · windows ${olWinText()} · times ${z ? "UTC" : tzAbbr(Date.now())}${O.cons.length ? "" : " · no prescription set"}`;
 }
 let olT = null;
-const olLater = () => { clearTimeout(olT); olT = setTimeout(() => { if (BURN && burnView() === "outlook") renderOutlook(); }, 150); };
+const olLater = () => { clearTimeout(olT); olT = setTimeout(() => { if (BURN && burnView() === "outlook" && !document.querySelector("#olTable input.oein")) renderOutlook(); }, 150); };
 function setBurnView(v){
   prefs.bv = v; savePrefs();
   try { history.replaceState(null, "", location.pathname + location.search + (v === "outlook" ? "#outlook" : "#day")); } catch (e) { /* ignore */ }
@@ -4218,7 +4309,7 @@ function bindOutlook(){
     </div>
     <div class="olspot" id="olSpot"></div>
     <div class="olwrap" id="olTable"></div>
-    <p class="mut ollegend"><span class="olk go"></span> in prescription <span class="olk warn"></span> caution <span class="olk bad"></span> out of prescription, for the minimum run of hours. Ranges are the lowest and highest values inside the window; hover a value for the spread across the models. Set caution values on each criterion of the prescription. Chance of rain and KBDI are checked in the outlook only.</p>
+    <p class="mut ollegend"><span class="olk go"></span> in prescription <span class="olk warn"></span> caution <span class="olk bad"></span> out of prescription, for the minimum run of hours. Ranges are the lowest and highest values inside the window; hover a value for the spread across the models. Click a value to edit it: the window's hours move to match and show in the burn day view too (outlined cells are edited; Ctrl+Z undoes). Set caution values on each criterion of the prescription. Chance of rain and KBDI are checked in the outlook only.</p>
     <label class="col"><b>Discussion</b> <span class="mut">written from the outlook; edit it as you like</span><textarea id="olDisc" rows="3"></textarea></label><button type="button" class="btn ghost" id="olDiscReset" hidden>Rewrite from the outlook</button>
   </section>`);
   const timeRow = $("expStart") && $("expStart").closest(".esrow"); if (timeRow) timeRow.classList.add("daywin");
@@ -4226,6 +4317,18 @@ function bindOutlook(){
   const num = (id, key, lo, hi) => $(id).onchange = e => { const v = e.target.value === "" ? "" : Math.max(lo, Math.min(hi, +e.target.value)); if (v !== "" && !isFinite(v)) return; prefs.exp.ol = { ...olCfg(), [key]: v === "" && key !== "kbdi" ? OL_DEF[key] : v }; savePrefs(); OLC = null; renderOutlook(); };
   num("olA", "wA", -3, 8); num("olB", "wB", -3, 8); num("olN", "minH", 1, 12); num("olK", "kbdi", 0, 800); num("olR", "annRain", 10, 90);
   $("olTable").onclick = ev => {
+    const cell = ev.target.closest("td[data-oe]");
+    if (cell && !cell.querySelector("input")){
+      const O = burnOutlook(), h = O && olHourly(O.s.id), d = O && O.days[+cell.dataset.j], E = OL_EDIT[cell.dataset.oe]; if (!d || !E) return;
+      const cur = olCurrent(h, d, E), shown = cur == null ? "" : E.step >= 1 ? Math.round(cur) : cur.toFixed(2);
+      cell.innerHTML = `<input class="oein" type="number" step="${E.wind ? 1 : E.step}" value="${shown}" aria-label="${hesc(E.lab)}"><small>${hesc(E.lab.replace(/ \(.*\)$/, ""))}${E.wind ? " (" + wuLabel() + ")" : ""}; blank for guidance</small>`;
+      const inp = cell.querySelector("input"); inp.focus(); inp.select();
+      let done = false;
+      const finish = ok => { if (done) return; done = true; if (ok && inp.value !== shown) olApplyEdit(+cell.dataset.j, cell.dataset.oe, inp.value); else renderOutlook(); };
+      inp.onkeydown = e2 => { if (e2.key === "Enter"){ e2.preventDefault(); finish(true); } else if (e2.key === "Escape"){ e2.preventDefault(); finish(false); } };
+      inp.onblur = () => finish(true);
+      return;
+    }
     const b = ev.target.closest("[data-plan]"); if (!b) return;
     const O = burnOutlook(); const d = O && O.days[+b.dataset.plan]; if (!d) return;
     prefs.exp.start = Math.floor(d.w.A/H)*H; prefs.exp.end = Math.ceil(d.w.b/H)*H; prefs.bv = "day";

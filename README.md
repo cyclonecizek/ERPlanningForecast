@@ -43,6 +43,13 @@ Fire Weather Forecast, as before. **Plan this day** on an outlook column sets th
   (3 by default), yellow when it holds or stays in caution that long; the day's status does the same with every
   criterion together. **Use the example prescription** loads the Cape example (RH, VPD, temperature, 20 ft winds,
   mixing height, transport wind, ventilation, LDSI, LVORI, chance of rain, KBDI).
+- **Editing**: click any outlook value marked editable (temperature, RH, 20 ft wind and peak, mixing height,
+  transport wind, LDSI, LVORI, chance of rain, the day's rain, KBDI) and type the window's highest (or lowest RH);
+  the hours in that window move to match (by the difference for temperature, RH, LVORI and rain chance, in
+  proportion for winds, mixing height and LDSI; rain scales over the day) and are saved as ordinary edits, so the
+  burn day view and the Fire Weather Forecast show them and Ctrl+Z undoes them. A blank returns the window to
+  guidance. A KBDI typed for a day restarts the KBDI chain from it. Edits made on any burn day stay in the outlook
+  after you plan a different day. Edited cells are outlined.
 - **Chance of a burn window**: the share of the guidance members (weighted like the blend) with the minimum run of
   hours meeting every hourly criterion. Chance of rain and KBDI are checked in the outlook only.
 - **New criteria**: vapor pressure deficit (also a row in the burn day table, following temperature and dew point
