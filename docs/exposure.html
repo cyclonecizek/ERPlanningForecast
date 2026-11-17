@@ -91,7 +91,8 @@ a.btn{ text-decoration:none; color:var(--ink); display:inline-block; }
 main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .matrix:focus{ outline:none; }
 .pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
-.pagenav{ align-items:center; }
+.pagenav{ align-items:center; flex-wrap:wrap; }
+.pagenav a{ white-space:nowrap; }
 .pagenav .navsp{ flex:1; }
 .pagenav a.offl{ font:500 13px var(--font); border-bottom:0; margin-right:10px; }
 .pagenav .theme{ margin:0 0 4px; }
@@ -540,7 +541,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </dialog>
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "exposure";</script>
-<script src="guidance.js?v=0bebdc243a"></script>
-<script src="planning-app.js?v=5e720a5b80"></script>
+<script src="guidance.js?v=6e1e7193fe"></script>
+<script src="planning-app.js?v=a1aa16fa70"></script>
 </body>
 </html>

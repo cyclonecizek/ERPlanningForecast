@@ -63,6 +63,8 @@ function burnFollow(o, g, rows, ed, sid){
     /* RH from edited temperature or dew point */
     if (o.rh && ed("rh", r) === undefined && (ed("t", r) !== undefined || ed("td", r) !== undefined) && o.t[i] != null && o.td[i] != null && g.t[i] != null && g.td[i] != null && g.rh[i] != null)
       o.rh[i] = Math.max(1, Math.min(100, Math.round(g.rh[i] + rhFrom(o.t[i], o.td[i]) - rhFrom(g.t[i], g.td[i]))));
+    if (o.vpd && ed("vpd", r) === undefined && (ed("t", r) !== undefined || ed("td", r) !== undefined) && o.t[i] != null && o.td[i] != null && g.t[i] != null && g.td[i] != null && g.vpd[i] != null)
+      o.vpd[i] = Math.max(0, Math.round((g.vpd[i] + vpdFrom(o.t[i], o.td[i]) - vpdFrom(g.t[i], g.td[i]))*10)/10);
     /* LDSI from edited inputs */
     const inEd = ["sky","s20","tw","mixh"].some(k => ed(k, r) !== undefined);
     if (o.di && ed("di", r) === undefined && inEd && ["sky","s20","tw","mixh"].every(k => o[k] && o[k][i] != null && g[k] && g[k][i] != null)){
@@ -88,13 +90,26 @@ const RXF = {
   di:    { l:"Dispersion index (LDSI)", short:"LDSI", unit:"", key:"di" },
   lvori: { l:"LVORI", short:"LVORI", unit:"", key:"lvori" },
   invh:  { l:"Inversion base", short:"Inversion", unit:"ft", key:"invh" },
+  vpd:   { l:"Vapor pressure deficit", short:"VPD", unit:"kPa", key:"vpd", step:0.1 },
+  vr:    { l:"Ventilation rate", short:"Ventilation", unit:"m²/s", key:"vr", step:500 },
+  /* checked in the 7-day outlook only: no member value for the burn day's chances */
+  pop:   { l:"Chance of rain (hourly)", short:"Rain chance", unit:"%", key:"pp1", outlook:true },
+  kbdi:  { l:"KBDI (Keetch-Byram)", short:"KBDI", unit:"", key:"kbdi", outlook:true, daily:true, step:10 },
 };
+/* the criteria the burn day can turn into chances (every member has a value) */
+const dayRx = cons => (cons || []).filter(c => RXF[c.f] && !RXF[c.f].outlook);
 function burnDefaults(){
   const d = new Date(), st = capeToUTC(d.getFullYear(), d.getMonth() + 1, d.getDate() + 1, 8, 0);
   return { op:"", start:st, end:st + 10*H, hourly:"all", custom:{ name:"Burn unit", lat:28.66, lon:-80.70 },
     /* an example prescription: replace with the burn plan's own limits */
-    constraints:[ { id:"r1", type:"rx", f:"rh", op:">=", v:30 }, { id:"r2", type:"rx", f:"rh", op:"<=", v:55 }, { id:"r3", type:"rx", f:"s20", op:">=", v:4, unit:"mph" }, { id:"r4", type:"rx", f:"s20", op:"<=", v:15, unit:"mph" },
-      { id:"r5", type:"rx", f:"mixh", op:">=", v:1700 }, { id:"r6", type:"rx", f:"tw", op:">=", v:9, unit:"mph" }, { id:"r7", type:"rx", f:"di", op:">=", v:21 }, { id:"r8", type:"rx", f:"lvori", op:"<=", v:4 } ] };
+    constraints: burnExample(), ol:{ wA:0, wB:0, minH:3, kbdi:"", annRain:50 } };
+}
+/* an example prescription for the Cape (from the Burn planning forecast): each criterion's value is the
+   edge of "in prescription" and y the edge of "caution" (yellow); beyond it is out (red) */
+function burnExample(){
+  return [ ["rh",">=",30,25], ["rh","<=",54,64], ["vpd",">=",0.6,0.4], ["vpd","<=",2.0,2.5], ["t","<=",85,92], ["s20",">=",4,2,"mph"], ["s20","<=",12,15,"mph"], ["g20","<=",18,25,"mph"],
+    ["mixh",">=",1700,1000], ["tw",">=",10,5,"mph"], ["tw","<=",20,25,"mph"], ["vr",">=",6000,3000], ["di",">=",41,21], ["lvori","<=",4,6], ["pop","<=",20,40], ["kbdi","<=",400,550] ]
+    .map(([f, op, v, y, unit], k) => ({ id:"r" + (k + 1), type:"rx", f, op, v, y, ...(unit ? { unit } : {}) }));
 }
 function persDefaults(){
   const st = Math.ceil(Date.now()/H)*H;
@@ -119,7 +134,7 @@ const fmtNum = v => (Math.round(v*10)/10).toString();
 const opText = op => ({ ">":">", ">=":"≥", "<":"<", "<=":"≤" })[op] || op;
 function rxValueText(c){ const f = RXF[c.f] || {}; if (f.sector) return `${Math.round(+c.v)}–${Math.round(+c.v2)}°`; return `${fmtNum(+c.v)}${f.wind ? " " + (c.unit || "mph") : f.unit === "%" ? "%" : f.unit === "°F" ? "°F" : f.unit ? " " + f.unit : ""}`; }
 function rxParams(exp){
-  const list = (exp.constraints || []).filter(c => RXF[c.f]).map(c => {
+  const list = dayRx(exp.constraints).map(c => {
     const f = RXF[c.f], vNum = f.wind ? (+c.v || 0)*(WIND_UNITS[c.unit || "mph"] || 1) : +c.v;
     const title = f.sector ? `${f.l} from ${rxValueText(c)}` : `${f.l} ${opText(c.op)} ${rxValueText(c)}`;
     const base = { k:"x" + c.id, g:"Prescription (%)", l: f.sector ? rxValueText(c) : `${opText(c.op)}${rxValueText(c)}`, s:f.short, chip:`${f.short} ${f.sector ? rxValueText(c) : opText(c.op) + rxValueText(c)}`, kind:"prob", title, csv:`p_${c.f}_${f.sector ? "from" + Math.round(+c.v) + "to" + Math.round(+c.v2) : (c.op === ">=" || c.op === ">" ? "ge" : "le") + fmtNum(+c.v)}_pct`, cons:c };
@@ -196,6 +211,7 @@ function applyBurnConfig(exp){
   const thrOf = key => rx.filter(p => p.dep && p.dep[0] === key && typeof p.v === "number").map(p => Math.round(p.v));
   const list = [...["sky","t","td"].map(base),
     { k:"rh", g:"Temperature (°F)", l:"RH", s:"%", kind:"num", unit:"%", step:1, lo:1, hi:100, title:"Relative humidity", csv:"rh_pct" },
+    { k:"vpd", g:"Temperature (°F)", l:"VPD", s:"kPa", kind:"num", unit:"kPa", step:0.1, lo:0, title:"Vapor pressure deficit (kPa) from temperature and dew point", thr:[], csv:"vpd_kpa" },
     ...["pp1","pp3","pp6","lt1","lt3","lt6"].map(base),
     { k:"s20", g:"Winds (kt)", l:"20 ft", s:"sust", kind:"num", unit:"kt", step:1, lo:0, title:"20 ft sustained wind", thr:thrOf("s20"), csv:"wind20ft_sust_kt" },
     { k:"g20", g:"Winds (kt)", l:"20 ft", s:"peak", kind:"num", unit:"kt", step:1, lo:0, title:"20 ft peak wind", thr:thrOf("g20"), peakOf:"s20", csv:"wind20ft_peak_kt" },
@@ -292,6 +308,7 @@ function guidanceFor(sid){
       if (p.kind === "sev") return v || "-";
       /* amounts keep two decimals (a trace under 0.005 in shows as 0) */
       if (p.unit === "in") return v == null ? null : Math.round(v*100)/100;
+      if (p.unit === "kPa") return v == null ? null : Math.round(v*10)/10;
       return rnd(v);
     });
   }
@@ -657,11 +674,11 @@ function renderExpSetup(){
   if (!$("expCustom").contains(el)){ $("cuName").value = e.custom.name || ""; $("cuLat").value = e.custom.lat; $("cuLon").value = e.custom.lon; }
   const sel = (id, opts, v) => `<select data-f="${id}">${opts.map(([val, lab]) => `<option value="${val}" ${String(val) === String(v) ? "selected" : ""}>${lab}</option>`).join("")}</select>`;
   if (BURN){
-    const fields = Object.entries(RXF).map(([k, f]) => [k, f.l]);
+    const fields = Object.entries(RXF).map(([k, f]) => [k, f.l + (f.outlook ? " (outlook only)" : "")]);
     $("expCons").innerHTML = e.constraints.filter(c => RXF[c.f]).length ? e.constraints.filter(c => RXF[c.f]).map(c => {
       const f = RXF[c.f];
       const val = f.sector ? `<label>from <input data-f="v" type="number" min="0" max="360" step="5" value="${c.v ?? 0}">°</label><label>to <input data-f="v2" type="number" min="0" max="360" step="5" value="${c.v2 ?? 90}">°</label><span class="mut">clockwise</span>`
-        : `${sel("op", [[">=","at least"],["<=","at most"]], c.op)}<input data-f="v" type="number" step="${c.f === "mixh" ? 100 : 1}" value="${c.v}">${f.wind ? sel("unit", [["mph","mph"],["kt","kt"]], c.unit || "mph") : `<span class="mut">${f.unit || ""}</span>`}`;
+        : `${sel("op", [[">=","at least"],["<=","at most"]], c.op)}<input data-f="v" type="number" step="${f.step || (c.f === "mixh" ? 100 : 1)}" value="${c.v}">${f.wind ? sel("unit", [["mph","mph"],["kt","kt"]], c.unit || "mph") : `<span class="mut">${f.unit || ""}</span>`}<label class="caut" title="Caution (yellow in the outlook) until this value; beyond it is out of prescription. Leave blank for in or out only.">caution to <input data-f="y" type="number" step="${f.step || (c.f === "mixh" ? 100 : 1)}" value="${c.y ?? ""}" placeholder="none"></label>`;
       return `<div class="con" data-id="${c.id}">${sel("f", fields, c.f)}${val}<button type="button" class="x" data-del="${c.id}" aria-label="Remove">×</button></div>`;
     }).join("") : `<p class="mut">No prescription yet. Add the burn plan's limits (humidity, winds, mixing height, transport wind, dispersion) to get the chance each one, and all together, is met.</p>`;
     return;
@@ -1098,8 +1115,8 @@ function bindExp(){
   $("expCons").onchange = ev => {
     const row = ev.target.closest("[data-id]"), f = ev.target.dataset.f; if (!row || !f) return;
     const c = prefs.exp.constraints.find(x => x.id === row.dataset.id); if (!c) return;
-    c[f] = ev.target.type === "number" ? +ev.target.value : ev.target.value;
-    if (BURN && f === "f"){ const d = { rh:[">=",30], t:["<=",90], s20:["<=",15], g20:["<=",20], dir:[null,0], tw:[">=",9], mixh:[">=",1700], di:[">=",21], lvori:["<=",4], invh:[">=",1000] }[c.f]; if (d){ c.op = d[0] || c.op; c.v = d[1]; if (c.f === "dir"){ c.v = 0; c.v2 = 90; } if (RXF[c.f].wind) c.unit = c.unit || "mph"; } renderExpSetup(); }
+    c[f] = ev.target.type === "number" ? (ev.target.value === "" && f === "y" ? "" : +ev.target.value) : ev.target.value;
+    if (BURN && f === "f"){ const d = { rh:[">=",30,25], t:["<=",90,95], s20:["<=",15,18], g20:["<=",20,25], dir:[null,0], tw:[">=",9,5], mixh:[">=",1700,1000], di:[">=",21,13], lvori:["<=",4,6], invh:[">=",1000,500], vpd:[">=",0.6,0.4], vr:[">=",6000,3000], pop:["<=",20,40], kbdi:["<=",400,550] }[c.f]; if (d){ c.op = d[0] || c.op; c.v = d[1]; c.y = d[2] ?? ""; if (c.f === "dir"){ c.v = 0; c.v2 = 90; } if (RXF[c.f].wind) c.unit = c.unit || "mph"; } renderExpSetup(); }
     expChanged(false);
   };
   $("expCons").onclick = ev => { const d = ev.target.closest("[data-del]"); if (!d) return; prefs.exp.constraints = prefs.exp.constraints.filter(x => x.id !== d.dataset.del); expChanged(false); };
@@ -1114,7 +1131,9 @@ function bindExp(){
     }
     $("expOpLab").textContent = "Burn unit"; $("expOp").placeholder = "e.g. KSC Unit 12, Happy Creek block";
     $("expConsTitle").textContent = "Prescription"; $("addWind").hidden = true; $("addTemp").hidden = true; $("addRx").hidden = false;
-    $("addRx").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"rx", f:"rh", op:">=", v:30 }); expChanged(false); };
+    $("addRx").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"rx", f:"rh", op:">=", v:30, y:25 }); expChanged(false); };
+    if (!$("rxExample")){ $("addRx").insertAdjacentHTML("afterend", `<button class="btn ghost" type="button" id="rxExample" title="Replace the prescription with the example for the Cape">Use the example prescription</button>`); }
+    $("rxExample").onclick = () => { if (prefs.exp.constraints.length && !confirm("Replace the prescription with the example?")) return; prefs.exp.constraints = burnExample(); expChanged(false); };
   }
   $("addWind").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"wind", h:60, kind:"peak", op:">=", v:25, unit:"kt" }); expChanged(false); };
   $("addTemp").onclick = () => { prefs.exp.constraints.push({ id:newId(), type:"temp", op:">", v:95, unit:"F" }); expChanged(false); };
@@ -1256,7 +1275,8 @@ function renderRowPick(){
   const h = new Set(prefs.hideRows || []), groups = [];
   PARAMS.forEach(p => { const g = grpLabel(p.g), last = groups[groups.length - 1]; if (last && last.g === g) last.ps.push(p); else groups.push({ g, ps:[p] }); });
   $("rowList").innerHTML = groups.map(gr => { const on = gr.ps.filter(p => !h.has(p.k)).length;
-    return `<div class="rowfam"><label class="rg"><input type="checkbox" data-rg="${hesc(gr.g)}" ${on === gr.ps.length ? "checked" : ""}> <b>${hesc(gr.g)}</b></label>${gr.ps.map(p => `<label><input type="checkbox" data-row="${p.k}" ${h.has(p.k) ? "" : "checked"}> ${hesc(p.l)}${p.s ? ` <span class="mut">${hesc(p.s)}</span>` : ""}</label>`).join("")}</div>`; }).join("");
+    return `<div class="rowfam"><label class="rg"><input type="checkbox" data-rg="${hesc(gr.g)}" ${on === gr.ps.length ? "checked" : ""}> <b>${hesc(gr.g)}</b></label>${gr.ps.map(p => `<label><input type="checkbox" data-row="${p.k}" ${h.has(p.k) ? "" : "checked"}> ${hesc(p.l)}${p.s ? ` <span class="mut">${hesc(p.s)}</span>` : ""}</label>`).join("")}</div>`; }).join("")
+    + (IS_PLANNING ? `<div class="rowfam"><label class="rg"><input type="checkbox" data-row="qpfday" ${h.has("qpfday") ? "" : "checked"}> <b>Daily rainfall range</b></label><span class="mut" style="font-size:12px">24 h percentiles, in the panel and every product</span></div>` : "");
   document.querySelectorAll("#rowList [data-rg]").forEach(x => { const gr = groups.find(g => g.g === x.dataset.rg); const on = gr.ps.filter(p => !h.has(p.k)).length; x.indeterminate = on > 0 && on < gr.ps.length; });
   const nOn = PARAMS.filter(p => !h.has(p.k)).length; $("rowSum").textContent = nOn === PARAMS.length ? "all rows" : `${nOn} of ${PARAMS.length} rows`;
 }
@@ -1452,7 +1472,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN) renderFWF(); if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); if (IS_PLANNING) renderQpfDay(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN){ renderFWF(); olLater(); } if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
@@ -1615,6 +1635,8 @@ function parseInput(p, txt){
   if (isWind(p) && wfac() !== 1) return Math.max(0, Math.round(n/wfac()*10)/10);   /* typed in the display unit, stored in knots */
   if (p.kind === "prob" && n > 0 && n < 1 && txt.includes(".")) n *= 100;
   if (p.lo != null) n = Math.max(p.lo, n); if (p.hi != null) n = Math.min(p.hi, n);
+  if (p.unit === "in") return Math.round(n*100)/100;
+  if (p.unit === "kPa") return Math.round(n*10)/10;
   return Math.round(n);
 }
 function setEdit(sid, k, key, val, group, isLinked){
@@ -2447,7 +2469,7 @@ function burnSummary(){
   const OFs = officialFor(prefs.site), o = OFs.o, ok = [];
   S.rows.forEach((r, i) => {
     let good = true;
-    for (const c of cons){
+    for (const c of dayRx(cons)){
       const f = RXF[c.f], key = f.sector ? "dir" : f.key, x = o[key] ? o[key][i] : null; if (x == null){ good = false; break; }
       const v = f.wind ? (+c.v)*(WIND_UNITS[c.unit || "mph"] || 1) : +c.v;
       const pass = f.sector ? inSector(x, +c.v, +c.v2) : c.op === ">=" ? x >= v : c.op === ">" ? x > v : c.op === "<=" ? x <= v : x < v;
@@ -2499,6 +2521,15 @@ function siteSheet(s, OFs, issued, by){
     R.push(row);
   });
   const n0 = 8, n1 = 7 + rows.length;
+  if (!EXPO && qpfShown()){
+    const q = qpfDaily(s.id, o);
+    if (q && q.days.length){
+      R.push([]);
+      R.push([{ v:`Daily rainfall range (in), 24 h ${q.startText}`, s:3 }]); merges.push(`A${R.length}:${colName(Math.min(ncol - 1, 6))}${R.length}`);
+      R.push([{ v:"Period", s:4 }, { v:"", s:4 }, { v:"", s:4 }, ...q.pcts.map(n => ({ v: pctName(n), s:4 }))]); merges.push(`A${R.length}:C${R.length}`);
+      q.days.forEach(d => { R.push([{ v:d.label, s:5 }, { v:"", s:5 }, { v:"", s:5 }, ...[d.lo, d.mid, d.hi].map(v => ({ v: qpfIn(v), s:5 }))]); merges.push(`A${R.length}:C${R.length}`); });
+    }
+  }
   merges.push(`A1:${last}1`, `A2:${last}2`, `A3:${last}3`, `A4:${last}4`);
   return { name: `${s.name} (${s.point})`.slice(0, 31), rows:R, merges, heights, freeze:{ r:7, c:3 },
     cols:[11,11,7, ...shownParams().map(p => p.kind === "sev" ? 14 : p.kind === "prob" ? 8 : 7)],
@@ -2507,6 +2538,8 @@ function siteSheet(s, OFs, issued, by){
 function csvFor(list, issued, by, internal){
   if (EXPO) return csvGeneric(list, issued, by, internal);
   const head = ["site","point","valid_start_utc","valid_end_utc","valid_start_local","period_h","sky","sky_pct","temp_f","dewpoint_f","wbgt_f","pop_1h_pct","pop_3h_pct","pop_6h_pct","qpf_in","ltg_1h_pct","ltg_3h_pct","ltg_6h_pct","wind54_sust_kt","wind54_peak_kt","wind200_sust_kt","wind200_peak_kt","wind_dir_deg","wind_dir","p_sust_gt18kt_pct","p_peak_gt25kt_pct","p_peak_gt35kt_pct","p_peak_gt50kt_pct","p_temp_gt_hot_pct","hot_threshold_f","p_temp_lt40f_pct","p_temp_lt32f_pct","p_vis_lt3mi_pct","severe","wpc_ero","issued_utc","forecaster"];
+  const QP = qpfPcts(); head.push("qpf24_period_start_utc", ...QP.map(n => `qpf24_p${n}_in`));
+  const qpfOf = Object.fromEntries(list.map(([s2, OF2]) => [s2.id, qpfDaily(s2.id, OF2.o)]));
   const q = v => { if (v === undefined || v === null) return ""; const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [head.join(",")];
   for (const [s, OFs] of list){
@@ -2514,7 +2547,8 @@ function csvFor(list, issued, by, internal){
     S.rows.forEach((r, i) => {
       const p = lp(r.a), loc = `${p.y}-${pad2(p.mo)}-${pad2(p.d)} ${pad2(p.h)}:00`;
       const n = k => o[k][i] == null ? "" : Math.round(o[k][i]);
-      lines.push([s.name, s.point, new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, o.sky[i] == null ? "" : skyCat(o.sky[i]), n("sky"), n("t"), n("td"), n("wbgt"), n("pp1"), n("pp3"), n("pp6"), o.qpf && o.qpf[i] != null ? (+o.qpf[i]).toFixed(2) : "", n("lt1"), n("lt3"), n("lt6"), n("s54"), n("g54"), n("s200"), n("g200"), n("dir"), o.dir[i] == null ? "" : compass(o.dir[i]), n("x18"), n("x25"), n("x35"), n("x50"), n("xhot"), hotOf(s), n("x40"), n("x32"), n("xvis"), o.sev[i] || "-", o.ero ? (o.ero[i] || "-") : "", new Date(issued).toISOString().slice(0,16) + "Z", by].map(q).join(","));
+      lines.push([s.name, s.point, new Date(r.a).toISOString().slice(0,16) + "Z", new Date(r.b).toISOString().slice(0,16) + "Z", loc, r.len, o.sky[i] == null ? "" : skyCat(o.sky[i]), n("sky"), n("t"), n("td"), n("wbgt"), n("pp1"), n("pp3"), n("pp6"), o.qpf && o.qpf[i] != null ? (+o.qpf[i]).toFixed(2) : "", n("lt1"), n("lt3"), n("lt6"), n("s54"), n("g54"), n("s200"), n("g200"), n("dir"), o.dir[i] == null ? "" : compass(o.dir[i]), n("x18"), n("x25"), n("x35"), n("x50"), n("xhot"), hotOf(s), n("x40"), n("x32"), n("xvis"), o.sev[i] || "-", o.ero ? (o.ero[i] || "-") : "", new Date(issued).toISOString().slice(0,16) + "Z", by,
+        ...(dq => dq ? [new Date(dq.a).toISOString().slice(0,16) + "Z", qpfIn(dq.lo), qpfIn(dq.mid), qpfIn(dq.hi)].map(v => v === "–" ? "" : v) : ["", "", "", ""])(qpfOf[s.id] && qpfOf[s.id].days.find(d => r.a >= d.A && r.a < d.b))].map(q).join(","));
     });
   }
   return lines.join("\r\n") + "\r\n";
@@ -2559,6 +2593,151 @@ function openPublish(){
   $("pubSites").onchange = qcRefresh; qcRefresh();
   dlg.showModal(); $("pubInit").focus();
 }
+/* ---------- daily rainfall range (planning forecast) ----------
+   For each 24 h period, every guidance member's rain total (from its own hourly, or 3 and 6-hourly, amounts),
+   then the weighted percentiles across the members: by default the 10th percentile, the median and the 90th
+   percentile, set under Guidance sources. Members come from the sources the precipitation blend uses, with
+   the same weights (a member counts once its source's weight is shared among that source's members), so an
+   ensemble's spread is the range. A member counts for a period only if its amounts cover at least 90% of it.
+   The range follows the forecaster: when the official rain amounts for the period add up to a different
+   total than the guidance blend's, the percentiles scale by the same ratio (or shift by the difference when
+   the guidance is nearly dry). The median is the middle member and can sit below the blend's average. */
+const QPF_PCT_DEF = [10, 50, 90];
+function qpfPcts(){
+  const v = (prefs.qpfPct || QPF_PCT_DEF).map(Number);
+  return v.length === 3 && v.every(x => Number.isInteger(x) && x >= 1 && x <= 99) && v[0] < v[1] && v[1] < v[2] ? v : QPF_PCT_DEF.slice();
+}
+const ordinal = n => { const t = n % 100; return n + (t >= 11 && t <= 13 ? "th" : ["th","st","nd","rd"][n % 10] || "th"); };
+const pctName = n => n === 50 ? "median" : `${ordinal(n)} percentile`;
+const pctShort = n => n === 50 ? "median" : ordinal(n);
+const qpfStartKey = () => ["0", "7", "12z"].includes(String(prefs.qpfStart)) ? String(prefs.qpfStart) : "0";
+const qpfStartText = () => ({ "0":"midnight to midnight local", "7":"0700 to 0700 local", "12z":"1200 to 1200 UTC" })[qpfStartKey()];
+const qpfShown = () => IS_PLANNING && !(prefs.hideRows || []).includes("qpfday");
+/* the 24 h periods from the first row to the end of the forecast; the first one may be partial (rest of today) */
+function qpfPeriods(){
+  const rows = S.rows; if (!rows || !rows.length) return [];
+  const from = rows[0].a, to = rows[rows.length - 1].b, key = qpfStartKey(), out = [];
+  let bound;
+  if (key === "12z"){ const a0 = Math.floor((from - 12*H)/(24*H))*24*H + 12*H; bound = k => a0 + k*24*H; }
+  else { const hh = +key; bound = k => localMidnight(from, k) + hh*H; }
+  let k = bound(0) <= from ? 0 : -1;
+  for (let n = 0; n < 9 && bound(k) < to; n++, k++){
+    const a = bound(k), b = bound(k + 1), A = Math.max(a, from);
+    if (b > to + H) break;                      /* the forecast ends inside it */
+    if (b - A < 3*H) continue;                  /* only an hour or two of today left */
+    out.push({ a, b, A, partial: A > a });
+  }
+  return out.slice(0, 7);
+}
+/* one member's rain total over [A, B), or null when its amounts cover less than 90% of the period */
+function memberRainTotal(m, A, B, TL){
+  if (!m.pr) return null;
+  let sum = 0, cov = 0;
+  for (let t = A + H; t <= B + 12*H; t += H){
+    const i = TL.idx(t); if (i < 0 || i >= TL.n) continue;
+    const v = m.pr[i]; if (v == null) continue;
+    const k = (m.pacc && m.pacc[i]) || 1, ov = Math.min(t, B) - Math.max(t - k*H, A);
+    if (ov <= 0) continue;
+    sum += v*ov/(k*H); cov += ov;
+  }
+  return cov >= 0.9*(B - A) ? sum : null;
+}
+/* the members' totals and weights for one period */
+function qpfMembers(G, A, B){
+  const W0 = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
+  const on = G.src.filter(s => prefs.enabled[s.def.id] !== false && W0(s) > 0);
+  const gather = list => {
+    const per = [];
+    for (const s of list){
+      const tot = []; for (const m of s.members){ const v = memberRainTotal(m, A, B, G.TL); if (v != null) tot.push([v, m.lw ?? 1]); }
+      if (tot.length) per.push([s, tot]);
+    }
+    /* the NBM family shares one weight among the sources with a value */
+    const fam = per.filter(([s]) => NBM_FAMILY.has(s.def.id)).length;
+    const vals = [], wts = [];
+    for (const [s, tot] of per){
+      const w = W0(s)*(NBM_FAMILY.has(s.def.id) && fam > 1 ? 1/fam : 1), lws = tot.reduce((x, y) => x + y[1], 0);
+      tot.forEach(([v, lw]) => { vals.push(v); wts.push(w*lw/lws); });
+    }
+    return { vals, wts, nSrc: per.length };
+  };
+  let r = gather(on.filter(s => blendAllows(prefs, "precip", s)));
+  if (r.vals.length < 5){ const all = gather(on); if (all.vals.length > r.vals.length) r = { ...all, fallback:true }; }
+  return r;
+}
+/* the range around the forecaster's total: a chance of a dry period plus a gamma distribution for the wet
+   part, the way probabilistic QPF is often built around a deterministic amount. The members give the dry
+   share and the wet amounts' spread (coefficient of variation); the forecaster's total sets the mean.
+   Raising the total makes a dry period less likely in proportion; lowering it makes it more likely. */
+function lnGamma(z){ const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5]; let x = z, y = z, t = x + 5.5; t -= (x + 0.5)*Math.log(t); let ser = 1.000000000190015; for (const cj of c) ser += cj/++y; return -t + Math.log(2.5066282746310005*ser/x); }
+function gammaP(a, x){
+  if (x <= 0) return 0;
+  if (x < a + 1){ let sum = 1/a, del = sum, ap = a; for (let n = 0; n < 300; n++){ ap++; del *= x/ap; sum += del; if (Math.abs(del) < Math.abs(sum)*1e-12) break; } return sum*Math.exp(-x + a*Math.log(x) - lnGamma(a)); }
+  let b = x + 1 - a, c = 1e300, d = 1/b, h = d;
+  for (let i = 1; i < 300; i++){ const an = -i*(i - a); b += 2; d = an*d + b; if (Math.abs(d) < 1e-300) d = 1e-300; c = b + an/c; if (Math.abs(c) < 1e-300) c = 1e-300; d = 1/d; const del = d*c; h *= del; if (Math.abs(del - 1) < 1e-12) break; }
+  return 1 - Math.exp(-x + a*Math.log(x) - lnGamma(a))*h;
+}
+function gammaQ(p, k, theta){ let lo = 0, hi = k*theta*30 + 10; for (let i = 0; i < 80; i++){ const m = (lo + hi)/2; if (gammaP(k, m/theta) < p) lo = m; else hi = m; } return (lo + hi)/2; }
+function qpfAround(vals, wts, gd, od, pcts){
+  if (od < 0.005) return pcts.map(() => 0);
+  let W = 0, Wd = 0, sw = 0, sw2 = 0, Ww = 0;
+  vals.forEach((v, i) => { const w = wts[i]; W += w; if (v < 0.01) Wd += w; else { Ww += w; sw += w*v; sw2 += w*v*v; } });
+  const p0 = W ? Wd/W : 0, mw = Ww ? sw/Ww : 0, sd = Ww ? Math.sqrt(Math.max(0, sw2/Ww - mw*mw)) : 0;
+  const cv = Ww && mw > 0 && vals.filter(v => v >= 0.01).length >= 3 ? Math.max(0.3, Math.min(1.5, sd/mw)) : 1;
+  const r = gd >= 0.01 ? od/gd : Infinity;
+  const pd = Math.min(0.95, r >= 1 ? (isFinite(r) ? p0/r : Math.min(p0, 0.3)) : p0 + (1 - p0)*(1 - r));
+  const k = 1/(cv*cv), mean = od/(1 - pd), theta = mean/k;
+  return pcts.map(pc => { const q = pc/100; return q <= pd ? 0 : gammaQ((q - pd)/(1 - pd), k, theta); });
+}
+/* the official (or guidance) rain amount over [A, B), from the forecast rows */
+function rowsRain(arr, A, B){
+  if (!arr) return null;
+  let s = 0, any = false;
+  S.rows.forEach((r, i) => { const v = arr[i]; if (v == null) return; const ov = Math.min(r.b, B) - Math.max(r.a, A); if (ov <= 0) return; s += v*ov/(r.b - r.a); any = true; });
+  return any ? s : null;
+}
+/* the daily range for one point: { pcts, start, days:[{ a, b, A, partial, label, lo, mid, hi, n, adj }] } */
+function qpfDaily(sid, o){
+  const G = S.G[sid]; if (!G || !S.rows || !S.TL) return null;
+  const pcts = qpfPcts(), g = guidanceFor(sid) || {}, z = qpfStartKey() === "12z";
+  const days = qpfPeriods().map(per => {
+    const { vals, wts, nSrc, fallback } = qpfMembers(G, per.A, per.b);
+    const L = dayLabel(per.a, z), wd = L.wd.slice(0, 3);
+    const label = per.partial ? `${wd} ${L.dt} (from ${hhmm(per.A, z)})` : `${wd} ${L.dt}`;
+    const base = { a:per.a, b:per.b, A:per.A, partial:per.partial, label, wd, dt:L.dt, n:vals.length, nSrc, fallback:!!fallback };
+    if (vals.length < 5) return { ...base, lo:null, mid:null, hi:null, adj:false };
+    let q = wquant(vals, wts, pcts.map(p => p/100));
+    if (!q) return { ...base, lo:null, mid:null, hi:null, adj:false };
+    /* follow the forecaster's rain amounts */
+    let adj = false;
+    const gd = rowsRain(g.qpf, per.A, per.b), od = rowsRain(o && o.qpf, per.A, per.b);
+    if (gd != null && od != null && Math.abs(od - gd) >= Math.max(0.02, 0.1*gd)){ adj = true; q = qpfAround(vals, wts, gd, od, pcts); }
+    const r2 = v => Math.round(Math.max(0, v)*100)/100;
+    return { ...base, lo:r2(q[0]), mid:r2(q[1]), hi:r2(q[2]), adj };
+  });
+  return { pcts, start: qpfStartKey(), startText: qpfStartText(), days };
+}
+const qpfIn = v => v == null ? "–" : v.toFixed(2);
+const qpfHead = d => `${pctShort(d.pcts[0])} / ${pctShort(d.pcts[1])} / ${pctShort(d.pcts[2])}`;
+/* the studio panel above the table */
+function renderQpfDay(){
+  const m = $("matrix"); if (!m) return;
+  let el = $("qpfDay");
+  if (!qpfShown()){ if (el) el.remove(); return; }
+  if (!el){ m.insertAdjacentHTML("beforebegin", `<section class="panel qpfday" id="qpfDay" aria-label="Daily rainfall range"></section>`); el = $("qpfDay"); }
+  const s = site(), d = qpfDaily(s.id, OF && OF.o);
+  if (!d || !d.days.length){ el.innerHTML = `<div class="qdh"><b>Daily rainfall range</b><span class="mut">waiting for guidance</span></div>`; return; }
+  const top = Math.max(0.25, ...d.days.map(x => x.hi || 0)), X = v => Math.min(100, v/top*100);
+  const anyAdj = d.days.some(x => x.adj), fb = d.days.some(x => x.fallback);
+  el.innerHTML = `<div class="qdh"><b>Daily rainfall range</b> <span class="mut">${hesc(s.name)} · 24 h ${hesc(d.startText)} · ${hesc(pctName(d.pcts[0]))}, ${hesc(pctName(d.pcts[1]))} and ${hesc(pctName(d.pcts[2]))} of the guidance members</span><span class="sp"></span><button type="button" class="lnk" id="qpfSet">Change percentiles</button></div>
+    <div class="qdgrid">${d.days.map(x => `<div class="qd${x.adj ? " adj" : ""}" title="${hesc(`${x.label}: ${pctName(d.pcts[0])} ${qpfIn(x.lo)} in, ${pctName(d.pcts[1])} ${qpfIn(x.mid)} in, ${pctName(d.pcts[2])} ${qpfIn(x.hi)} in, from ${x.n} members of ${x.nSrc} sources${x.adj ? "; adjusted to your rain amounts" : ""}${x.fallback ? "; the precipitation blend had too few members, so every selected source is used" : ""}`)}">
+      <div class="qdd">${hesc(`${x.wd} ${x.dt}`)}${x.partial ? `<small>from ${hhmm(x.A, d.start === "12z")}</small>` : ""}</div>
+      ${x.mid == null ? `<div class="qdv mut">–</div>` : `<div class="qdv"><span>${qpfIn(x.lo)}</span><b>${qpfIn(x.mid)}</b><span>${qpfIn(x.hi)}</span></div>
+      <div class="qdbar"><i style="left:${X(x.lo)}%;width:${Math.max(1.5, X(x.hi) - X(x.lo))}%"></i><em style="left:${X(x.mid)}%"></em></div>`}
+    </div>`).join("")}</div>
+    <p class="qdn mut">Inches. ${hesc(qpfHead(d))} for each period${anyAdj ? "; outlined periods follow your rain amount edits" : ""}${fb ? "; the precipitation blend had too few members on some days, so those use every selected source" : ""}. Hover a day for the member count.</p>`;
+  $("qpfSet").onclick = () => { const sp = $("sourcesPanel"); if (sp){ sp.open = true; sp.scrollIntoView({ behavior:"smooth", block:"start" }); setTimeout(() => $("qpfP1") && $("qpfP1").focus(), 400); } };
+}
 /* the public preview: day (0600-1800 local) and night periods for about three days at each point, each
    summarizing the official rows inside it: high or low, sky, the highest rain and lightning chances,
    rain total, strongest 54 ft wind and peak, and the outlooks */
@@ -2593,9 +2772,10 @@ function planningPreview(list, issued){
         s: sv.length ? Math.round(Math.max(...sv)*wf) : null, g: g.length ? Math.round(Math.max(...g)*wf) : null, dir: gi != null && o.dir && o.dir[gi] != null ? compass(o.dir[gi]) : null,
         sev: cat(vals("sev")), ero: cat(vals("ero")), hail: maxOf(vals("hailp")) || null };
     });
-    return { id:s2.id, name:s2.name, point:s2.point, cells };
+    const qd = qpfShown() ? qpfDaily(s2.id, o) : null;
+    return { id:s2.id, name:s2.name, point:s2.point, cells, qpf: qd && qd.days.length ? qd.days.map(d => ({ start: new Date(d.A).toISOString(), end: new Date(d.b).toISOString(), partial:d.partial, lo:d.lo, mid:d.mid, hi:d.hi })) : null };
   });
-  return { units: wuLabel(), tz: tzAbbr(issued), periods: ps.map(({ label, night, start, end }) => ({ label, night, start, end })), sites };
+  return { units: wuLabel(), tz: tzAbbr(issued), periods: ps.map(({ label, night, start, end }) => ({ label, night, start, end })), qpfPcts: qpfPcts(), qpfStart: qpfStartText(), sites };
 }
 /* the interactive product's data on its own (what the public viewer draws), without the logo */
 function interactiveData(list, issued, by){
@@ -2691,6 +2871,7 @@ function reportModel(list, issued, by){
       site:s, title: PERSONAL ? productName(s) : `${EXPO ? s.point : s.name} ${productName(s)}`,
       sub: PERSONAL ? `${s.name} (${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}). Issued ${iss}${by ? " by " + by : ""}. Times ${tz}.` : `Issued ${iss} by ${by}. Forecast point ${s.point} (${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}). Times ${tz}.${EXPO ? " " + constraintSummary() : ""}`,
       summary: PERSONAL ? persSummary() : null,
+      qpf: qpfShown() ? qpfDaily(s.id, o) : null,
       pages: pages.map(pg => {
         const set = new Set(pg.cols);
         const dayHdr = pg.days.map((d, j) => { const L = dayLabel(rows[d.cols[0]].a, z); const nm = d.dk === dayKey(issued, z) ? "Today" : d.dk === dayKey(issued + 24*H, z) ? "Tomorrow" : L.wd; return { label: d.cols.length >= 3 ? `${nm}, ${L.dt}` : L.dt, n:d.cols.length }; });
@@ -2742,6 +2923,11 @@ td.mut{color:#9AA6B0}.hd{display:flex;gap:14px;align-items:center;margin-bottom:
       }
       h += `</tbody></table></div>`;
     }
+    if (m.qpf && m.qpf.days.length){
+      const q = m.qpf;
+      h += `<div class="wrap"><table><thead><tr><th style="text-align:left">Daily rainfall range (in)<small>24 h ${hesc(q.startText)}</small></th>${q.days.map(d => `<th>${hesc(d.label)}</th>`).join("")}</tr></thead><tbody>`
+        + [0, 1, 2].map(j => `<tr><th class="lab">${hesc(pctName(q.pcts[j]))}</th>${q.days.map(d => `<td>${qpfIn([d.lo, d.mid, d.hi][j])}</td>`).join("")}</tr>`).join("") + `</tbody></table></div>`;
+    }
     h += `</section>`;
   }
   h += `<p class="note">${hesc(document.querySelector(".foot p").textContent)}</p></body></html>`;
@@ -2791,6 +2977,7 @@ function interactiveReport(list, issued, by, logo){
     logo: logo ? `data:image/png;base64,${logo.b64}` : null, rows,
     sites: list.map(([st, OFs]) => ({
       id:st.id, name: EXPO ? st.point : st.name, point:st.point, lat:st.lat, lon:st.lon,
+      qpf: qpfShown() ? (q => q && q.days.length ? { pcts:q.pcts, start:q.startText, days:q.days.map(d => ({ a:d.A, b:d.b, partial:d.partial, lo:d.lo, mid:d.mid, hi:d.hi })) } : null)(qpfDaily(st.id, OFs.o)) : null,
       params: shownParams().map(p => {
         const spm = spanMap(p.k);
         return { k:p.k, label: p.kind === "sev" ? (p.k === "ero" ? "WPC excessive rain" : "SPC category") : colLabel(p, st), sub:p.s || "", group:p.g, kind:p.kind, wind:isWind(p), unit:p.unit || "", thr:p.thr || [], cons:!!p.cons, limit: p.cons ? p.v : null,
@@ -2799,7 +2986,7 @@ function interactiveReport(list, issued, by, logo){
             const v = OFs.o[p.k][i];
             if (v === undefined) return [sp.s, null, "–", null];
             const txt = p.kind === "sev" ? (v === "-" ? "-" : v) : p.kind === "sky" ? skyCat(v) : p.kind === "dir" ? (v == null ? "" : compass(v)) : null;
-            return [sp.s, typeof v === "number" ? r2(v) : v, txt, tintA(p, v)];
+            return [sp.s, typeof v === "number" ? (p.unit === "in" ? Math.round(v*100)/100 : r2(v)) : v, txt, tintA(p, v)];
           }) };
       }) })),
   };
@@ -2817,7 +3004,7 @@ select,.btn{border:1px solid var(--rule);border-radius:8px;background:var(--pane
 .sp{flex:1}.lab{font-size:12px;color:var(--ink3)}
 .tabs{display:flex;gap:4px;padding:12px 22px 0;flex-wrap:wrap}.tabs button{border:1px solid var(--rule);border-bottom:0;border-radius:10px 10px 0 0;background:var(--rule2);color:var(--ink2);padding:8px 14px;font:600 14px inherit;cursor:pointer}.tabs button[aria-selected=true]{background:var(--panel);color:var(--ink)}
 main{padding:0 22px 30px}.card{background:var(--panel);border:1px solid var(--rule);border-radius:0 12px 12px 12px;padding:14px}
-.meta{color:var(--ink2);font-size:13px;margin:0 0 10px}.psum{border:1px solid var(--rule,#ddd);border-radius:10px;padding:10px 14px;margin:0 0 12px}.psum h3{margin:4px 0;font-size:14px}.psum ul{margin:2px 0 6px 18px;padding:0}.psum p{margin:2px 0 4px;line-height:1.45}.cons{background:rgba(181,134,43,.12);border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:13px}
+.meta{color:var(--ink2);font-size:13px;margin:0 0 10px}.qd{border:1px solid var(--rule);border-radius:10px;padding:8px 12px;margin:0 0 12px}.qd h3{margin:0 0 6px;font-size:14px}.qd h3 small{color:var(--ink3);font-weight:400}.qdr{display:flex;gap:8px;flex-wrap:wrap}.qdc{min-width:118px;flex:1;max-width:170px;border:1px solid var(--rule2);border-radius:8px;padding:6px 8px;text-align:center}.qdc .d{font-weight:600;font-size:12.5px}.qdc .d small{display:block;font-weight:400;color:var(--ink3);font-size:11px}.qdc .v{font-variant-numeric:tabular-nums;font-size:13px;margin-top:3px}.qdc .v b{font-size:16px;margin:0 6px}.qdc .k{font-size:10.5px;color:var(--ink3)}.psum{border:1px solid var(--rule,#ddd);border-radius:10px;padding:10px 14px;margin:0 0 12px}.psum h3{margin:4px 0;font-size:14px}.psum ul{margin:2px 0 6px 18px;padding:0}.psum p{margin:2px 0 4px;line-height:1.45}.cons{background:rgba(181,134,43,.12);border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:13px}
 .days{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .tw{overflow:auto;max-height:calc(100vh - 210px);border:1px solid var(--rule);border-radius:10px}
 table{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;font-size:12.5px}
@@ -2871,7 +3058,7 @@ function reportViewer(){
   const dl = t => (st.z === "Z" ? dayZ : dayL).format(new Date(t));
   const tzName = () => st.z === "Z" ? "UTC" : (new Intl.DateTimeFormat("en-US", { timeZone:D.tz, timeZoneName:"short" }).format(new Date(D.issued)).split(" ").pop());
   const groupName = g => g.replace("Winds (kt)", "Winds (" + st.wu + ")");
-  const valTxt = (p, c) => { if (!c || c[1] == null) return c && c[2] != null ? c[2] : ""; if (c[2] != null) return c[2]; if (p.wind) return String(Math.round(c[1]*UF[st.wu])); return String(Math.round(c[1])); };
+  const valTxt = (p, c) => { if (!c || c[1] == null) return c && c[2] != null ? c[2] : ""; if (c[2] != null) return c[2]; if (p.wind) return String(Math.round(c[1]*UF[st.wu])); if (p.unit === "in") return (+c[1]).toFixed(2); return String(Math.round(c[1])); };
   const unitOf = p => p.wind ? st.wu : p.kind === "prob" ? "%" : p.unit === "°F" || p.k === "t" || p.k === "td" || p.k === "wbgt" ? "°F" : p.unit || "";
   const bg = c => c && c[3] ? ` style="background:rgba(${c[3][0]},${c[3][1]},${c[3][2]},calc(${c[3][3].toFixed(3)} / var(--fa)))"` : "";
   const site = () => D.sites[st.site];
@@ -2946,11 +3133,18 @@ function reportViewer(){
       return `<div class="gc"><h3>${esc(title)} <small>${esc(p.sub)}${p.kind === "sky" || p.kind === "dir" ? "" : " · " + esc(unitOf(p))}</small></h3>${s}</div>`;
     }).join("") + `</div><p class="meta">${visible().some(p => p.wind && p.thr.length) ? "Red dashed lines: wind thresholds. " : ""}Hover a graph for values.</p>`;
   }
+  /* daily rainfall range: the members' spread for each 24 h period */
+  function qpfBox(s){
+    const q = s.qpf; if (!q || !q.days || !q.days.length) return "";
+    const ord = n => n === 50 ? "median" : n + ({ 1:"st", 2:"nd", 3:"rd" }[n % 10] && !(n % 100 >= 11 && n % 100 <= 13) ? { 1:"st", 2:"nd", 3:"rd" }[n % 10] : "th");
+    const f = v => v == null ? "–" : v.toFixed(2);
+    return `<div class="qd"><h3>Daily rainfall range <small>inches, 24 h ${esc(q.start)}: ${esc(ord(q.pcts[0]))} percentile, ${esc(ord(q.pcts[1]))}${q.pcts[1] === 50 ? "" : " percentile"} (bold) and ${esc(ord(q.pcts[2]))} percentile</small></h3><div class="qdr">${q.days.map(d => `<div class="qdc"><div class="d">${esc(dl(d.a))}${d.partial ? `<small>from ${hm(d.a)} ${tzName()}</small>` : ""}</div><div class="v">${f(d.lo)}<b>${f(d.mid)}</b>${f(d.hi)}</div><div class="k">${esc(ord(q.pcts[0]))} · ${esc(ord(q.pcts[1]))} · ${esc(ord(q.pcts[2]))}</div></div>`).join("")}</div></div>`;
+  }
   function render(){
     head();
     const s = site(), days = dayStarts();
     const body = st.view === "graphs" ? graphs() : `<div class="tw" id="tw">${st.orient === "down" ? tableDown() : tableAcross()}</div>`;
-    $("card").innerHTML = `<p class="meta">${esc(s.name)}${s.point && s.point !== s.name ? " (" + esc(s.point) + ")" : ""} · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} · times ${tzName()}</p>${D.constraints ? `<p class="cons">${esc(D.constraints)}</p>` : ""}${D.summary ? `<div class="psum">${(D.summary.concerns || []).length ? `<h3>Main concerns</h3><ul>${D.summary.concerns.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}${D.summary.text ? `<h3>Discussion</h3><p>${esc(D.summary.text)}</p>` : ""}</div>` : ""}${st.view === "table" ? `<div class="days">${days.map((d, j) => `<button class="btn" data-day="${j}">${esc(d.label)}</button>`).join("")}</div>` : ""}${body}`;
+    $("card").innerHTML = `<p class="meta">${esc(s.name)}${s.point && s.point !== s.name ? " (" + esc(s.point) + ")" : ""} · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)} · times ${tzName()}</p>${D.constraints ? `<p class="cons">${esc(D.constraints)}</p>` : ""}${D.summary ? `<div class="psum">${(D.summary.concerns || []).length ? `<h3>Main concerns</h3><ul>${D.summary.concerns.map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : ""}${D.summary.text ? `<h3>Discussion</h3><p>${esc(D.summary.text)}</p>` : ""}</div>` : ""}${qpfBox(s)}${st.view === "table" ? `<div class="days">${days.map((d, j) => `<button class="btn" data-day="${j}">${esc(d.label)}</button>`).join("")}</div>` : ""}${body}`;
     save();
   }
   /* hover readout */
@@ -3085,7 +3279,23 @@ function pdfReport(models, logo){
       line(M, top, xcol(ncol), top, 0.6, 0.6); line(M, top, M, y, 0.6, 0.6); line(xcol(ncol), top, xcol(ncol), y, 0.6, 0.6);
       line(M + gw, top + dh + th, M + gw, y, 0.6, 0.6); line(x0, top, x0, y, 0.45, 1);
       ci = 0; pg.dayHdr.forEach((d, j) => { if (j) line(xcol(ci), top, xcol(ci), y, 0.45, 1.2); ci += d.n; });
-      text("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less.", M, Math.min(Hp - M, y + 14), 6.5, { color:[125,139,151] });
+      if (m.qpf && m.qpf.days.length && pi === 0 && y + 64 < Hp - M){
+        const q = m.qpf, lw2 = gw + lw, nd = q.days.length, dw = Math.min(84, (W - 2*M - lw2)/nd), y0 = y + 10, hh = 11, rr = 10.5;
+        rect(M, y0, lw2 + nd*dw, hh, [244,247,247]);
+        text("Daily rainfall range (in)", M + 3, y0 + 8, 6.8, { bold:true });
+        q.days.forEach((d, j) => text(d.label, M + lw2 + j*dw + dw/2, y0 + 8, fitText(d.label, dw - 4, 6.8, true), { bold:true, align:"c" }));
+        [0, 1, 2].forEach(k => {
+          const yy = y0 + hh + k*rr;
+          text(pctName(q.pcts[k]), M + 3, yy + 7.6, 6.6, { bold: k === 1, color:[75,90,104] });
+          q.days.forEach((d, j) => text(qpfIn([d.lo, d.mid, d.hi][k]), M + lw2 + j*dw + dw/2, yy + 7.6, 7, { align:"c", bold: k === 1 }));
+          line(M, yy + rr, M + lw2 + nd*dw, yy + rr, 0.86, 0.4);
+        });
+        const y1 = y0 + hh + 3*rr;
+        line(M, y0, M + lw2 + nd*dw, y0, 0.6, 0.6); line(M, y0, M, y1, 0.6, 0.6); line(M + lw2 + nd*dw, y0, M + lw2 + nd*dw, y1, 0.6, 0.6); line(M, y1, M + lw2 + nd*dw, y1, 0.6, 0.6);
+        for (let j = 0; j <= nd; j++) line(M + lw2 + j*dw, y0, M + lw2 + j*dw, y1, 0.75, 0.4);
+        y = y1;
+      }
+      text("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less." + (m.qpf && m.qpf.days.length && pi === 0 ? ` Daily rainfall: 24 h totals ${m.qpf.startText}, the spread of the guidance members around the official forecast.` : ""), M, Math.min(Hp - M, y + 14), fitText("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less." + (m.qpf && m.qpf.days.length && pi === 0 ? ` Daily rainfall: 24 h totals ${m.qpf.startText}, the spread of the guidance members around the official forecast.` : ""), W - 2*M, 6.5, false), { color:[125,139,151] });
       pages.push(cs.join("\n"));
     });
   }
@@ -3581,6 +3791,19 @@ function bind(){
   $("linkWin").checked = prefs.linkWin !== false; $("linkWin").onchange = e => { prefs.linkWin = e.target.checked; savePrefs(); renderAll(); };
   $("clampProbs").checked = prefs.clamp; $("clampProbs").onchange = e => { prefs.clamp = e.target.checked; savePrefs(); renderAll(); };
   $("hotThr").onchange = e => { const v = parseFloat(e.target.value); if (isFinite(v)){ prefs.hot[prefs.site] = v; savePrefs(); renderAll(); } };
+  /* daily rainfall range: which percentiles, and when the 24 h day starts */
+  if ($("qpfP1")){
+    const showQ = () => { const q = qpfPcts(); ["qpfP1","qpfP2","qpfP3"].forEach((id, j) => $(id).value = q[j]); $("qpfStart").value = qpfStartKey(); };
+    showQ();
+    const setQ = () => {
+      const v = ["qpfP1","qpfP2","qpfP3"].map(id => Math.round(+$(id).value));
+      if (!(v.every(x => x >= 1 && x <= 99) && v[0] < v[1] && v[1] < v[2])){ toast("Percentiles must be whole numbers from 1 to 99, low to high"); showQ(); return; }
+      prefs.qpfPct = v; savePrefs(); renderAll();
+    };
+    ["qpfP1","qpfP2","qpfP3"].forEach(id => $(id).onchange = setQ);
+    $("qpfStart").onchange = e => { prefs.qpfStart = e.target.value; savePrefs(); renderAll(); };
+    $("qpfReset").onclick = () => { delete prefs.qpfPct; delete prefs.qpfStart; savePrefs(); showQ(); renderAll(); };
+  }
   if (EXPO) document.querySelectorAll('.pagenav a[data-page="verify"]').forEach(a => { a.href = "verify.html#exposure"; a.addEventListener("click", () => { try { localStorage.setItem("erwx:verifyMode", "exposure"); } catch (e) { /* ignore */ } }); });
   const lb = document.getElementById("linkBar");
   if (lb){
@@ -3681,9 +3904,403 @@ function bind(){
   });
   bindChart();
 }
+/* ============================================================
+   Burn forecasts, 7-day outlook view (from the Burn planning forecast, built on this page's engine)
+   ============================================================
+   Each day's burn window (sunrise and sunset at the point, plus offsets) for seven days, from the same
+   blended guidance as the burn day view: every source, the automatic and forecaster weights, and the
+   forecaster's edits for the hours the burn day covers. The prescription is the page's own list; each
+   criterion can carry a caution value, which gives green (in prescription), yellow (caution) and red
+   (out). A criterion's cell is green when it holds for the minimum run of hours in a row, yellow when it
+   holds or stays in caution that long, otherwise red; the day's status does the same with every criterion
+   together, and KBDI (a daily check) can only make it worse. The chance of a burn window is the share of
+   the guidance members (weighted like the blend) with that many hours in a row meeting every criterion.
+   Chance of rain and KBDI are checked here only: they have no member value for the burn day's chances. */
+const OL_DEF = { wA:0, wB:0, minH:3, kbdi:"", annRain:50 };
+const olCfg = () => (prefs.exp.ol = Object.assign({}, OL_DEF, prefs.exp.ol || {}));
+const burnView = () => prefs.bv === "day" ? "day" : "outlook";
+/* sunrise and sunset (the sunrise equation, solar depression 0.833°) for the local date of t */
+function sunRiseSet(t, lat, lon){
+  const p = lp(t), rad = Math.PI/180;
+  const jd = Date.UTC(p.y, p.mo - 1, p.d, 12)/86400e3 + 2440587.5;
+  const n = Math.round(jd - 2451545.0 + 0.0008), Js = n - lon/360;
+  const M = (357.5291 + 0.98560028*Js) % 360, C = 1.9148*Math.sin(M*rad) + 0.02*Math.sin(2*M*rad) + 0.0003*Math.sin(3*M*rad);
+  const lam = (M + C + 180 + 102.9372) % 360, Jt = 2451545.0 + Js + 0.0053*Math.sin(M*rad) - 0.0069*Math.sin(2*lam*rad);
+  const dec = Math.asin(Math.sin(lam*rad)*Math.sin(23.4397*rad));
+  const cw = (Math.sin(-0.833*rad) - Math.sin(lat*rad)*Math.sin(dec))/(Math.cos(lat*rad)*Math.cos(dec)), w = Math.acos(Math.max(-1, Math.min(1, cw)))/rad;
+  const ms = J => Math.round((J - 2440587.5)*86400e3);
+  return { rise: ms(Jt - w/360), set: ms(Jt + w/360) };
+}
+/* the burn windows: today (if its window is still open) and the next days, up to seven */
+function olWindows(s){
+  const c = olCfg(), now = Date.now(), out = [], last = S.TL ? S.TL.t0 + (S.TL.n - 2)*H : now + 7*24*H;
+  for (let k = 0; k < 9 && out.length < 7; k++){
+    const day = localMidnight(now, k) + 12*H, sr = sunRiseSet(day, s.lat, s.lon);
+    const a = sr.rise + (+c.wA || 0)*H, b = sr.set - (+c.wB || 0)*H;
+    if (b <= a || b - Math.max(a, Math.ceil(now/H)*H) < Math.max(2, +c.minH || 3)*H || b > last) continue;   /* today counts while a full run of hours is left */
+    out.push({ day, a, b, A: Math.max(a, Math.ceil(now/H)*H), rise: sr.rise, set: sr.set, partial: a < now });
+  }
+  return out;
+}
+/* criterion test for one value: 0 green, 1 caution, 2 out, null unknown */
+function rxLevel(c, x){
+  if (x == null || !isFinite(x)) return null;
+  const f = RXF[c.f]; if (!f) return null;
+  if (f.sector) return inSector(x, +c.v, +c.v2) ? 0 : 2;
+  const k = f.wind ? (WIND_UNITS[c.unit || "mph"] || 1) : 1, v = (+c.v)*k, y = c.y === "" || c.y == null || !isFinite(+c.y) ? null : (+c.y)*k;
+  const ge = c.op === ">=" || c.op === ">";
+  if (ge ? x >= v : x <= v) return 0;
+  if (y != null && (ge ? x >= y : x <= y)) return 1;
+  return 2;
+}
+/* the best level held for `n` hours in a row (or the whole window when it's shorter) */
+function runLevel(levels, n){
+  const L = levels.filter(v => v != null); if (!L.length) return null;
+  const need = Math.min(n, L.length);
+  for (const lim of [0, 1]){ let run = 0; for (const v of levels){ run = v != null && v <= lim ? run + 1 : 0; if (run >= need) return lim; } }
+  return 2;
+}
+const OL_KEYS = ["sky","t","td","rh","vpd","s20","g20","dir","mixh","tw","tdir","vr","di","lvori","pp1","qpf"];
+let OLC = null;   /* cache: { key, res } */
+function olHourly(sid){
+  const s = SITES.find(x => x.id === sid), raw = S.raw && S.raw[sid];
+  if (!s || !raw || !raw.length || !S.TL) return null;
+  const wins = olWindows(s); if (!wins.length) return null;
+  const from = Math.floor(Date.now()/H)*H, to = Math.ceil(wins[wins.length - 1].b/H)*H;
+  const key = JSON.stringify([sid, S.fetchedAt, raw.length, prefs.enabled, prefs.weight, prefs.grpSrc, prefs.autoW, prefs.exp.constraints, prefs.exp.ol, edits[sid] || {}, from]);
+  if (OLC && OLC.key === key) return OLC.res;
+  const rows = buildRowsRange(from, to, Infinity), G = new SiteGuidance(s, S.TL, rows);
+  for (const [d, members, extra] of raw) G.addSource(d, members, extra);
+  const A = aggregate(G, prefs);
+  /* the forecaster's edits for the hours the burn day covers */
+  let OFs = null; try { OFs = S.G[sid] && S.rows ? officialFor(sid) : null; } catch (e) { OFs = null; }
+  const offAt = {}; if (OFs) S.rows.forEach((r, i) => { if (r.len === 1) offAt[r.a] = i; });
+  const ed = edits[sid] || {};
+  const val = {}, edited = new Set();
+  for (const k of OL_KEYS){
+    val[k] = rows.map((r, i) => {
+      let v = A.val[k] ? A.val[k][i] : null;
+      const oi = offAt[r.a];
+      if (oi != null && OFs.o[k] && OFs.o[k][oi] != null){
+        const ov = OFs.o[k][oi];
+        if (v == null || Math.abs(ov - v) > (k === "vpd" ? 0.05 : k === "qpf" ? 0.005 : 0.5)){ v = ov; if (ed[k] && ed[k][S.rows[oi].key] !== undefined) edited.add(r.a); }
+      }
+      return v;
+    });
+  }
+  const res = { s, rows, G, A, val, wins, edited };
+  OLC = { key, res };
+  return res;
+}
+/* the outlook for the current point */
+function burnOutlook(){
+  const s = site(), h = olHourly(s.id); if (!h) return null;
+  const c = olCfg(), cons = (prefs.exp.constraints || []).filter(x => RXF[x.f]), hourCons = cons.filter(x => !RXF[x.f].daily);
+  const idxOf = {}; h.rows.forEach((r, i) => idxOf[r.a] = i);
+  const kb = olKBDI(h);
+  const days = h.wins.map(w => {
+    /* hours whose middle falls inside the window */
+    const hrs = []; for (let t = Math.floor(w.A/H)*H; t < w.b; t += H) if (t + H/2 >= w.A && t + H/2 < w.b && idxOf[t] != null) hrs.push(idxOf[t]);
+    const valAt = (k, i) => h.val[k] ? h.val[k][i] : null;
+    const critX = (cc, i) => { const f = RXF[cc.f]; return f.sector ? valAt("dir", i) : cc.f === "pop" ? valAt("pp1", i) : valAt(f.key, i); };
+    const perCrit = hourCons.map(cc => { const lv = hrs.map(i => rxLevel(cc, critX(cc, i))); return { c:cc, levels:lv, status: runLevel(lv, c.minH) }; });
+    const hourAll = hrs.map((i, k) => { const ls = perCrit.map(p => p.levels[k]); return ls.some(v => v == null) ? null : ls.length ? Math.max(...ls) : 0; });
+    const dk = dayKey(w.day, false), kd = kb && kb.days[dk];
+    const kStat = cons.filter(x => RXF[x.f].daily).map(cc => ({ c:cc, status: kd ? rxLevel(cc, kd.v) : null }));
+    let status = cons.length ? runLevel(hourAll, c.minH) : null;
+    for (const k of kStat) if (k.status != null && status != null) status = Math.max(status, k.status);
+    /* the best run of hours fully in prescription */
+    let best = null, run = null;
+    hrs.forEach((i, k) => { if (hourAll[k] === 0){ if (!run) run = { a:h.rows[i].a, b:h.rows[i].b, n:1 }; else { run.b = h.rows[i].b; run.n++; } if (!best || run.n > best.n) best = { ...run }; } else run = null; });
+    const inRx = hourAll.filter(v => v === 0).length;
+    const stat = (k, how) => { const v = hrs.map(i => valAt(k, i)).filter(x => x != null); if (!v.length) return null; return how === "min" ? Math.min(...v) : how === "max" ? Math.max(...v) : v.reduce((a, b) => a + b, 0)/v.length; };
+    const range = k => { const lo = stat(k, "min"), hi = stat(k, "max"); return lo == null ? null : [lo, hi]; };
+    /* the model spread of each element's window extremes (for the tooltips) */
+    const spread = (k, how) => { const sv = h.A.srcv[k] || {}, per = []; for (const id in sv){ const v = hrs.map(i => sv[id][i]).filter(x => x != null); if (v.length) per.push(how === "min" ? Math.min(...v) : Math.max(...v)); } return per.length >= 2 ? [Math.min(...per), Math.max(...per)] : null; };
+    const dirMean = k => { let u = 0, v = 0, n = 0; for (const i of hrs){ const d = valAt(k, i); if (d == null) continue; u += Math.sin(d*Math.PI/180); v += Math.cos(d*Math.PI/180); n++; } return n ? (Math.atan2(u, v)*180/Math.PI + 360) % 360 : null; };
+    /* rain over the local day (for KBDI and the table) */
+    const d0 = localMidnight(w.day, 0), d1 = localMidnight(w.day, 1);
+    let rain = 0, rn = 0; h.rows.forEach((r, i) => { if (r.a >= d0 && r.a < d1 && h.val.qpf[i] != null){ rain += h.val.qpf[i]; rn++; } });
+    return { w, hrs, perCrit, kStat, status, best, inRx, n: hrs.length, chance: olChance(h, hrs, c.minH), edited: hrs.some(i => h.edited.has(h.rows[i].a)),
+      el: { sky: stat("sky", "mean"), t: range("t"), rh: range("rh"), vpd: range("vpd"), s20: range("s20"), g20: stat("g20", "max"), dir: dirMean("dir"), mixh: range("mixh"), tw: range("tw"), tdir: dirMean("tdir"), vr: range("vr"), di: range("di"), lvori: stat("lvori", "max"), pop: stat("pp1", "max"), rain: rn ? rain : null, kbdi: kd || null },
+      spread: { t: spread("t", "max"), rh: spread("rh", "min"), s20: spread("s20", "max"), mixh: spread("mixh", "max"), tw: spread("tw", "max"), di: spread("di", "max"), lvori: spread("lvori", "max"), vpd: spread("vpd", "max") } };
+  });
+  return { s, days, cons, kb, cfg: c };
+}
+/* the share of guidance members with minH hours in a row meeting every criterion */
+function olChance(h, hrs, minH){
+  if (!hrs.length || typeof window === "undefined" || !window.FIRE_RX) return null;
+  const W0 = s => prefs.weight[s.def.id] ?? s.def.w ?? 1;
+  const on = h.G.src.filter(s => prefs.enabled[s.def.id] !== false && W0(s) > 0);
+  const need = Math.min(minH, hrs.length);
+  let hit = 0, tot = 0;
+  for (const s of on){
+    const mem = []; s.blocks.forEach((bl, mi) => {
+      let known = 0, run = 0, ok = false;
+      for (const i of hrs){ const b = bl[i], v = b ? b.rx : null; if (v != null) known++; run = v === 1 ? run + 1 : 0; if (run >= need) ok = true; }
+      if (known >= 0.8*hrs.length) mem.push([ok ? 1 : 0, s.members[mi].lw ?? 1]);
+    });
+    if (!mem.length) continue;
+    const lws = mem.reduce((a, b) => a + b[1], 0), w = W0(s)*autoFactor(h.G, prefs, s.def.id, "t", h.rows[hrs[0]].a);
+    mem.forEach(([x, lw]) => { hit += w*x*lw/lws; tot += w*lw/lws; });
+  }
+  return tot ? Math.round(100*hit/tot) : null;
+}
+/* ---------- KBDI: today's Florida Forest Service value (or one typed in), stepped forward with the forecast ---------- */
+let KBDI = { state:"loading" };
+const FFS_URL = "https://weather.fdacs.gov/KBDI/report/kbdi_current.html";
+async function loadKBDI(){
+  let best = null;
+  try { const r = await fetch(`${typeof DATA_BASE !== "undefined" ? DATA_BASE : ""}data/kbdi.json?t=${Date.now()}`, { cache:"no-store" }); if (r.ok){ const j = await r.json(); if (isFinite(+j.kbdi)) best = j; } } catch (e) { /* not there yet */ }
+  const p = lp(Date.now() - 36*H), stale = `${p.y}-${pad2(p.mo)}-${pad2(p.d)}`;
+  if (!best || best.date < stale){
+    /* the FFS county table through the r.jina.ai reader (FDACS doesn't let other sites read it directly) */
+    try {
+      let c = null; try { c = JSON.parse(localStorage.getItem("burnfx:kbdi") || "null"); } catch (e) { c = null; }
+      let d = c && Date.now() - c.at < 3600e3 ? c.d : null;
+      if (!d){
+        const t = await fetch("https://r.jina.ai/" + FFS_URL, { signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
+        const dm = t.match(/KBDI Summary for ([A-Za-z]+) (\d{1,2}), (\d{4})/), row = t.match(/\|\s*Brevard\s*\|\s*(\d+)\s*\|\s*(-?\d+)\s*\|\s*(\d+)\s*\/\s*(\d+)\s*\|/);
+        if (dm && row){ const mon = MONTHS.findIndex(m => m.toLowerCase() === dm[1].slice(0, 3).toLowerCase()); d = { kbdi:+row[1], change:+row[2], min:+row[3], max:+row[4], date:`${dm[3]}-${pad2(mon + 1)}-${pad2(+dm[2])}`, county:"Brevard" }; try { localStorage.setItem("burnfx:kbdi", JSON.stringify({ at:Date.now(), d })); } catch (e) { /* ignore */ } }
+      }
+      if (d && (!best || d.date > best.date)) best = d;
+    } catch (e) { /* use what we have */ }
+  }
+  KBDI = best ? { state:"ok", value:+best.kbdi, date:best.date, county:best.county || "Brevard", min:best.min, max:best.max } : { state:"none" };
+  OLC = null; if (BURN) renderOutlook();
+}
+/* one day of the Keetch-Byram (1968) equation: rain first (the first 0.20 in of a rain spell is absorbed,
+   then 100 points per inch), then drying from the day's high temperature and the mean annual rainfall */
+function kbdiStep(q, tmax, rain, st, R){
+  if (rain != null && rain >= 0.01){ st.cum += rain; const net = Math.max(0, st.cum - 0.20) - st.used; if (net > 0){ q -= 100*net; st.used += net; } }
+  else { st.cum = 0; st.used = 0; }
+  q = Math.max(0, q);
+  if (tmax != null){ const dq = (800 - q)*(0.968*Math.exp(0.0486*tmax) - 8.30)/(1 + 10.88*Math.exp(-0.0441*R))*0.001; if (dq > 0) q += dq; }
+  return Math.min(800, q);
+}
+function olKBDI(h){
+  const c = olCfg(), man = parseFloat(c.kbdi);
+  const start = isFinite(man) ? { v: Math.max(0, Math.min(800, man)), src:"entered" } : KBDI.state === "ok" ? { v: KBDI.value, src:`FFS ${KBDI.county} County, ${KBDI.date}` } : null;
+  if (!start) return null;
+  const R = +c.annRain > 0 ? +c.annRain : 50, days = {}, st = { cum:0, used:0 };
+  let q = start.v;
+  for (let k = 0; k < 9; k++){
+    const d0 = localMidnight(Date.now(), k), d1 = localMidnight(Date.now(), k + 1);
+    if (k > 0){
+      let tx = null, rain = 0, n = 0;
+      h.rows.forEach((r, i) => { if (r.a < d0 || r.a >= d1) return; const t = h.val.t[i], p = h.val.qpf[i]; if (t != null) tx = tx == null ? t : Math.max(tx, t); if (p != null){ rain += p; n++; } });
+      if (tx == null && !n) break;
+      q = kbdiStep(q, tx, n ? rain : null, st, R);
+    }
+    days[dayKey(d0 + 12*H, false)] = { v: Math.round(q), obs: k === 0 };
+  }
+  return { start, days };
+}
+const kbdiCat = q => q < 200 ? "low" : q < 400 ? "moderate" : q < 600 ? "high" : "extreme";
+/* ---------- NWS Melbourne spot forecasts for the Cape and KSC ---------- */
+const SPOT_URL = "https://forecast.weather.gov/product.php?site=NWS&issuedby=MLB&product=FWS&format=CI&version=1&glossary=0";
+const SPOT_KEYS = [/canaveral/i, /\bccsfs\b/i, /\bccafs\b/i, /\bksc\b/i, /kennedy/i, /merritt island/i, /\bminwr\b/i, /space force/i, /space launch delta/i, /\bsld ?45\b/i, /\b45th\b/i, /\bnasa\b/i, /@nasa\.gov/i, /@spaceforce\.mil/i, /@us\.af\.mil/i];
+let SPOT = { state:"loading", list:[] };
+function parseSpot(text, issued){
+  const L = text.split("\n").map(s => s.trim()), i = L.findIndex(l => /^spot forecast for/i.test(l)); if (i < 0) return null;
+  let title = L[i]; for (let j = i + 1; j < Math.min(L.length, i + 3) && L[j] && !/^national weather service/i.test(L[j]); j++) title += " " + L[j];
+  const flat = text.replace(/\s+/g, " "), m = flat.match(/ignition time of (\d{3,4}) ([A-Z]{3}) on ([A-Za-z]+) (\d{1,2})/i);
+  let date = null, ign = "";
+  if (m){ const mon = MONTHS.findIndex(x => x.toLowerCase() === m[3].slice(0, 3).toLowerCase()), im = +issued.slice(5, 7) - 1; let y = +issued.slice(0, 4); if (mon >= 0){ if (mon < im - 6) y++; else if (mon > im + 6) y--; date = `${y}-${pad2(mon + 1)}-${pad2(+m[4])}`; ign = `${m[1].padStart(4, "0")} ${m[2].toUpperCase()}`; } }
+  if (!date){ const d = text.match(/\.DELDT (\d{2})\/(\d{2})\/(\d{2})/); if (d) date = `20${d[3]}-${d[1]}-${d[2]}`; }
+  if (!date) return null;
+  const req = (text.match(/Requested by\.+([^\n]*)/i) || [])[1] || "", email = (text.match(/\.EMAIL (\S+)/) || [])[1] || "";
+  return { title: title.replace(/^spot forecast for\s*/i, "").replace(/\s+/g, " ").trim(), date, ign, hay: [title, req, email].join(" ") };
+}
+async function checkSpots(){
+  if (DEMO){ SPOT = { state:"none", list:[] }; return; }
+  try {
+    const r = await fetch("https://api.weather.gov/products/types/FWS/locations/MLB", { headers:{ Accept:"application/ld+json" } }); if (!r.ok) throw new Error(r.status);
+    const list = ((await r.json())["@graph"] || []).slice(0, 25), p0 = lp(Date.now()), today = `${p0.y}-${pad2(p0.mo)}-${pad2(p0.d)}`, p6 = lp(Date.now() + 6*24*H), last = `${p6.y}-${pad2(p6.mo)}-${pad2(p6.d)}`, hits = [];
+    await Promise.all(list.map(async (p, k) => { try { const t = (await fetch(p["@id"], { headers:{ Accept:"application/ld+json" } }).then(x => x.json())).productText || ""; const sp = parseSpot(t, p.issuanceTime || ""); if (sp && sp.date >= today && sp.date <= last && SPOT_KEYS.some(re => re.test(sp.hay))) hits.push({ ...sp, k }); } catch (e) { /* skip */ } }));
+    hits.sort((a, b) => a.k - b.k); const seen = new Set();
+    SPOT = { state:"ok", list: hits.filter(x => { const key = x.title.toLowerCase() + "|" + x.date; if (seen.has(key)) return false; seen.add(key); return true; }) };
+  } catch (e) { SPOT = { state:"error", list:[] }; }
+  if (BURN) renderOutlook();
+}
+/* ---------- display ---------- */
+const OL_STAT = ["In prescription", "Caution", "Out of prescription"];
+const OL_CLS = ["go", "warn", "bad"];
+const olW = v => v == null ? "–" : Math.round(v*wfac());
+const olRange = (r, f) => r == null ? "–" : f(r[0]) === f(r[1]) ? f(r[0]) : `${f(r[0])}–${f(r[1])}`;
+/* rows of the outlook table: element, label, how the window value shows, the prescription fields it carries */
+const OL_ROWS = [
+  ["sky", "Sky cover", d => d.el.sky == null ? "–" : skyCat(d.el.sky), []],
+  ["t", "Temperature (°F)", d => olRange(d.el.t, Math.round), ["t"]],
+  ["rh", "Relative humidity (%)", d => olRange(d.el.rh, Math.round), ["rh"]],
+  ["vpd", "VPD (kPa)", d => olRange(d.el.vpd, v => (Math.round(v*10)/10).toFixed(1)), ["vpd"]],
+  ["s20", "20 ft wind", d => `${d.el.dir == null ? "" : compass(d.el.dir) + " "}${olRange(d.el.s20, v => String(olW(v)))}`, ["s20", "dir"]],
+  ["g20", "20 ft peak", d => String(olW(d.el.g20)), ["g20"]],
+  ["mixh", "Mixing height (ft)", d => olRange(d.el.mixh, v => (Math.round(v/100)*100).toLocaleString("en-US")), ["mixh"]],
+  ["tw", "Transport wind", d => `${d.el.tdir == null ? "" : compass(d.el.tdir) + " "}${olRange(d.el.tw, v => String(olW(v)))}`, ["tw"]],
+  ["vr", "Ventilation (m²/s)", d => olRange(d.el.vr, v => (Math.round(v/100)*100).toLocaleString("en-US")), ["vr"]],
+  ["di", "Dispersion (LDSI)", d => olRange(d.el.di, Math.round), ["di"]],
+  ["lvori", "LVORI (max)", d => d.el.lvori == null ? "–" : String(Math.round(d.el.lvori)), ["lvori"]],
+  ["pop", "Chance of rain (max %)", d => d.el.pop == null ? "–" : String(Math.round(d.el.pop)), ["pop"]],
+  ["rain", "Rain, whole day (in)", d => d.el.rain == null ? "–" : d.el.rain.toFixed(2), []],
+  ["kbdi", "KBDI", d => d.el.kbdi ? `${d.el.kbdi.v}${d.el.kbdi.obs ? "" : ""}` : "–", ["kbdi"]],
+];
+function olCellStatus(d, fields){
+  const st = [...d.perCrit.filter(p => fields.includes(p.c.f)).map(p => p.status), ...d.kStat.filter(p => fields.includes(p.c.f)).map(p => p.status)].filter(v => v != null);
+  return st.length ? Math.max(...st) : null;
+}
+const olWhen = (a, b) => `${hhmm(a, zulu())}–${hhmm(b, zulu())}${zulu() ? "Z" : ""}`;
+function olDiscAuto(O){
+  if (!O || !O.days.length) return "";
+  const s = O.s, name = prefs.exp.op || s.name, good = O.days.filter(d => d.status === 0), warn = O.days.filter(d => d.status === 1);
+  const dn = d => `${dayLabel(d.w.day, false).wd} ${dayLabel(d.w.day, false).dt}`;
+  const why = d => { const bad = [...d.perCrit, ...d.kStat].filter(p => p.status === 2).map(p => RXF[p.c.f].short); return bad.length ? ` (${[...new Set(bad)].join(", ")} out)` : ""; };
+  const parts = [`${name}: burn windows ${olWinText()}.`];
+  if (good.length) parts.push(`In prescription: ${good.map(d => `${dn(d)}${d.best ? ` ${olWhen(d.best.a, d.best.b)}` : ""}${d.chance != null ? `, ${d.chance}% of guidance` : ""}`).join("; ")}.`);
+  if (warn.length) parts.push(`Caution: ${warn.map(d => `${dn(d)}${why(d)}`).join("; ")}.`);
+  const out = O.days.filter(d => d.status === 2); if (out.length) parts.push(`Out of prescription: ${out.map(d => `${dn(d)}${why(d)}`).join("; ")}.`);
+  if (!O.cons.length) parts.push("No prescription is set.");
+  if (O.kb){ const k0 = O.kb.days[dayKey(O.days[0].w.day, false)]; if (k0) parts.push(`KBDI ${k0.v} (${kbdiCat(k0.v)}).`); }
+  return parts.join(" ");
+}
+function olWinText(){ const c = olCfg(), h = v => `${Math.abs(v)} h`; const a = +c.wA || 0, b = +c.wB || 0; return `${a ? `${h(a)} ${a > 0 ? "after" : "before"} sunrise` : "sunrise"} to ${b ? `${h(b)} ${b > 0 ? "before" : "after"} sunset` : "sunset"}`; }
+const olDiscKey = O => `${O.s.id}|${dayKey(O.days[0].w.day, false)}`;
+function olDisc(O){ const d = prefs.exp.olDisc; return d && d.key === olDiscKey(O) && d.text != null ? d.text : olDiscAuto(O); }
+function renderOutlook(){
+  if (!BURN) return;
+  document.body.classList.toggle("bv-outlook", burnView() === "outlook");
+  document.querySelectorAll("#burnView [data-bv]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.bv === burnView())));
+  const el = $("outlook"); if (!el || burnView() !== "outlook") return;
+  const c = olCfg();
+  if (document.activeElement && !el.contains(document.activeElement)){ $("olA").value = c.wA; $("olB").value = c.wB; $("olN").value = c.minH; $("olK").value = c.kbdi; $("olR").value = c.annRain; }
+  $("olKNote").textContent = KBDI.state === "ok" ? `FFS ${KBDI.county} County ${KBDI.value} on ${KBDI.date}${KBDI.min != null ? ` (county range ${KBDI.min}–${KBDI.max})` : ""}` : KBDI.state === "loading" ? "looking for the FFS value…" : "FFS value not available: type today's KBDI";
+  $("olK").placeholder = KBDI.state === "ok" ? `FFS ${KBDI.value}` : "FFS";
+  const sp = $("olSpot");
+  sp.className = "olspot" + (SPOT.list.length ? " on" : "");
+  sp.innerHTML = SPOT.state === "loading" ? `<span class="mut">Checking NWS Melbourne spot forecasts…</span>` : SPOT.list.length ? `<a href="${SPOT_URL}" target="_blank" rel="noopener"><b>NWS spot forecast for the Cape or KSC</b></a> <span class="mut">${SPOT.list.map(x => `${hesc(x.title)} (${hesc(x.date)}${x.ign ? ", ignition " + hesc(x.ign) : ""})`).join(" · ")}</span>` : `<span class="mut">No NWS Melbourne spot forecast for the Cape or KSC this week.</span> <a href="${SPOT_URL}" target="_blank" rel="noopener">All MLB spot forecasts</a>`;
+  const O = burnOutlook();
+  if (!O){ $("olTable").innerHTML = `<p class="mut">${S.loading ? "Loading guidance…" : "No guidance for the outlook yet."}</p>`; return; }
+  const z = zulu();
+  let h = `<table class="ol"><thead><tr><th class="olh"></th>${O.days.map((d, j) => { const L = dayLabel(d.w.day, false); return `<th class="olday"><b>${L.wd.slice(0, 3)} ${L.dt}</b><small>${olWhen(d.w.A, d.w.b)}${d.w.partial ? " (rest of today)" : ""}</small><button type="button" class="lnk" data-plan="${j}" title="Open this window in the burn day view">Plan this day</button></th>`; }).join("")}</tr></thead><tbody>`;
+  h += `<tr class="olsum"><th class="olh">Prescription<small>${hesc(c.minH)} h in a row</small></th>${O.days.map(d => d.status == null ? `<td>–</td>` : `<td class="${OL_CLS[d.status]}"><b>${OL_STAT[d.status]}</b><small>${d.best ? `${olWhen(d.best.a, d.best.b)} · ${d.inRx} of ${d.n} h` : `0 of ${d.n} h`}${d.edited ? " · edited" : ""}</small></td>`).join("")}</tr>`;
+  h += `<tr><th class="olh">Chance of a burn window<small>guidance members</small></th>${O.days.map(d => `<td title="The share of the guidance members with ${c.minH} or more hours in a row meeting every hourly criterion">${d.chance == null ? "–" : d.chance + "%"}</td>`).join("")}</tr>`;
+  for (const [k, lab, f, fields] of OL_ROWS){
+    if (k === "kbdi" && !O.kb) continue;
+    const wl = ["s20","g20","tw"].includes(k) ? ` (${wuLabel()})` : "";
+    h += `<tr><th class="olh">${hesc(lab)}${wl}</th>${O.days.map(d => { const st = olCellStatus(d, fields), sp2 = d.spread[k]; const tip = sp2 ? `Across the models: ${k === "rh" ? "lowest" : "highest"} ${olRange(sp2, k === "vpd" ? v => v.toFixed(1) : ["s20","tw"].includes(k) ? v => String(olW(v)) : Math.round)}` : ""; return `<td class="${st == null ? "" : OL_CLS[st]}"${tip ? ` title="${hesc(tip)}"` : ""}>${hesc(f(d))}${k === "kbdi" && d.el.kbdi ? `<small>${d.el.kbdi.obs ? (O.kb.start.src === "entered" ? "entered" : "FFS") : "forecast"}</small>` : ""}</td>`; }).join("")}</tr>`;
+  }
+  h += `</tbody></table>`;
+  $("olTable").innerHTML = h;
+  const ta = $("olDisc"); if (document.activeElement !== ta) ta.value = olDisc(O);
+  $("olDiscReset").hidden = !(prefs.exp.olDisc && prefs.exp.olDisc.key === olDiscKey(O));
+  $("olSub").textContent = `${prefs.exp.op || O.s.name} · ${O.s.lat.toFixed(4)}, ${O.s.lon.toFixed(4)} · windows ${olWinText()} · times ${z ? "UTC" : tzAbbr(Date.now())}${O.cons.length ? "" : " · no prescription set"}`;
+}
+let olT = null;
+const olLater = () => { clearTimeout(olT); olT = setTimeout(() => { if (BURN && burnView() === "outlook") renderOutlook(); }, 150); };
+function setBurnView(v){
+  prefs.bv = v; savePrefs();
+  try { history.replaceState(null, "", location.pathname + location.search + (v === "outlook" ? "#outlook" : "#day")); } catch (e) { /* ignore */ }
+  renderOutlook(); if (v === "day") renderAll();
+}
+function bindOutlook(){
+  if (!BURN || $("outlook")) return;
+  if (location.hash === "#day") prefs.bv = "day"; else if (location.hash === "#outlook") prefs.bv = "outlook";
+  const main = document.querySelector("main");
+  main.insertAdjacentHTML("afterbegin", `<div class="burnsw"><span class="seg" id="burnView" role="group" aria-label="Burn forecast view"><button type="button" data-bv="outlook">7-day outlook</button><button type="button" data-bv="day">Burn day</button></span><span class="mut" id="burnSwNote">The outlook finds the days to burn; the burn day view builds the hourly forecast and the Fire Weather Forecast for one of them.</span></div>`);
+  $("expSetup").insertAdjacentHTML("beforebegin", `<section class="panel outlook" id="outlook" aria-label="7-day burn outlook">
+    <div class="olhead"><div><h2>7-day burn outlook</h2><p class="mut" id="olSub"></p></div><span class="sp"></span><button type="button" class="btn" id="olCsv">Download CSV</button><button type="button" class="btn primary" id="olPdf">Download PDF</button></div>
+    <div class="olset">
+      <label>Window starts <input type="number" id="olA" step="0.5" style="width:62px"> h after sunrise</label>
+      <label>ends <input type="number" id="olB" step="0.5" style="width:62px"> h before sunset</label>
+      <label>Burnable with at least <input type="number" id="olN" min="1" max="12" step="1" style="width:52px"> h in a row</label>
+      <label>KBDI today <input type="number" id="olK" min="0" max="800" step="1" style="width:78px"></label><span class="mut" id="olKNote"></span>
+      <label>Mean annual rain <input type="number" id="olR" min="10" max="90" step="1" style="width:56px"> in</label>
+    </div>
+    <div class="olspot" id="olSpot"></div>
+    <div class="olwrap" id="olTable"></div>
+    <p class="mut ollegend"><span class="olk go"></span> in prescription <span class="olk warn"></span> caution <span class="olk bad"></span> out of prescription, for the minimum run of hours. Ranges are the lowest and highest values inside the window; hover a value for the spread across the models. Set caution values on each criterion of the prescription. Chance of rain and KBDI are checked in the outlook only.</p>
+    <label class="col"><b>Discussion</b> <span class="mut">written from the outlook; edit it as you like</span><textarea id="olDisc" rows="3"></textarea></label><button type="button" class="btn ghost" id="olDiscReset" hidden>Rewrite from the outlook</button>
+  </section>`);
+  const timeRow = $("expStart") && $("expStart").closest(".esrow"); if (timeRow) timeRow.classList.add("daywin");
+  $("burnView").onclick = ev => { const b = ev.target.closest("[data-bv]"); if (b) setBurnView(b.dataset.bv); };
+  const num = (id, key, lo, hi) => $(id).onchange = e => { const v = e.target.value === "" ? "" : Math.max(lo, Math.min(hi, +e.target.value)); if (v !== "" && !isFinite(v)) return; prefs.exp.ol = { ...olCfg(), [key]: v === "" && key !== "kbdi" ? OL_DEF[key] : v }; savePrefs(); OLC = null; renderOutlook(); };
+  num("olA", "wA", -3, 8); num("olB", "wB", -3, 8); num("olN", "minH", 1, 12); num("olK", "kbdi", 0, 800); num("olR", "annRain", 10, 90);
+  $("olTable").onclick = ev => {
+    const b = ev.target.closest("[data-plan]"); if (!b) return;
+    const O = burnOutlook(); const d = O && O.days[+b.dataset.plan]; if (!d) return;
+    prefs.exp.start = Math.floor(d.w.A/H)*H; prefs.exp.end = Math.ceil(d.w.b/H)*H; prefs.bv = "day";
+    try { history.replaceState(null, "", location.pathname + location.search + "#day"); } catch (e) { /* ignore */ }
+    expChanged(false); renderOutlook(); setTimeout(() => { const ed = document.querySelector(".editor"); if (ed) ed.scrollIntoView({ behavior:"smooth", block:"start" }); }, 400); toast(`Burn day set to ${dayLabel(d.w.day, false).wd} ${olWhen(prefs.exp.start, prefs.exp.end)}`);
+  };
+  $("olDisc").oninput = e => { const O = burnOutlook(); if (!O) return; prefs.exp.olDisc = { key: olDiscKey(O), text: e.target.value }; savePrefs(); $("olDiscReset").hidden = false; };
+  $("olDiscReset").onclick = () => { prefs.exp.olDisc = null; savePrefs(); renderOutlook(); };
+  $("olCsv").onclick = () => { const O = burnOutlook(); if (!O) return; download(new Blob([olCSV(O)], { type:"text/csv" }), `Burn_Outlook_${(prefs.exp.op || O.s.point).replace(/[^A-Za-z0-9]+/g, "_")}_${stampNow()}.csv`); };
+  $("olPdf").onclick = async () => { const O = burnOutlook(); if (!O) return; const logo = await loadLogo(); const pdf = await olPDF(O, logo || null); download(pdf, `Burn_Outlook_${(prefs.exp.op || O.s.point).replace(/[^A-Za-z0-9]+/g, "_")}_${stampNow()}.pdf`); };
+  loadKBDI(); checkSpots();
+  setInterval(() => { if (!document.hidden){ loadKBDI(); checkSpots(); } }, 30*60e3);
+  renderOutlook();
+}
+const stampNow = () => { const p = lp(Date.now()); return `${p.y}${pad2(p.mo)}${pad2(p.d)}_${pad2(p.h)}${pad2(p.mi)}`; };
+function olCSV(O){
+  const q = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const head = ["burn_unit","point","date","window_start_local","window_end_local","status","best_run","hours_in_rx","window_hours","chance_burn_window_pct","temp_min_f","temp_max_f","rh_min_pct","rh_max_pct","vpd_max_kpa","wind20_max_" + wuLabel(),"peak20_max_" + wuLabel(),"wind_dir","mixh_max_ft","transport_max_" + wuLabel(),"ventilation_max_m2s","ldsi_max","lvori_max","pop_max_pct","rain_day_in","kbdi","issued_utc","forecaster"];
+  const lines = [head.join(",")], r = (x, k) => x ? x[k] : null, R = v => v == null ? "" : Math.round(v);
+  for (const d of O.days){
+    const L = dayLabel(d.w.day, false), p = lp(d.w.day), e = d.el;
+    lines.push([prefs.exp.op || O.s.name, O.s.point, `${p.y}-${pad2(p.mo)}-${pad2(p.d)}`, hhmm(d.w.A, false), hhmm(d.w.b, false), d.status == null ? "" : OL_STAT[d.status], d.best ? olWhen(d.best.a, d.best.b) : "", d.inRx, d.n, d.chance ?? "",
+      R(r(e.t, 0)), R(r(e.t, 1)), R(r(e.rh, 0)), R(r(e.rh, 1)), e.vpd ? e.vpd[1].toFixed(2) : "", e.s20 ? olW(e.s20[1]) : "", e.g20 == null ? "" : olW(e.g20), e.dir == null ? "" : compass(e.dir), R(r(e.mixh, 1)), e.tw ? olW(e.tw[1]) : "", R(r(e.vr, 1)), R(r(e.di, 1)), R(e.lvori), R(e.pop), e.rain == null ? "" : e.rain.toFixed(2), e.kbdi ? e.kbdi.v : "",
+      new Date().toISOString().slice(0, 16) + "Z", (prefs.initials || "").toUpperCase()].map(q).join(","));
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+/* the outlook as a one-page PDF (US Letter landscape) */
+async function olPDF(O, logo){
+  const seal = await loadSealApp(), W = 792, Hp = 612, X0 = 28, X1 = W - 28; let cs = [];
+  const f = n => (+n).toFixed(2), rgbf = c => c.map(v => f(v/255)).join(" ");
+  const rect = (x, y, w, h, c) => cs.push(`${rgbf(c)} rg ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re f`);
+  const box = (x, y, w, h, lw) => cs.push(`0.55 0.6 0.65 RG ${f(lw || .5)} w ${f(x)} ${f(Hp - y - h)} ${f(w)} ${f(h)} re S`);
+  const fit = (t, mw, size, b) => { let z = size; while (z > 4.5 && textW(t, z, b) > mw) z -= .25; return z; };
+  const clean = t => String(t ?? "").replace(/≥/g, ">=").replace(/≤/g, "<=").replace(/²/g, "2");
+  const text = (t, x, y, size, o2 = {}) => { t = clean(t); const z = o2.max ? fit(t, o2.max, size, o2.bold) : size, w = textW(t, z, o2.bold); const tx = o2.align === "c" ? x - w/2 : o2.align === "r" ? x - w : x; cs.push(`BT ${rgbf(o2.color || [0,0,0])} rg /${o2.bold ? "F2" : "F1"} ${f(z)} Tf ${f(tx)} ${f(Hp - y)} Td ${pdfStr(t)} Tj ET`); };
+  const wrap = (t, size, mw) => { const out = []; let ln = ""; for (const w of clean(t).split(/\s+/).filter(Boolean)){ const t2 = ln ? ln + " " + w : w; if (textW(t2, size, false) > mw && ln){ out.push(ln); ln = w; } else ln = t2; } if (ln) out.push(ln); return out; };
+  const NAVY = [16,40,72], FILL = [[210,236,216],[253,236,186],[251,215,212]];
+  rect(X0, 22, X1 - X0, 50, NAVY);
+  if (logo){ const lh = 42, lw = lh*logo.rw/logo.rh; cs.push(`q ${f(lw)} 0 0 ${f(lh)} ${f(X0 + 6)} ${f(Hp - 26 - lh)} cm /Im1 Do Q`); }
+  if (seal){ const lh = 42, lw = lh*seal.rw/seal.rh; cs.push(`q ${f(lw)} 0 0 ${f(lh)} ${f(X1 - 6 - lw)} ${f(Hp - 26 - lh)} cm /Im2 Do Q`); }
+  text("BURN PLANNING FORECAST: 7-DAY OUTLOOK", W/2, 44, 16, { bold:true, color:[255,255,255], align:"c" });
+  text("45th Weather Squadron  ·  Prescribed Burn Support", W/2, 61, 8.5, { color:[220,228,238], align:"c" });
+  const iss = Date.now(), z = zulu();
+  text(`${prefs.exp.op || O.s.name}  ·  ${O.s.lat.toFixed(4)}, ${O.s.lon.toFixed(4)}  ·  burn windows ${olWinText()}  ·  issued ${dayLabel(iss, z).dt} ${hhmm(iss, z)}${z ? "Z" : "L"}${prefs.initials ? " by " + prefs.initials.toUpperCase() : ""}  ·  winds ${wuLabel()}`, X0, 88, 8.5, { max: X1 - X0 });
+  let y = 96;
+  const lw = 150, n = O.days.length, cw = (X1 - X0 - lw)/n;
+  rect(X0, y, X1 - X0, 24, [234,238,241]); box(X0, y, X1 - X0, 24);
+  O.days.forEach((d, j) => { const L = dayLabel(d.w.day, false), x = X0 + lw + j*cw; text(`${L.wd.slice(0, 3)} ${L.dt}`, x + cw/2, y + 10, 8.5, { bold:true, align:"c" }); text(olWhen(d.w.A, d.w.b) + (d.w.partial ? " (today)" : ""), x + cw/2, y + 19.5, 7, { align:"c", color:[75,90,104], max: cw - 4 }); });
+  y += 24;
+  const row = (label, cells, hgt, bold) => {
+    box(X0, y, lw, hgt); text(label, X0 + 4, y + hgt/2 + 3, 7.6, { bold:true, max: lw - 8 });
+    cells.forEach((c2, j) => { const x = X0 + lw + j*cw; if (c2.fill != null) rect(x, y, cw, hgt, FILL[c2.fill]); box(x, y, cw, hgt); text(c2.t, x + cw/2, y + (c2.sub ? hgt/2 : hgt/2 + 3), bold ? 8 : 7.6, { align:"c", bold, max: cw - 4 }); if (c2.sub) text(c2.sub, x + cw/2, y + hgt/2 + 9, 6.4, { align:"c", color:[75,90,104], max: cw - 4 }); });
+    y += hgt;
+  };
+  row(`Prescription (${O.cfg.minH} h in a row)`, O.days.map(d => ({ t: d.status == null ? "-" : OL_STAT[d.status], fill: d.status, sub: d.best ? `${olWhen(d.best.a, d.best.b)}, ${d.inRx} of ${d.n} h` : `0 of ${d.n} h` })), 24, true);
+  row("Chance of a burn window", O.days.map(d => ({ t: d.chance == null ? "-" : d.chance + "%" })), 14);
+  for (const [k, lab, fn, fields] of OL_ROWS){
+    if (k === "kbdi" && !O.kb) continue;
+    row(lab + (["s20","g20","tw"].includes(k) ? ` (${wuLabel()})` : ""), O.days.map(d => ({ t: fn(d), fill: olCellStatus(d, fields) })), 14);
+  }
+  y += 10;
+  const presc = burnSummary().replace(/ Forecast in prescription:.*$| Forecast: no hours.*$/, "");
+  const cautions = O.cons.filter(c => c.y !== "" && c.y != null && isFinite(+c.y)).map(c => `${RXF[c.f].short} ${c.op === ">=" ? "down to" : "up to"} ${fmtNum(+c.y)}${RXF[c.f].wind ? " " + (c.unit || "mph") : ""}`);
+  const para = (title, body) => { const lines = wrap(body, 8, X1 - X0 - 12).slice(0, 7); if (!lines.length) return; const hh = 14 + lines.length*10 + 2; if (y + hh > Hp - 30) return; box(X0, y, X1 - X0, hh); text(title, X0 + 6, y + 11, 8.5, { bold:true }); lines.forEach((l2, k) => text(l2, X0 + 6, y + 22 + k*10, 8)); y += hh + 6; };
+  para("Discussion", olDisc(O));
+  para("Prescription", presc + (cautions.length ? ` Caution: ${cautions.join("; ")}.` : "") + ` KBDI: ${O.kb ? `today ${O.kb.start.v} (${O.kb.start.src}), later days stepped forward with the forecast high and rain (Keetch-Byram 1968).` : "not available."}`);
+  text("Green: in prescription; yellow: caution; red: out, for the minimum run of hours. Ranges are the lowest and highest values inside the burn window, from the blended guidance with the forecaster's edits. The chance is the share of guidance members with that many hours in a row in prescription.", X0, Hp - 18, 6.6, { color:[90,100,110], max: X1 - X0 });
+  return pdfAssemble([cs.join("\n")], logo, W, Hp, { image2: seal });
+}
+
 /* the LMEF page loads this file as a library (exports, logo, PDF writer) and runs its own UI */
 bind();
 bindExp();
+if (BURN) bindOutlook();
 if (!LMEF) bindBrief();
 if (HOOKS.bind) HOOKS.bind();
 loadAll();

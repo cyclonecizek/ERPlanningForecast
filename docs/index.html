@@ -91,7 +91,8 @@ a.btn{ text-decoration:none; color:var(--ink); display:inline-block; }
 main{ padding:18px 28px 40px; display:grid; gap:18px; }
 .matrix:focus{ outline:none; }
 .pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
-.pagenav{ align-items:center; }
+.pagenav{ align-items:center; flex-wrap:wrap; }
+.pagenav a{ white-space:nowrap; }
 .pagenav .navsp{ flex:1; }
 .pagenav a.offl{ font:500 13px var(--font); border-bottom:0; margin-right:10px; }
 .pagenav .theme{ margin:0 0 4px; }
@@ -362,6 +363,18 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 <style>.srcbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 10px}.srcbar .mut{color:var(--ink-3);font-size:12.5px}</style>
+<style>/* daily rainfall range */
+.qpfday{padding:10px 16px 8px}
+.qpfday .qdh{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}.qpfday .qdh .sp{flex:1}.qpfday .qdh .mut{font-size:12.5px;color:var(--ink-3)}
+.qdgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px;margin:8px 0 4px}
+.qd{border:1px solid var(--rule-2);border-radius:8px;padding:6px 8px;background:var(--panel-2)}
+.qd.adj{border-color:var(--edit);box-shadow:inset 0 0 0 1px var(--edit)}
+.qdd{font-weight:600;font-size:12.5px}.qdd small{display:block;color:var(--ink-3);font-weight:400;font-size:11.5px}
+.qdv{display:flex;justify-content:space-between;align-items:baseline;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--ink-2);margin-top:2px}.qdv b{font-size:16px;color:var(--ink)}
+.qdbar{position:relative;height:6px;border-radius:3px;background:var(--rule-2);margin:5px 0 2px}.qdbar i{position:absolute;top:0;bottom:0;background:rgba(var(--p),.55);border-radius:3px}.qdbar em{position:absolute;top:-2px;width:2px;height:10px;background:var(--ink);margin-left:-1px}
+.qdn{font-size:12px;margin:4px 0 0}
+.qpfset{display:inline-flex !important;gap:6px;align-items:center}.qpfset input{width:48px}
+</style>
 <style>.rowpick{padding:0}.rowpick > summary{padding:12px 16px;cursor:pointer;font-weight:600;list-style:none}.rowpick > summary::-webkit-details-marker{display:none}.rowpick .srcbar{padding:0 16px}.rowgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px 18px;padding:6px 16px 16px}.rowfam{display:flex;flex-direction:column;gap:3px;font-size:13px}.rowfam .rg{margin-bottom:2px}.rowfam label{display:flex;gap:6px;align-items:center}</style>
 <style>.planbar{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:6px 0 8px;padding:8px 14px;border:1px solid var(--rule);border-radius:10px;background:var(--panel);font-size:13.5px}.planbar .mut{color:var(--ink-3)}.mx td.c.pf{box-shadow:inset 0 -2px 0 #2C77B8}</style>
 <style>.blendby{margin-top:14px;border-top:1px solid var(--rule);padding-top:10px}.blendby h3{margin:0 0 4px;font-size:14px}.blendby .mut{color:var(--ink-3);font-size:12.5px;margin:0 0 6px}.bbt th{text-align:left;font-weight:500;padding:4px 12px 4px 0;font-size:13px}.bbt td{padding:4px 0}.bbt select{font:inherit;font-size:13px;padding:3px 6px}.bbc{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:12.5px}.bbc label{display:flex;gap:4px;align-items:center}</style>
@@ -481,6 +494,7 @@ document.addEventListener("DOMContentLoaded", function(){
       <label><input type="checkbox" id="linkWin" checked> Link 1, 3 and 6 hr precipitation and lightning probabilities</label>
       <label><input type="checkbox" id="clampProbs" checked> Cap guidance probabilities at 99% (1% rounds down to 0)</label>
       <span class="limits plan-only">Hot threshold (°F) <input type="number" id="hotThr" step="1"></span>
+      <span class="limits plan-only qpfset" id="qpfSettings">Daily rainfall range: percentiles <input type="number" id="qpfP1" min="1" max="99" step="1" aria-label="Low percentile"> <input type="number" id="qpfP2" min="1" max="99" step="1" aria-label="Middle percentile"> <input type="number" id="qpfP3" min="1" max="99" step="1" aria-label="High percentile">, 24 h from <select id="qpfStart" aria-label="When the 24 hour period starts"><option value="0">midnight local</option><option value="7">0700 local</option><option value="12z">1200 UTC</option></select> <button type="button" class="lnk" id="qpfReset" title="10th, median, 90th; midnight to midnight">Defaults</button></span>
     </div>
   </details>
 
@@ -539,7 +553,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </form>
 </dialog>
 <div class="toast" id="toast"></div>
-<script src="guidance.js?v=0bebdc243a"></script>
-<script src="planning-app.js?v=5e720a5b80"></script>
+<script src="guidance.js?v=6e1e7193fe"></script>
+<script src="planning-app.js?v=a1aa16fa70"></script>
 </body>
 </html>

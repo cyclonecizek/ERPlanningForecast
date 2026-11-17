@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build ER_Weather_Tools.html: the planning, exposure, LMEF and TAF pages in one self-contained file.
+"""Build ER_Weather_Tools.html: every tool page (planning, TAF, MWP, burn, exposure, LMEF, verification) in one self-contained file.
 
 Double-click the file to open it in Edge or Chrome; nothing to install. Scripts, styles, the 45 WS
 patch and the TFC-style templates are built in. Model guidance comes straight from the public
@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")
 PAGES = [("planning", "index.html", "Planning forecast"), ("taf", "taf.html", "TAF generator"), ("mwp", "mwp.html", "Mission weather products"), ("burn", "burn.html", "Burn forecasts"), ("exposure", "exposure.html", "Exposure forecasts"), ("lmef", "lmef.html", "Launch forecast (LMEF)"), ("verify", "verify.html", "Verification")]
-HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "burn.html": "burn", "lmef.html": "lmef", "taf.html": "taf", "mwp.html": "mwp", "verify.html": "verify", "verify.html#exposure": "verify", "./#brief": "planning#brief"}
+HREF_TO_TAB = {"./": "planning", "index.html": "planning", "exposure.html": "exposure", "burn.html": "burn", "burnplan.html": "burn", "lmef.html": "lmef", "taf.html": "taf", "mwp.html": "mwp", "verify.html": "verify", "verify.html#exposure": "verify", "./#brief": "planning#brief"}
 
 
 def page_html(fname, base, logo_uri, seal_uri=""):

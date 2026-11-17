@@ -19,6 +19,54 @@ studio and public-page split. Public copies, releases, withdrawals, the GitHub c
 are switched off, and their workflows aren't included, because this repository is public. Nudge mode starts from
 the last forecast you published on this computer. Everything else matches the AFSPC edition.
 
+
+## Daily rainfall range (planning forecast)
+A panel above the table gives, for each 24 h period, a low, middle and high rain total: by default the 10th
+percentile, the median and the 90th percentile of every guidance member's own 24 h total, using the sources and
+weights of the precipitation blend. Change the percentiles, and whether the day runs midnight to midnight local,
+0700 to 0700 local or 1200 to 1200 UTC, under **Guidance sources** (or **Change percentiles** on the panel). A member
+counts only if its amounts cover at least 90% of the period; the first period is the rest of today.
+When your rain amount edits change a period's total by more than 0.02 in (and 10%), the range is rebuilt around
+your total: the members give the chance of a dry period and the spread of the wet amounts (a gamma distribution),
+your total sets the mean, and raising the total makes a dry period less likely. Those periods are outlined.
+The range goes into the PDF, Excel, HTML and interactive products, the public page preview, and four CSV columns
+(`qpf24_period_start_utc`, `qpf24_p<n>_in`). Turn it off under **Rows shown → Daily rainfall range**.
+
+## Burn forecasts: 7-day outlook and burn day (`burn.html`)
+One tab, two views. **7-day outlook** (from a colleague's Burn planning forecast, now on this page's engine) finds the
+days to burn: each day's burn window (sunrise and sunset at the point, plus the offsets you set) for seven days, from
+the same blended guidance as the burn day: every source, the automatic and your weights, blend by parameter, and
+your edits for the hours the burn day covers (those days say "edited"). **Burn day** is the hourly editor and the
+Fire Weather Forecast, as before. **Plan this day** on an outlook column sets the burn day to that window.
+- **One prescription** for both views. Each criterion can carry a **caution** value: green is in prescription,
+  yellow caution, red out. A criterion is green for the day when it holds for the minimum run of hours in a row
+  (3 by default), yellow when it holds or stays in caution that long; the day's status does the same with every
+  criterion together. **Use the example prescription** loads the Cape example (RH, VPD, temperature, 20 ft winds,
+  mixing height, transport wind, ventilation, LDSI, LVORI, chance of rain, KBDI).
+- **Chance of a burn window**: the share of the guidance members (weighted like the blend) with the minimum run of
+  hours meeting every hourly criterion. Chance of rain and KBDI are checked in the outlook only.
+- **New criteria**: vapor pressure deficit (also a row in the burn day table, following temperature and dew point
+  edits) and ventilation rate.
+- **KBDI** starts from `docs/data/kbdi.json` (the **Update KBDI** workflow, `pipeline/update_kbdi.py`, Florida Forest
+  Service report for Brevard County), else the report read through a relay, else the value typed in; later days
+  step forward with the blended high and rain (Keetch-Byram 1968).
+- **NWS spot forecasts** from Melbourne for the Cape and KSC are flagged above the table.
+- The outlook has its own discussion, **Download PDF** (one page) and **Download CSV**.
+`burnplan.html` now forwards to the outlook. The colleague's page kept its settings in the browser
+(`burnoutlook:`); they don't carry over, so set the burn unit and prescription here once.
+
+## Special Weather Statement (AFSPC edition)
+**Special statement** in the page bar opens the editor: hazard, level (elevated, high impact, extreme), headline,
+details, areas, start and end times and an optional https link, with a preview of the banner. It releases through
+the same `public-release` issue and workflow as the products (type `sws`, one product per hazard, so a new
+statement for the same hazard replaces the last one) and leads the public page until it expires; **End now**
+releases a final version marked ended. Statements are kept in the official archive. The personal edition
+(`"publicPage": false`) hides it.
+Pick **Announcement (anything else)** as the hazard for a notice that isn't weather (phones down, a changed
+briefing time): give it a short title, which shows in place of the hazard, and the banner reads "Announcement".
+It starts at the blue **Notice** level. Each announcement title is its own product, so several can run at once.
+
+
 ## Blend by parameter
 Under the source list, **Blend by parameter** sets the sources each parameter group blends: temperature (with dew
 point, humidity and WBGT), sky and visibility, winds (every height, peaks, direction), precipitation (chance and
@@ -27,7 +75,6 @@ ensembles, NBM (gridded and text), the NWS forecast, or a custom list. Your weig
 apply among the chosen sources; exceedance and constraint chances follow their parameter's set; a row the chosen
 sources don't cover uses all sources (counted in the panel). Saved per page in this browser
 (`prefs.grpSrc`). The TAF generator keeps its own source list.
-
 
 ## ECMWF MOS
 **ECMWF MOS** (`ecm`, MOS family) is N. Luchetti's ECMWF IFS MOS (https://nluchetti1.github.io/ecmwf-mos/, built from

@@ -270,14 +270,16 @@ const FIRE_VARS = ["boundary_layer_height", ...INV_LEV.map(l => `temperature_${l
 Object.assign(VMAP, { boundary_layer_height:"blh", relative_humidity_950hPa:"rh950", relative_humidity_850hPa:"rh850", geopotential_height_1000hPa:"z1000", geopotential_height_700hPa:"z700" },
   ...INV_LEV.map(l => ({ [`temperature_${l}hPa`]: "t" + l })),
   ...PLEV.map(p => ({ [`wind_speed_${p}hPa`]: "ws" + p, [`wind_direction_${p}hPa`]: "wd" + p, [`geopotential_height_${p}hPa`]: "z" + p })));
-const FIRE_KEYS = ["rh","mixh","tw","vr","di","lvori","invh","invlow"];
+const FIRE_KEYS = ["rh","vpd","mixh","tw","vr","di","lvori","invh","invlow"];
+/* vapor pressure deficit (kPa) from temperature and dew point (°F) */
+const vpdFrom = (tF, tdF) => { if (tF == null || tdF == null) return null; const es = c => 0.6108*Math.exp(17.27*c/(c + 237.3)); return Math.max(0, es(f2c(tF)) - es(f2c(Math.min(tdF, tF)))); };
 const fToC = f => (f - 32)*5/9;
 function deriveFire(m, n){
   const z = () => new Array(n).fill(null);
   FIRE_KEYS.forEach(k => m[k] = z()); m.twd = z(); m.haines = z();
   for (let i = 0; i < n; i++){
     const T = m.t[i], Td = m.td[i];
-    if (T != null && Td != null) m.rh[i] = rhFrom(T, Td);
+    if (T != null && Td != null){ m.rh[i] = rhFrom(T, Td); m.vpd[i] = vpdFrom(T, Td); }
     const blh = m.blh ? m.blh[i] : null;
     if (blh != null) m.mixh[i] = Math.max(0, blh*3.28084);
     /* transport wind: vector mean of the levels inside the mixed layer (80 m when it is shallower) */
@@ -728,7 +730,7 @@ function blockOf(m, row, TL){
     for (const k of ["rh", ...MARINE_KEYS]){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 || k === "wvd" ? a[rng[0]] : agg(a, how[k]); }
   }
   if (FIRE){
-    const how = { rh:"min", mixh:"max", tw:"mean", vr:"max", di:"max", lvori:"max", invh:"min", invlow:"max" };
+    const how = { rh:"min", vpd:"max", mixh:"max", tw:"mean", vr:"max", di:"max", lvori:"max", invh:"min", invlow:"max" };
     for (const k of FIRE_KEYS){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 ? a[rng[0]] : agg(a, how[k]); o[k + "Lo"] = agg(a, "min"); o[k + "Hi"] = agg(a, "max"); }
     for (const k of [...hk, "t"]){ if (!m[k]) continue; o[k + "Lo"] = agg(m[k], "min"); o[k + "Hi"] = agg(m[k], "max"); }
     let tu = 0, tv = 0, tn = 0; for (const i of (row.len === 1 ? [rng[0]] : rng)){ const d = m.twd[i], s = m.tw[i]; if (d == null || s == null) continue; tu += -Math.sin(d*Math.PI/180)*s; tv += -Math.cos(d*Math.PI/180)*s; tn++; }
@@ -995,7 +997,7 @@ function exceed(G, pk, ri, delta, hot){
    product's HTML and PDF. The forecaster unzips it and uploads the docs folder to the products
    repository; a workflow there rebuilds the index. Only planning forecasts, TAFs, mission weather products
    (page 1) and LMEFs for publicly announced launches can be made public, and only after the forecaster confirms they are cleared. */
-const PUBLIC_TYPES = ["planning", "taf", "lmef", "mwp"];
+const PUBLIC_TYPES = ["planning", "taf", "lmef", "mwp", "sws"];   /* sws: Special Weather Statements (AFSPC edition) */
 const _crcT = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function storeZip(files){
   const enc = new TextEncoder(), parts = [], central = []; let off = 0;
@@ -1049,7 +1051,7 @@ async function gzipB64(text){
   for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
   return btoa(bin).replace(/(.{76})/g, "$1\n");
 }
-/* meta as for publicSnapshot; view: { kind:"planning-data", data } | { kind:"html", html } | { kind:"text", text } */
+/* meta as for publicSnapshot; view: { kind:"planning-data", data } | { kind:"html", html } | { kind:"text", text } | { kind:"statement" } (the statement travels in meta) */
 async function releaseBody(meta, view, by){
   if (!PUBLIC_TYPES.includes(meta.type)) throw new Error("This product type isn't cleared for the public page");
   const rel = { schema:2, ...meta, issued: new Date(meta.issued).toISOString(), audience:"public", releasedBy: by || meta.forecaster || "", view };
@@ -1133,7 +1135,7 @@ async function showGitHubConnection(after){
    the Official archive workflow files it under docs/data/archive/<type>/<YYYY>/<MM>/ and closes the issue.
    Exposure and burn forecasts are never archived on GitHub (operation names and constraints). Without a
    connection nothing is sent; the browser's own copy stays as before. */
-const ARCHIVE_TYPES = ["planning", "taf", "mwp", "lmef"];
+const ARCHIVE_TYPES = ["planning", "taf", "mwp", "lmef", "sws"];
 async function archiveOfficial(meta, data){
   if (!ARCHIVE_TYPES.includes(meta.type) || typeof ghToken !== "function" || !ghToken()) return null;
   { const cfg = await siteConfig(); if (cfg.publicPage === false || cfg.archive === false) return null; }
@@ -1273,11 +1275,182 @@ async function showPublicManager(){
         ${(p.history || []).map(h => `<tr data-wrow="1"><td style="padding:3px 0;color:var(--ink-2,#555)">Earlier: ${e2(when(h.issued))}${h.forecaster ? " by " + e2(h.forecaster) : ""}</td><td style="text-align:right"><a data-wd="1" data-scope="version" href="${e2(withdrawUrl(p, "version", h.id, h.issued))}" target="_blank" rel="noopener">Withdraw this version</a></td></tr>`).join("")}
       </table></div>`).join("");
 }
+/* ---------- Special Weather Statement: the banner (shared by the studio editor, products page and viewer) ---------- */
+const SWS_HAZARDS = [["severe","Severe thunderstorms"],["tornado","Tornadoes"],["flood","Flooding rain"],["tropical","Tropical storm or hurricane"],["wind","Damaging winds"],["lightning","Lightning"],["heat","Extreme heat"],["cold","Freeze or cold"],["fog","Dense fog"],["fire","Fire weather"],["marine","Hazardous seas"],["other","High-impact weather"],["custom","Announcement (anything else)"]];
+const SWS_LEVELS = [["notice","Notice"],["elevated","Elevated"],["high","High impact"],["extreme","Extreme"]];
+/* a custom announcement's key: one product per title, so different announcements can run side by side */
+const swsSlug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "announcement";
+const swsKey = s => s.hazard === "custom" ? `sws-custom-${swsSlug(s.label)}` : `sws-${s.hazard}`;
+const SWS_AREAS = [["ksc","Kennedy Space Center"],["ccsfs","Cape Canaveral SFS"],["psfb","Patrick SFB"]];
+const SWS_CSS = `.sws{border-radius:12px;padding:16px 20px 14px;margin:0 0 18px;border:1px solid;border-left-width:8px;background:#FFF6E0;border-color:#E3B341;color:#2A1F05}
+.sws.lv-high{background:#FFEBDD;border-color:#E07B39;color:#2E1405}.sws.lv-notice{background:#E8F1FB;border-color:#4A86C5;color:#0E2238}.sws.lv-extreme{background:#FDE3E1;border-color:#C62D23;color:#2E0805}
+.sws .sws-top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font:600 12.5px/1.2 system-ui,"Segoe UI",Arial,sans-serif;text-transform:uppercase;letter-spacing:.06em}
+.sws .sws-lv{padding:3px 8px;border-radius:999px;background:#B7791F;color:#fff}.sws.lv-high .sws-lv{background:#C2410C}.sws.lv-notice .sws-lv{background:#2B6CB0}.sws.lv-extreme .sws-lv{background:#B91C1C}
+.sws .sws-hz{opacity:.85}
+.sws h2.sws-h{margin:8px 0 6px;font:700 24px/1.2 "Barlow Semi Condensed","Arial Narrow",Arial,sans-serif;letter-spacing:.2px}
+.sws .sws-t{margin:0 0 8px;font-size:15.5px;line-height:1.5;white-space:pre-line}
+.sws .sws-m{margin:0;font-size:13.5px;opacity:.85}.sws .sws-m a{color:inherit;font-weight:600}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .sws{background:#3A2C0B;border-color:#C9962E;color:#FBEFD2}:root:not([data-theme="light"]) .sws.lv-high{background:#3D1E0C;border-color:#E07B39;color:#FDE3D1}:root:not([data-theme="light"]) .sws.lv-notice{background:#10233A;border-color:#5B9BDB;color:#DCEBFB}:root:not([data-theme="light"]) .sws.lv-extreme{background:#3F1110;border-color:#E0574D;color:#FDDCD9}}
+:root[data-theme="dark"] .sws{background:#3A2C0B;border-color:#C9962E;color:#FBEFD2}:root[data-theme="dark"] .sws.lv-high{background:#3D1E0C;border-color:#E07B39;color:#FDE3D1}:root[data-theme="dark"] .sws.lv-notice{background:#10233A;border-color:#5B9BDB;color:#DCEBFB}:root[data-theme="dark"] .sws.lv-extreme{background:#3F1110;border-color:#E0574D;color:#FDDCD9}`;
+function swsWhen(iso, tz){
+  const d = new Date(iso); if (isNaN(d)) return "";
+  const f = o => new Intl.DateTimeFormat("en-US", { timeZone: tz || "America/New_York", ...o }).format(d);
+  return `${f({ weekday:"short", month:"short", day:"numeric" })} ${f({ hour:"2-digit", minute:"2-digit", hourCycle:"h23" }).replace(":", "")} ${f({ timeZoneName:"short" }).split(" ").pop()} (${d.toISOString().slice(11, 16).replace(":", "")}Z)`;
+}
+function swsBanner(s, issued, by, opts){
+  opts = opts || {};
+  const e = x => String(x == null ? "" : x).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const lv = (SWS_LEVELS.find(l => l[0] === s.level) || SWS_LEVELS[1]), custom = s.hazard === "custom";
+  const hz = custom ? ["custom", s.label || "Announcement"] : (SWS_HAZARDS.find(h => h[0] === s.hazard) || ["other", "High-impact weather"]);
+  const kind = custom ? "Announcement" : "Special Weather Statement";
+  const areas = (s.areas || []).map(a => (SWS_AREAS.find(x => x[0] === a) || [a, a])[1]);
+  const now = opts.now || Date.now(), st = Date.parse(s.starts), ex = Date.parse(s.expires);
+  const span = s.cancelled ? `Ended ${e(swsWhen(s.expires))}` : isFinite(st) && st > now ? `In effect from ${e(swsWhen(s.starts))} until ${e(swsWhen(s.expires))}` : `In effect until ${e(swsWhen(s.expires))}`;
+  const link = /^https:\/\/[^\s"<>]+$/.test(s.link || "") ? ` · <a href="${e(s.link)}" target="_blank" rel="noopener">More information</a>` : "";
+  return `<section class="sws lv-${e(lv[0])}" aria-label="${kind}"><div class="sws-top"><span>${kind}</span><span class="sws-lv">${e(lv[1])}</span><span class="sws-hz">${e(hz[1])}</span></div>
+<h2 class="sws-h">${e(s.headline)}</h2>${s.text ? `<p class="sws-t">${e(s.text)}</p>` : ""}
+<p class="sws-m">${areas.length ? `${e(areas.join(", "))} · ` : ""}${span}${issued ? ` · Issued ${e(swsWhen(issued))}${by ? " by " + e(by) : ""}` : ""}${link}</p></section>`;
+}
+/* the statements to show now: not ended, not expired; the most serious first */
+function swsActive(products, now){
+  now = now || Date.now();
+  const rank = l => ({ extreme:3, high:2, elevated:1, notice:0 })[l] || 0;
+  return (products || []).filter(p => p.type === "sws" && p.statement && !p.statement.cancelled && Date.parse(p.statement.expires) > now)
+    .sort((a, b) => rank(b.statement.level) - rank(a.statement.level) || Date.parse(b.issued) - Date.parse(a.issued));
+}
+/* ---------- Special Weather Statement editor (AFSPC edition only) ----------
+   A header on the public products page for high-impact weather (severe storms, flooding, tropical systems
+   and so on): hazard, level, headline, details, the areas, and how long it's in effect. It goes out through
+   the same release issue and workflow as the products, as type "sws", one product per hazard, so a new
+   statement for the same hazard replaces the last one. "End now" releases a final version marked ended,
+   and the page drops a statement by itself when it expires. Hidden in the personal edition. */
+const swsPad = n => String(n).padStart(2, "0");
+const swsToInput = ms => { const p = lp(ms); return `${p.y}-${swsPad(p.mo)}-${swsPad(p.d)}T${swsPad(p.h)}:${swsPad(p.mi)}`; };
+function swsFromInput(v){
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); if (!m) return null;
+  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]); let t = base;
+  for (let k = 0; k < 3; k++){ const p = lp(t); t += base - Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi); }
+  return t;
+}
+/* the products page's list (or the studio's copy of it): the statements in effect */
+async function swsCurrent(){
+  const cfg = await siteConfig(), page = (cfg.productsPage || "").replace(/\/?$/, "/");
+  let idx = null;
+  if (page && !/\/\/ORG\./.test(page)){ try { idx = await getJSON(`${page}products/index.json?ts=${Date.now()}`, 10000); } catch (e) { idx = null; } }
+  if (!idx || !Array.isArray(idx.products)){ try { idx = await getJSON(`${typeof DATA_BASE !== "undefined" ? DATA_BASE : ""}data/public_index.json?ts=${Date.now()}`, 8000); } catch (e) { idx = null; } }
+  return idx && Array.isArray(idx.products) ? { list: swsActive(idx.products), updated: idx.updated } : null;
+}
+async function showSWSEditor(){
+  const cfg = await siteConfig(); if (cfg.publicPage === false) return;
+  if (!document.getElementById("swsCss")){ const st = document.createElement("style"); st.id = "swsCss"; st.textContent = SWS_CSS + `
+#swsDlg{width:min(940px,96vw);max-height:92vh;border:1px solid #ccd;border-radius:12px;padding:20px 22px;font:14px/1.5 system-ui,"Segoe UI",sans-serif;color:inherit;background:var(--panel,#fff)}
+#swsDlg h2.t{margin:0;font-size:18px;flex:1}#swsDlg .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#swsDlg .cols{display:grid;grid-template-columns:minmax(300px,1fr) minmax(300px,1fr);gap:18px;margin-top:12px}@media (max-width:760px){#swsDlg .cols{grid-template-columns:1fr}}
+#swsDlg label.f{display:block;font-weight:600;margin:10px 0 4px;font-size:13px}#swsDlg label.f small{font-weight:400;color:var(--ink-3,#777)}
+#swsDlg input[type=text],#swsDlg input[type=url],#swsDlg input[type=datetime-local],#swsDlg select,#swsDlg textarea{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--rule,#ccd);border-radius:8px;font:14px inherit;background:var(--panel,#fff);color:inherit}
+#swsDlg textarea{min-height:110px;resize:vertical}#swsDlg .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#swsDlg .seg{display:inline-flex;border:1px solid var(--rule,#ccd);border-radius:8px;overflow:hidden}#swsDlg .seg button{border:0;background:none;padding:6px 12px;font:600 13px inherit;cursor:pointer;color:inherit}#swsDlg .seg button+button{border-left:1px solid var(--rule,#ccd)}
+#swsDlg .seg button[aria-pressed=true][data-lv=notice]{background:#2B6CB0;color:#fff}#swsDlg .seg button[aria-pressed=true][data-lv=elevated]{background:#B7791F;color:#fff}#swsDlg .seg button[aria-pressed=true][data-lv=high]{background:#C2410C;color:#fff}#swsDlg .seg button[aria-pressed=true][data-lv=extreme]{background:#B91C1C;color:#fff}
+#swsDlg .chk{display:flex;gap:14px;flex-wrap:wrap}#swsDlg .chk label{display:flex;gap:6px;align-items:center}
+#swsDlg .q{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}#swsDlg .q button{font-size:12px;padding:3px 8px}
+#swsDlg .cur{border:1px solid var(--rule,#dde);border-radius:10px;padding:8px 12px;margin-top:10px;font-size:13.5px}#swsDlg .cur .it{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0}#swsDlg .cur .it b{flex:1;min-width:200px}
+#swsDlg .err{color:var(--bad,#B23A2E);font-size:13.5px;min-height:1.3em;margin:8px 0 0}#swsDlg .pv{position:sticky;top:0}#swsDlg .pvl{font-size:12px;color:var(--ink-3,#777);margin:10px 0 6px;text-transform:uppercase;letter-spacing:.06em}`; document.head.appendChild(st); }
+  let d = document.getElementById("swsDlg"); if (d) d.remove();
+  d = document.createElement("dialog"); d.id = "swsDlg";
+  const e2 = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  const H1 = 3600e3, now0 = Math.ceil(Date.now()/H1)*H1;
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem("erwx:swsDraft") || "{}"); } catch (e) { saved = {}; }
+  const S0 = Object.assign({ hazard:"severe", label:"", level:"elevated", headline:"", text:"", areas: SWS_AREAS.map(a => a[0]), starts: now0 - H1, expires: now0 + 23*H1, link:"" }, saved.at && Date.now() - saved.at < 6*H1 ? saved.s : {});
+  if (!(S0.expires > Date.now())){ S0.starts = now0 - H1; S0.expires = now0 + 23*H1; }
+  d.innerHTML = `<div class="row"><h2 class="t">Special Weather Statement or announcement</h2><button type="button" class="btn" id="swClose">Close</button></div>
+    <p style="margin:4px 0 0;color:var(--ink-2,#555)">A header across the top of the public products page for high-impact weather, or with <b>Announcement</b> for anything else people need to know (phones down, a changed briefing time). It goes out like a product release and comes down by itself when it expires.</p>
+    <div class="cur" id="swCur">Checking the public page for statements in effect…</div>
+    <div class="cols"><div>
+      <div class="two"><div><label class="f" for="swHaz">Hazard</label><select id="swHaz">${SWS_HAZARDS.map(h => `<option value="${h[0]}">${e2(h[1])}</option>`).join("")}</select></div>
+      <div><label class="f">Level</label><span class="seg" id="swLv">${SWS_LEVELS.map(l => `<button type="button" data-lv="${l[0]}">${e2(l[1])}</button>`).join("")}</span></div></div>
+      <div id="swLabWrap" hidden><label class="f" for="swLab">Announcement title <small>shown in place of the hazard, up to 40 characters</small></label><input type="text" id="swLab" maxlength="40" placeholder="e.g. Phones down" autocomplete="off"></div>
+      <label class="f" for="swHead">Headline <small>one line, up to 120 characters</small></label><input type="text" id="swHead" maxlength="120" placeholder="e.g. Hurricane Milton expected to bring damaging winds Wednesday night, or: 45 WS phones are down; call 321-555-0100" autocomplete="off">
+      <label class="f" for="swText">Details <small>what, when, how bad, and what to do</small></label><textarea id="swText" maxlength="1500" placeholder="Timing, the impacts to expect at each area, and any actions for the workforce."></textarea>
+      <label class="f">Areas</label><div class="chk" id="swAreas">${SWS_AREAS.map(a => `<label><input type="checkbox" value="${a[0]}"> ${e2(a[1])}</label>`).join("")}</div>
+      <div class="two"><div><label class="f" for="swFrom">In effect from <small>${e2(tzAbbr(Date.now()))}</small></label><input type="datetime-local" id="swFrom"></div>
+      <div><label class="f" for="swTo">Until <small>${e2(tzAbbr(Date.now()))}</small></label><input type="datetime-local" id="swTo"></div></div>
+      <div class="q" id="swQuick"><span style="font-size:12px;color:var(--ink-3,#777)">Until</span>${[6, 12, 24, 48, 72].map(h => `<button type="button" class="btn" data-h="${h}">+${h} h</button>`).join("")}</div>
+      <label class="f" for="swLink">More information link <small>optional, https only (NHC, NWS Melbourne)</small></label><input type="url" id="swLink" placeholder="https://www.nhc.noaa.gov/" autocomplete="off">
+      <label class="f" for="swBy">Forecaster</label><input type="text" id="swBy" maxlength="5" style="width:90px" autocomplete="off">
+      <p class="err" id="swErr"></p>
+      <div class="row"><button type="button" class="btn primary" id="swGo">Release to the public page</button><button type="button" class="btn" id="swClear">Clear the form</button></div>
+    </div><div class="pv"><div class="pvl">Preview, as the public page shows it</div><div id="swPrev"></div></div></div>`;
+  document.body.appendChild(d); d.showModal();
+  const $s = id => d.querySelector("#" + id);
+  const set = s => {
+    $s("swHaz").value = s.hazard; $s("swLab").value = s.label || ""; $s("swLabWrap").hidden = s.hazard !== "custom"; d.querySelectorAll("#swLv button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.lv === s.level)));
+    $s("swHead").value = s.headline || ""; $s("swText").value = s.text || ""; $s("swLink").value = s.link || "";
+    d.querySelectorAll("#swAreas input").forEach(c => c.checked = (s.areas || []).includes(c.value));
+    $s("swFrom").value = swsToInput(s.starts); $s("swTo").value = swsToInput(s.expires);
+  };
+  const get = () => ({ hazard: $s("swHaz").value, label: $s("swHaz").value === "custom" ? $s("swLab").value.trim() : "", level: (d.querySelector("#swLv [aria-pressed=true]") || {}).dataset?.lv || "elevated",
+    headline: $s("swHead").value.trim(), text: $s("swText").value.trim(), areas: [...d.querySelectorAll("#swAreas input:checked")].map(c => c.value),
+    starts: swsFromInput($s("swFrom").value), expires: swsFromInput($s("swTo").value), link: $s("swLink").value.trim() });
+  const iso = ms => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const draw = () => {
+    $s("swLabWrap").hidden = $s("swHaz").value !== "custom";
+    const s = get(); try { localStorage.setItem("erwx:swsDraft", JSON.stringify({ at: Date.now(), s })); } catch (e) { /* ignore */ }
+    $s("swPrev").innerHTML = swsBanner({ ...s, headline: s.headline || "Headline", starts: s.starts ? iso(s.starts) : "", expires: s.expires ? iso(s.expires) : "" }, new Date().toISOString(), $s("swBy").value.trim().toUpperCase());
+  };
+  set(S0); $s("swBy").value = (typeof prefs !== "undefined" && prefs.initials) || (() => { try { return JSON.parse(localStorage.getItem("planfx:v1:prefs") || "{}").initials || ""; } catch (e) { return ""; } })();
+  draw();
+  d.addEventListener("input", draw); d.addEventListener("change", draw);
+  /* an announcement starts at Notice; a weather hazard picked after one goes back to Elevated */
+  $s("swHaz").addEventListener("change", () => { const lv = (d.querySelector("#swLv [aria-pressed=true]") || {}).dataset?.lv; const want = $s("swHaz").value === "custom" ? (lv === "elevated" ? "notice" : lv) : (lv === "notice" ? "elevated" : lv); d.querySelectorAll("#swLv button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.lv === want))); draw(); });
+  $s("swLv").onclick = ev => { const b = ev.target.closest("[data-lv]"); if (!b) return; d.querySelectorAll("#swLv button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); draw(); };
+  $s("swQuick").onclick = ev => { const b = ev.target.closest("[data-h]"); if (!b) return; const st = swsFromInput($s("swFrom").value) || Date.now(); $s("swTo").value = swsToInput(Math.max(st, Date.now()) + (+b.dataset.h)*H1); draw(); };
+  $s("swClose").onclick = () => d.close();
+  $s("swClear").onclick = () => { try { localStorage.removeItem("erwx:swsDraft"); } catch (e) { /* ignore */ } set({ hazard:"severe", label:"", level:"elevated", headline:"", text:"", areas: SWS_AREAS.map(a => a[0]), starts: now0 - H1, expires: now0 + 23*H1, link:"" }); draw(); };
+  const release = async (s, by, endNow) => {
+    const custom = s.hazard === "custom", hz = custom ? ["custom", s.label] : (SWS_HAZARDS.find(h => h[0] === s.hazard) || ["other", "High-impact weather"]);
+    const issued = Date.now();
+    const st = { hazard: s.hazard, ...(custom ? { label: s.label } : {}), level: s.level, headline: s.headline, text: s.text, areas: s.areas, starts: iso(s.starts), expires: iso(s.expires), link: s.link || "", cancelled: !!endNow };
+    const meta = { type:"sws", key: swsKey(s), title: custom ? "Announcement" : "Special Weather Statement", subtitle: hz[1], issued, forecaster: by, headline: endNow ? `Ended: ${s.headline}` : s.headline, statement: st };
+    if (typeof archiveOnce === "function") archiveOnce(`sws:${meta.key}:${issued}`, meta, { statement: st });
+    const zipFn = async () => { const snap = await publicSnapshot(meta, {}); const a = document.createElement("a"); a.href = URL.createObjectURL(snap.blob); a.download = snap.name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); };
+    d.close();
+    await showReleaseDialog(meta, { kind:"statement" }, by, zipFn);
+  };
+  $s("swGo").onclick = async () => {
+    const s = get(), by = $s("swBy").value.trim().toUpperCase(), err = m => { $s("swErr").textContent = m; };
+    if (s.hazard === "custom" && !s.label) return err("Give the announcement a title (for example: Phones down).");
+    if (!s.headline) return err("Write a headline.");
+    if (!s.areas.length) return err("Tick at least one area.");
+    if (!s.starts || !s.expires) return err("Set when it's in effect.");
+    if (s.expires <= Date.now()) return err("The end time has already passed.");
+    if (s.expires <= s.starts) return err("The end time must be after the start.");
+    if (s.expires - Date.now() > 7*24*H1) return err("A statement can run for up to 7 days; release an update to extend it.");
+    if (s.link && !/^https:\/\/[^\s"<>]+$/.test(s.link)) return err("The link must start with https://");
+    if (!by) return err("Add your initials.");
+    err(""); if (typeof prefs !== "undefined"){ prefs.initials = by; try { savePrefs(); } catch (e) { /* ignore */ } }
+    await release(s, by, false);
+  };
+  /* statements in effect: update one, or end it now */
+  const cur = await swsCurrent(), box = $s("swCur");
+  if (!cur){ box.textContent = "The public page's list couldn't be read, so statements in effect aren't shown here. A new statement for the same hazard replaces the one in effect."; return; }
+  if (!cur.list.length){ box.textContent = "No statement is in effect on the public page."; return; }
+  box.innerHTML = `<div style="font-weight:600;margin-bottom:2px">In effect on the public page</div>` + cur.list.map((p, i) => `<div class="it"><b>${e2(p.statement.headline)}</b><span style="color:var(--ink-3,#777)">${e2(p.statement.hazard === "custom" ? "Announcement" : "Statement")} · ${e2((SWS_LEVELS.find(l => l[0] === p.statement.level) || ["", ""])[1])} · ${e2(p.subtitle || "")} · until ${e2(swsWhen(p.statement.expires))}</span><button type="button" class="btn" data-up="${i}">Update</button><button type="button" class="btn" data-end="${i}">End now</button></div>`).join("");
+  box.onclick = async ev => {
+    const u = ev.target.closest("[data-up]"), en = ev.target.closest("[data-end]");
+    if (u){ const s = cur.list[+u.dataset.up].statement; set({ ...s, starts: Date.parse(s.starts), expires: Date.parse(s.expires) }); draw(); $s("swHead").focus(); }
+    if (en){
+      const p = cur.list[+en.dataset.end], s = p.statement, by = $s("swBy").value.trim().toUpperCase();
+      if (!by){ $s("swErr").textContent = "Add your initials first."; $s("swBy").focus(); return; }
+      if (!confirm(`End "${s.headline}" now? The public page takes it down when the release goes out.`)) return;
+      await release({ ...s, starts: Date.parse(s.starts), expires: Date.now() }, by, true);
+    }
+  };
+}
 /* editions: site.config.json { "publicPage": false } is the personal edition: no public page, releases,
    withdrawals, GitHub connection or official archive (the controls are hidden, the archive never sent) */
 if (typeof document !== "undefined"){
   const st = document.createElement("style");
-  st.textContent = `.erwx-nopublic #tafPublic, .erwx-nopublic #lmPublic, .erwx-nopublic #pubBtn, .erwx-nopublic .pubpub, .erwx-nopublic #pubMgrLink, .erwx-nopublic label:has(#lmPubLaunch){ display:none !important; }
+  st.textContent = `.erwx-nopublic #tafPublic, .erwx-nopublic #lmPublic, .erwx-nopublic #pubBtn, .erwx-nopublic .pubpub, .erwx-nopublic #pubMgrLink, .erwx-nopublic #swsLink, .erwx-nopublic label:has(#lmPubLaunch){ display:none !important; }
     .erwx-noarchive label:has(#lmPubLaunch){ display:none !important; }`;
   document.head.appendChild(st);
   siteConfig().then(cfg => { if (cfg.publicPage === false) document.documentElement.classList.add("erwx-nopublic"); if (cfg.archive === false) document.documentElement.classList.add("erwx-noarchive"); });
@@ -1289,6 +1462,14 @@ if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded
   const a = document.createElement("a"); a.href = "#"; a.id = "pubMgrLink"; a.textContent = "Public page"; a.title = "What's on the public page, and withdrawing it";
   a.onclick = ev => { ev.preventDefault(); showPublicManager(); };
   nav.appendChild(a);
+  /* Special Weather Statements: the header on the public page for high-impact weather */
+  const w = document.createElement("a"); w.href = "#"; w.id = "swsLink"; w.textContent = "Special statement"; w.title = "Issue, update or end a Special Weather Statement on the public page";
+  w.onclick = ev => { ev.preventDefault(); showSWSEditor(); };
+  nav.insertBefore(w, a);
+  /* the link shows how many statements are in effect */
+  swsCurrent().then(c => { if (c && c.list.length){ w.textContent = `Special statement (${c.list.length} in effect)`; w.style.color = "#F2B53A"; } }).catch(() => {});
+  /* arriving from a page without the studio script (Burn planning): open what was asked for */
+  if (location.hash === "#sws" || location.hash === "#public"){ const h = location.hash; history.replaceState(null, "", location.pathname + location.search); setTimeout(() => h === "#sws" ? showSWSEditor() : showPublicManager(), 600); }
 });
 /* ---------- shared PDF helpers (planning, exposure, burn, LMEF and MWP pages) ---------- */
 const HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
