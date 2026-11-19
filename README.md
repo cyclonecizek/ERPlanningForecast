@@ -13,12 +13,30 @@ published as Excel or CSV. Static page on GitHub Pages; everything runs in the b
 
 Rows run hourly to 24 h, then 3-hour blocks to day 5, then 6-hour blocks on days 6 and 7.
 
-## Edition
-This is the **personal edition** (`docs/site.config.json`: `"publicPage": false, "archive": false`): one site, no
-studio and public-page split. Public copies, releases, withdrawals, the GitHub connection and the official archive
-are switched off, and their workflows aren't included, because this repository is public. Nudge mode starts from
-the last forecast you published on this computer. Everything else matches the AFSPC edition.
-
+## Marine forecasts (`marine.html`)
+Route and point forecasts for vessels, built from guidance and edited by the forecaster.
+* **Route:** click the map to drop waypoints (drag to move them), type them in (decimal degrees or degrees and
+  minutes), or open a route file (this page's JSON, a CSV of name, lat, lon and time, or a GPX route). Arrival
+  times come from a departure time and speed, with optional hours at each waypoint, or you type each one.
+  Rows can be added between waypoints every 1 to 12 hours along a straight track. **Single point:** one
+  position over a time range, every 1, 3 or 6 hours.
+* **Guidance:** wind, gusts, rain and thunder chances, visibility and air temperature blend the NWS gridded
+  forecast (US waters), the NBM, GFS, ECMWF IFS, ICON, GEM and UKMO. Seas, swell, wind waves and water
+  temperature blend NOAA WAVEWATCH III (GFS-Wave), ECMWF WAM, Météo-France MFWAM, DWD GWAM, the NWS gridded
+  waves and the NBM wave height (NBM text bulletins at the nearest marine station). Each source has a weight
+  under **Guidance sources**.
+* **Ranges and chances:** wind, seas, swell and wind waves show as a range between two percentiles of the
+  guidance (25th to 75th unless changed). Chances of wind at or over three speeds come from the GEFS and ECMWF
+  ensembles; chances of seas at or over three heights from the spread of the wave models plus the usual
+  forecast error at that lead time. Both follow the forecaster's edits.
+* **Editing:** click any value; directions take a compass point. The written summary updates with the edits
+  until the forecaster types in it; there is a separate box for remarks. The NWS coastal and offshore waters
+  forecasts for the zones along the route show below, and can go on the products.
+* **Products:** PDF (map, summary, table, NWS zone text), HTML, CSV, and a plain-text forecast copied for
+  email or chat. Routes can be saved by name in the browser or to a file.
+* **Stays local:** routes, positions and edits are kept in the browser and never go to GitHub or the public
+  page. The coastline (`docs/data/coast.json`) is Natural Earth (public domain): the world at 1:50m and
+  Florida and the Bahamas at 1:10m.
 
 ## Daily rainfall range (planning forecast)
 A panel above the table gives, for each 24 h period, a low, middle and high rain total: by default the 10th

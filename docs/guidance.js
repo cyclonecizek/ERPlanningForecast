@@ -39,6 +39,7 @@ const FAMILIES = {
   mos:   { label:"MOS and LAMP",    color:"var(--mos)" },
   ct:    { label:"Calibrated thunder", color:"var(--ct)" },
   nws:   { label:"NWS forecast",    color:"var(--blend)" },
+  wave:  { label:"Wave models",     color:"var(--wave, #1F7A99)" },
 };
 /* the NWS forecast (NDFD grids from api.weather.gov, the Melbourne office's forecast) as one member */
 const NDFD = { id:"ndfd", name:"NWS Forecast", fam:"nws" };
@@ -79,7 +80,18 @@ const PIPE = [
   { id:"refsct", name:"REFS calibrated thunder", fam:"ct", w:2 },
 ];
 /* HREF, the NAM and NAM MOS were retired by NCEP on 3 November 2026 and are no longer sources */
-const ALL_SOURCES = [NDFD, OM_DET[0], PIPE[2], PIPE[0], PIPE[3], PIPE[1], ...OM_DET.slice(1), ...OM_ENS, ...MOS, PIPE[4]];
+/* wave models (personal page, when waves are on). Open-Meteo marine serves each model on its own; the first
+   model id that answers is used. The NBM wave height comes from the NBM text bulletins (NBS, then NBE) at the
+   nearest marine station, through the Iowa Environmental Mesonet. The NWS forecast's waves ride on its own member. */
+const WAVES = [
+  { id:"ww3",     name:"WAVEWATCH III (GFS-Wave)", models:["ncep_gfswave016", "ncep_gfswave025"], fam:"wave" },
+  { id:"ecwam",   name:"ECMWF WAM",                models:["ecmwf_wam", "ecmwf_wam025"],         fam:"wave" },
+  { id:"mfwam",   name:"Météo-France MFWAM",       models:["meteofrance_wave"],                  fam:"wave" },
+  { id:"gwam",    name:"DWD GWAM",                 models:["gwam"],                              fam:"wave" },
+  { id:"nbmwave", name:"NBM wave height (text)",   fam:"wave" },
+];
+const ALL_SOURCES = [NDFD, OM_DET[0], PIPE[2], PIPE[0], PIPE[3], PIPE[1], ...OM_DET.slice(1), ...OM_ENS, ...MOS, PIPE[4],
+  ...(typeof window !== "undefined" && window.PAGE === "personal" ? WAVES : [])];
 
 /* ---------- parameters (matrix columns) ---------- */
 const SKY = [ ["CLR",0,6.25], ["FEW",6.25,31.25], ["SCT",31.25,56.25], ["BKN",56.25,93.75], ["OVC",93.75,101] ];
@@ -259,7 +271,10 @@ const VMAP = { cloud_cover_low:"cl", cloud_cover_mid:"cm", cloud_cover_high:"ch"
 const FIRE = typeof window !== "undefined" && window.PAGE === "burn";
 /* the personal forecast page (any point): relative humidity and, when asked, waves and sea state */
 const PERS = typeof window !== "undefined" && window.PAGE === "personal";
-const MARINE_KEYS = ["wvh", "swh", "wvp", "wvd", "sst"];
+/* waves: significant height, swell height, dominant period, direction (from), water temperature, wind-wave height,
+   swell period and swell direction (from); heights in ft */
+const MARINE_KEYS = ["wvh", "swh", "wvp", "wvd", "sst", "wwh", "swp", "swd"];
+const DIR_KEYS = new Set(["wvd", "swd"]);
 /* pages that carry relative humidity as its own row: personal, and the LMEF (RH in its edit table) */
 const RHROW = PERS || (typeof window !== "undefined" && window.PAGE === "lmef");
 const PLEV = [975, 950, 925, 900, 850, 800];
@@ -523,23 +538,102 @@ function parseMOS(rs, src, TL){
   return { members:[m], iv, run };
 }
 
-/* ---------- waves and sea state (Open-Meteo marine) as one member ----------
-   significant wave height and swell in ft, period in s, direction in degrees, water temperature in F */
-const MARINE = { id:"marine", name:"Open-Meteo marine", fam:"global" };
-async function fetchMarine(sites, TL){
-  const out = {};
+/* ---------- waves and sea state ----------
+   one member per wave model from Open-Meteo marine; heights in ft, periods in s, directions in degrees (from),
+   water temperature in F */
+const MARINE = { id:"marine", name:"Open-Meteo marine", fam:"wave" };
+const M2FT = 3.28084;
+async function fetchWaveModel(def, sites, TL){
+  const vars = "wave_height,wave_period,wave_direction,wind_wave_height,swell_wave_height,swell_wave_period,swell_wave_direction,sea_surface_temperature";
+  const out = {}; let used = null, lastErr = null;
   for (const s of sites){
-    try {
-      const js = await getJSON(`https://marine-api.open-meteo.com/v1/marine?latitude=${s.lat}&longitude=${s.lon}&hourly=wave_height,swell_wave_height,wave_period,wave_direction,sea_surface_temperature&timezone=GMT&timeformat=unixtime&forecast_days=10&past_days=2`, 25000);
-      const hr = js.hourly || {}, m = {}; MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
-      (hr.time || []).forEach((t, j) => { const i = TL.idx(t*1000); if (i < 0 || i >= TL.n) return;
-        const g = k => hr[k] ? hr[k][j] : null;
-        if (g("wave_height") != null) m.wvh[i] = g("wave_height")*3.28084; if (g("swell_wave_height") != null) m.swh[i] = g("swell_wave_height")*3.28084;
-        m.wvp[i] = g("wave_period"); m.wvd[i] = g("wave_direction"); if (g("sea_surface_temperature") != null) m.sst[i] = g("sea_surface_temperature")*9/5 + 32; });
-      if (m.wvh.some(v => v != null)) out[s.id] = { members:[marineMember(m, TL.n)] };
-    } catch (e) { /* inland, or the marine model isn't reachable */ }
+    for (const model of (used ? [used] : def.models)){
+      try {
+        const js = await getJSON(`https://marine-api.open-meteo.com/v1/marine?latitude=${s.lat}&longitude=${s.lon}&hourly=${vars}&models=${model}&timezone=GMT&timeformat=unixtime&forecast_days=10&past_days=1`, 25000);
+        const hr = js.hourly || {}, m = {}; MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
+        const ft = v => v == null ? null : v*M2FT;
+        (hr.time || []).forEach((t, j) => { const i = TL.idx(t*1000); if (i < 0 || i >= TL.n) return;
+          const g = k => hr[k] && hr[k][j] != null ? hr[k][j] : null;
+          m.wvh[i] = ft(g("wave_height")); m.swh[i] = ft(g("swell_wave_height")); m.wwh[i] = ft(g("wind_wave_height"));
+          m.wvp[i] = g("wave_period"); m.wvd[i] = g("wave_direction"); m.swp[i] = g("swell_wave_period"); m.swd[i] = g("swell_wave_direction");
+          if (g("sea_surface_temperature") != null) m.sst[i] = g("sea_surface_temperature")*9/5 + 32; });
+        fillWaveGaps(m, MARINE_KEYS, 3);
+        used = model;
+        if (m.wvh.some(v => v != null)) out[s.id] = { members:[marineMember(m, TL.n)], model };
+        break;
+      } catch (e) { lastErr = e; /* that model id isn't served here: try the next */ }
+    }
   }
+  if (!used && lastErr) throw lastErr;
   return out;
+}
+/* the NBM's significant wave height (SWH, ft) from its text bulletins at a marine station: NBS every 3 hours to
+   about 3 days, then NBE every 12 hours to about 7 days; hours in between are filled in a straight line */
+async function fetchNBMWaves(sites, TL, station){
+  if (!station) return {};
+  const swhOf = r => { const v = pick(r, ["swh"]); return v == null || !isFinite(+v) || +v >= 99 ? null : +v; };
+  const m = {}; MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
+  let n = 0, run = null;
+  for (const model of ["NBS", "NBE"]){
+    let js; try { js = await getJSON(`https://mesonet.agron.iastate.edu/api/1/mos.json?station=${encodeURIComponent(station)}&model=${model}`, 25000); } catch (e) { continue; }
+    const rows = rowsOf(js);
+    const latest = rows.reduce((a, r) => { const t = String(pick(r, ["runtime"]) || ""); return t > a ? t : a; }, "");
+    for (const r of rows){
+      if (String(pick(r, ["runtime"]) || "") !== latest) continue;
+      const v = swhOf(r), t = ptime(pick(r, ["ftime","valid","fcst_time"]));
+      if (v == null || t == null) continue;
+      const i = TL.idx(t); if (i < 0 || i >= TL.n) continue;
+      if (model === "NBE" && m.wvh[i] != null) continue;
+      m.wvh[i] = v; n++; if (!run) run = latest;
+    }
+  }
+  if (!n) return {};
+  fillWaveGaps(m, ["wvh"], 12);
+  const out = {}; for (const s of sites) out[s.id] = { members:[marineMember(m, TL.n)], run, station };
+  return out;
+}
+/* straight-line fill between valid hours, at most `max` hours apart */
+function fillWaveGaps(m, keys, max){
+  for (const k of keys){
+    const a = m[k]; if (!a) continue; let last = -1;
+    for (let i = 0; i < a.length; i++){
+      if (a[i] == null) continue;
+      if (last >= 0 && i - last > 1 && i - last <= max){
+        if (DIR_KEYS.has(k)){ for (let j = last + 1; j < i; j++) a[j] = a[last]; }
+        else for (let j = last + 1; j < i; j++) a[j] = a[last] + (a[i] - a[last])*(j - last)/(i - last);
+      }
+      last = i;
+    }
+  }
+}
+/* marine stations the NBM text bulletins cover (NDBC buoys); the nearest within 150 km is used */
+const NBM_MARINE = [
+  ["44013",42.346,-70.651,"Boston"],["44025",40.251,-73.164,"Long Island"],["44065",40.369,-73.703,"NY Harbor entrance"],["44009",38.461,-74.692,"Delaware Bay"],
+  ["44014",36.603,-74.837,"Virginia Beach"],["41025",35.010,-75.454,"Diamond Shoals"],["41013",33.436,-77.743,"Frying Pan Shoals"],["41004",32.501,-79.099,"Edisto"],
+  ["41008",31.400,-80.866,"Grays Reef"],["41112",30.709,-81.292,"Fernandina Beach"],["41012",30.041,-80.533,"St. Augustine"],["41009",28.501,-80.184,"Canaveral"],
+  ["41113",28.400,-80.533,"Cape Canaveral nearshore"],["41114",27.551,-80.225,"Fort Pierce"],["41010",28.878,-78.467,"Canaveral East"],
+  ["42036",28.501,-84.508,"West Tampa"],["42013",27.173,-82.924,"C10 West Florida"],["42022",27.505,-83.741,"C12 West Florida"],["42003",25.925,-85.615,"East Gulf"],
+  ["42039",28.787,-86.007,"Pensacola"],["42040",29.207,-88.226,"Mobile South"],["42001",25.942,-89.657,"Mid Gulf"],["42035",29.232,-94.413,"Galveston"],
+  ["42019",27.910,-95.345,"Freeport"],["42020",26.968,-96.693,"Corpus Christi"],
+  ["46086",32.499,-118.052,"San Clemente Basin"],["46025",33.755,-119.045,"Santa Monica Basin"],["46042",36.785,-122.396,"Monterey"],["46026",37.750,-122.838,"San Francisco"],
+  ["46013",38.235,-123.317,"Bodega Bay"],["46050",44.669,-124.546,"Stonewall Bank"],["46041",47.353,-124.742,"Cape Elizabeth"],["51201",21.671,-158.117,"Waimea Bay"]
+];
+function nearestNBMMarine(lat, lon){
+  const km = (a, b, c, d) => { const R = 6371, x = (d - b)*Math.PI/180*Math.cos((a + c)/2*Math.PI/180), y = (c - a)*Math.PI/180; return R*Math.hypot(x, y); };
+  let best = null; for (const [id, la, lo, name] of NBM_MARINE){ const d = km(lat, lon, la, lo); if (!best || d < best.km) best = { id, name, km:d }; }
+  return best && best.km <= 150 ? best : null;
+}
+/* the NWS marine forecast text for the zone holding the point (coastal waters, then offshore) */
+async function fetchCWF(lat, lon){
+  for (const type of ["coastal", "offshore"]){
+    let z; try { z = await getJSON(`https://api.weather.gov/zones?type=${type}&point=${(+lat).toFixed(4)},${(+lon).toFixed(4)}`, 15000); } catch (e) { continue; }
+    const f = (z.features || [])[0]; if (!f || !f.properties) continue;
+    const id = f.properties.id, name = f.properties.name;
+    const js = await getJSON(`https://api.weather.gov/zones/forecast/${id}/forecast`, 15000), P = js.properties || {};
+    const periods = (P.periods || []).map(p => ({ name:p.name, text:p.detailedForecast })).filter(p => p.text);
+    if (periods.length) return { id, name, updated: P.updated || P.updateTime || null, periods };
+  }
+  return null;
 }
 /* a marine member carries only sea-state fields; give it the standard ones (empty) so blocks and blends work */
 function marineMember(m, n){ for (const k of new Set(Object.values(VMAP))) if (!m[k]) m[k] = new Array(n).fill(null); m.gap = 3; const keep = {}; MARINE_KEYS.forEach(k => keep[k] = m[k]); deriveMember(m, n); Object.assign(m, keep); return m; }
@@ -575,6 +669,10 @@ async function fetchNDFD(sites, TL){
       fill("windSpeed", "s10"); fill("windDirection", "d10"); fill("windGust", "g10");
       fill("visibility", "vis"); fill("ceilingHeight", "cig", v => v*M2FT);
       fill("transportWindSpeed", "ndfdTw"); fill("transportWindDirection", "ndfdTwd"); fill("twentyFootWindSpeed", "ndfd20"); fill("mixingHeight", "ndfdMix");
+      /* waves, where the point is in or next to the NWS marine grids (heights in m, given as ft) */
+      if (PERS){ MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
+        fill("waveHeight", "wvh", v => v*M2FT); fill("wavePeriod", "wvp"); fill("waveDirection", "wvd");
+        fill("primarySwellHeight", "swh", v => v*M2FT); fill("primarySwellDirection", "swd"); fill("windWaveHeight", "wwh", v => v*M2FT); }
       /* probabilities as intervals, like MOS */
       const ivs = (name, kind) => { const prop = P[name]; if (!prop || !prop.values) return; for (const it of prop.values){ const [st, d] = String(it.validTime).split("/"); const a = Date.parse(st); if (it.value == null) continue; iv[kind].push({ a, b: a + dur(d)*H, p: Math.max(0, Math.min(1, it.value/100)) }); } };
       ivs("probabilityOfPrecipitation", "pop"); ivs("probabilityOfThunder", "tst");
@@ -591,7 +689,8 @@ async function fetchNDFD(sites, TL){
       for (let i = 0; i < TL.n; i++){ if (m.s10[i] != null && (m.g10[i] == null || m.g10[i] < m.s10[i])) m.g10[i] = m.s10[i]; }
       /* fire weather: NDFD mixing height and transport wind stand in for the model fields */
       m.blh = m.ndfdMix.slice();   /* meters, as the model boundary-layer height */
-      m.gap = 3; deriveMember(m, TL.n);
+      const keepW = {}; if (PERS) MARINE_KEYS.forEach(k => { if (m[k] && m[k].some(v => v != null)) keepW[k] = m[k]; });
+      m.gap = 3; deriveMember(m, TL.n); Object.assign(m, keepW);
       if (FIRE) for (let i = 0; i < TL.n; i++){ if (m.ndfd20[i] != null && m.s20) m.s20[i] = m.ndfd20[i]; }
       out[s.id] = { members:[m], iv, run: Date.parse(P.updateTime || P.validTimes && String(P.validTimes).split("/")[0]) || null };
     } catch (e) { /* this point isn't in an NWS grid, or the NWS isn't reachable */ }
@@ -726,8 +825,8 @@ function blockOf(m, row, TL){
   if (m.pr){ let s2 = 0, n2 = 0, mx2 = null; for (const i of rng){ const v = m.pr[i]; if (v == null) continue; s2 += v; n2++; if (mx2 == null || v > mx2) mx2 = v; } o.qpf = n2 ? s2 : null; o.prmax = mx2; }
   if (RHROW){
     /* RH like temperature; waves: highest in a block, period and water temperature averaged, direction from the first hour */
-    const how = { rh:"min", wvh:"max", swh:"max", wvp:"mean", sst:"mean" };
-    for (const k of ["rh", ...MARINE_KEYS]){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 || k === "wvd" ? a[rng[0]] : agg(a, how[k]); }
+    const how = { rh:"min", wvh:"max", swh:"max", wwh:"max", wvp:"mean", swp:"mean", sst:"mean" };
+    for (const k of ["rh", ...MARINE_KEYS]){ const a = m[k]; if (!a) continue; o[k] = row.len === 1 || DIR_KEYS.has(k) ? a[rng[0]] : agg(a, how[k]); }
   }
   if (FIRE){
     const how = { rh:"min", vpd:"max", mixh:"max", tw:"mean", vr:"max", di:"max", lvori:"max", invh:"min", invlow:"max" };
@@ -842,14 +941,16 @@ const BLEND_GROUPS = [
   ["wind",    "Winds (every height, peaks and direction)"],
   ["precip",  "Precipitation chance and rain amount"],
   ["thunder", "Lightning chance"],
+  ["waves",   "Waves and sea state"],
 ];
-const BLEND_PRESETS = [["all", "All selected sources"], ["mos", "MOS and LAMP"], ["hires", "High resolution"], ["global", "Global models"], ["ens", "Ensembles"], ["nbm", "NBM (gridded and text)"], ["nws", "NWS forecast"], ["custom", "Choose sources…"]];
+const BLEND_PRESETS = [["all", "All selected sources"], ["mos", "MOS and LAMP"], ["hires", "High resolution"], ["global", "Global models"], ["ens", "Ensembles"], ["nbm", "NBM (gridded and text)"], ["nws", "NWS forecast"], ["wave", "Wave models"], ["custom", "Choose sources…"]];
 function blendGroupOf(k){
   if (/^(t|td|wbgt|rh|tmax|tmin|hix)$/.test(k)) return "temp";
   if (/^(sky|vis|vmin|cig)$/.test(k)) return "sky";
   if (/^([sg]\d+|smax|gmax|dir|du|dv)$/.test(k)) return "wind";
   if (/^(qpf|prmax|pop|pp\d?)$/.test(k)) return "precip";
   if (/^(tst|lt\d?)$/.test(k)) return "thunder";
+  if (/^(wvh|swh|wwh|wvp|swp|wvd|swd|sst)$/.test(k)) return "waves";
   return null;
 }
 function blendAllows(prefs, grp, s){
@@ -862,6 +963,7 @@ function blendAllows(prefs, grp, s){
     case "ens": return fam === "ens";
     case "nbm": return NBM_FAMILY.has(id);
     case "nws": return fam === "nws";
+    case "wave": return fam === "wave";
     case "custom": return (c.ids || []).includes(id);
   }
   return true;
@@ -873,7 +975,9 @@ function aggregate(G, prefs){
   const famN = ri => { if (famAt.has(ri)) return famAt.get(ri); const n = fam.filter(s => s.blocks.some(b => b[ri] && b[ri].t != null)).length; famAt.set(ri, n); return n; };
   const share = (s, k, ri) => NBM_FAMILY.has(s.def.id) && !/^lt|tst/.test(k) ? 1/Math.max(1, famN(ri)) : 1;
   const WK = (s, k, ri) => W0(s)*autoFactor(G, prefs, s.def.id, k, rows[ri] ? rows[ri].a : Date.now())*share(s, k, ri);
-  const val = {}, srcv = {}, band = {}, mem = {};
+  const val = {}, srcv = {}, band = {}, mem = {}, wband = {};
+  /* wave heights show as a range between two percentiles of the wave models (25th to 75th unless changed) */
+  const SP = Array.isArray(prefs.seaPct) && prefs.seaPct.length === 2 ? prefs.seaPct.map(Number) : [25, 75];
   const scal = ["t","td","wbgt","sky","qpf", ...hkeys(), ...(FIRE ? FIRE_KEYS : []), ...(PERS ? ["rh", ...MARINE_KEYS] : RHROW ? ["rh"] : [])];
   for (const k of [...scal, "dir", ...(FIRE ? ["tdir"] : [])]){ val[k] = []; srcv[k] = {}; band[k] = []; }
   for (const k of new Set(["tmax","tmin","smax","gmax","vmin", ...PARAMS.filter(p => p.ex).map(p => p.ex)])) mem[k] = [];
@@ -896,8 +1000,15 @@ function aggregate(G, prefs){
         pairs.push([mean, w]);
         bs.forEach(b => { vals.push(b[k]); wts.push(w*(b.lw ?? 1)/lwSum); });
       }
+      if (DIR_KEYS.has(k)){
+        /* wave directions: a vector mean, so 350° and 10° average to north */
+        let U = 0, V = 0, W = 0; for (const [d, w] of pairs){ if (d == null) continue; U += Math.sin(d*Math.PI/180)*w; V += Math.cos(d*Math.PI/180)*w; W += w; }
+        val[k][ri] = W ? (Math.atan2(U, V)*180/Math.PI + 360) % 360 : null; band[k][ri] = null; continue;
+      }
       val[k][ri] = wmean(pairs);
-      band[k][ri] = vals.length >= 6 ? wquant(vals, wts, [0.1, 0.9]) : null;
+      /* waves blend a handful of models, so their spread shows from 3 */
+      band[k][ri] = vals.length >= (MARINE_KEYS.includes(k) ? 3 : 6) ? wquant(vals, wts, [0.1, 0.9]) : null;
+      if (MARINE_KEYS.includes(k)) (wband[k] = wband[k] || [])[ri] = vals.length >= 3 ? wquant(vals, wts, [SP[0]/100, SP[1]/100]) : null;
     }
     let U = 0, V = 0, ww = 0;
     let onDir = onFor("dir"); if (onDir !== on && !onDir.some(s => s.blocks.some(b => b[ri] && b[ri].du != null))) onDir = on;
@@ -967,7 +1078,7 @@ function aggregate(G, prefs){
     for (const o of (G.ero || [])){ if (r.a < o.b && r.b > o.a && inGeom(G.site.lon, G.site.lat, o.geom) && SEV.indexOf(o.cat) > SEV.indexOf(best)) best = o.cat; }
     return best;
   });
-  return { val, srcv, band };
+  return { val, srcv, band, wband };
 }
 /* which window a precip/lightning cell represents */
 /* which window a precip/lightning cell represents:

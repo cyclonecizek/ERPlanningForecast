@@ -113,7 +113,7 @@ function burnExample(){
 }
 function persDefaults(){
   const st = Math.ceil(Date.now()/H)*H;
-  return { op:"", title:"My Forecast", place:{ name:"Melbourne, FL", lat:28.0836, lon:-80.6081 }, tz:"America/New_York", start:st, end:st + 3*24*H, hourly:"all", marine:false, summary:null, concerns:null, gusts:[20, 25, 30], constraints:[] };
+  return { op:"", title:"My Forecast", place:{ name:"Melbourne, FL", lat:28.0836, lon:-80.6081 }, tz:"America/New_York", start:st, end:st + 3*24*H, hourly:"all", marine:false, summary:null, concerns:null, gusts:[20, 25, 30], seas:[2, 4, 6], nbmStn:"", constraints:[] };
 }
 function expDefaults(){
   if (PERSONAL) return persDefaults();
@@ -186,16 +186,20 @@ function applyPersonalConfig(exp){
   const gust = (exp.gusts || [20, 25, 30]).map(v => ({ k:`xg${v}`, g:"Gust chances (%)", l:`>${v} mph`, s:"gusts", chip:`Gusts >${v}`, kind:"prob", ex:"g33", dep:["g33"], op:">", v: v*0.868976, unit:"%", step:1, lo:0, hi:100, title:`Chance of gusts over ${v} mph`, csv:`p_gust_gt${v}mph_pct` }));
   const list = [...["sky","t","td"].map(base),
     { k:"rh", g:"Temperature (°F)", l:"Humidity", s:"%", kind:"num", unit:"%", step:1, lo:1, hi:100, title:"Relative humidity", csv:"rh_pct" },
-    ...["pp1","pp3","pp6","lt1","lt3","lt6"].map(base),
+    ...["pp1","pp3","pp6"].map(base), { ...base("qpf"), g:"Precip prob (%)", l:"Rain", s:"amount, in", title:"Rain amount over the row (in)", csv:"rain_in" }, ...["lt1","lt3","lt6"].map(base),
     { k:"s33", g:"Wind (kt)", l:"Wind", s:"10 m", kind:"num", unit:"kt", step:1, lo:0, title:"Wind speed (10 m)", csv:"wind_kt" },
     { k:"g33", g:"Wind (kt)", l:"Gusts", s:"10 m", kind:"num", unit:"kt", step:1, lo:0, title:"Wind gusts (10 m)", peakOf:"s33", csv:"gust_kt" },
     { ...base("dir"), g:"Wind (kt)", s:"10 m" }, ...gust,
     ...(exp.marine ? [
-      { k:"wvh", g:"Waves and sea state", l:"Waves", s:"ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Significant wave height", csv:"wave_ft" },
-      { k:"swh", g:"Waves and sea state", l:"Swell", s:"ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Swell height", csv:"swell_ft" },
-      { k:"wvp", g:"Waves and sea state", l:"Period", s:"s", kind:"num", unit:"s", step:1, lo:0, title:"Wave period", csv:"wave_period_s" },
-      { k:"wvd", g:"Waves and sea state", l:"From", s:"°", kind:"num", unit:"°", step:10, lo:0, hi:360, title:"Wave direction (from)", csv:"wave_dir_deg" },
-      { k:"sst", g:"Waves and sea state", l:"Water", s:"°F", kind:"num", unit:"°F", step:1, title:"Water temperature", csv:"water_temp_f" }] : [])];
+      { k:"wvh", g:"Waves and sea state", l:"Seas", s:"sig. ht, ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Seas: significant wave height (ft)", csv:"seas_ft" },
+      { k:"wvp", g:"Waves and sea state", l:"Period", s:"dominant, s", kind:"num", unit:"s", step:1, lo:0, title:"Dominant wave period (s)", csv:"wave_period_s" },
+      { k:"wvd", g:"Waves and sea state", l:"From", s:"waves", kind:"num", unit:"°", step:10, lo:0, hi:360, title:"Wave direction (from)", csv:"wave_dir_deg" },
+      { k:"wwh", g:"Waves and sea state", l:"Wind waves", s:"ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Wind-wave height (ft)", csv:"wind_wave_ft" },
+      { k:"swh", g:"Waves and sea state", l:"Swell", s:"ft", kind:"num", unit:"ft", step:0.5, lo:0, title:"Swell height (ft)", csv:"swell_ft" },
+      { k:"swp", g:"Waves and sea state", l:"Swell period", s:"s", kind:"num", unit:"s", step:1, lo:0, title:"Swell period (s)", csv:"swell_period_s" },
+      { k:"swd", g:"Waves and sea state", l:"Swell from", s:"°", kind:"num", unit:"°", step:10, lo:0, hi:360, title:"Swell direction (from)", csv:"swell_dir_deg" },
+      { k:"sst", g:"Waves and sea state", l:"Water", s:"°F", kind:"num", unit:"°F", step:1, title:"Water temperature", csv:"water_temp_f" },
+      ...(exp.seas || [2, 4, 6]).filter(v => +v > 0).map(v => ({ k:`xw${String(v).replace(".", "_")}`, g:"Sea chances (%)", l:`>${v} ft`, s:"seas", chip:`Seas >${v} ft`, kind:"prob", ex:"wvh", dep:["wvh"], op:">", v:+v, unit:"%", step:1, lo:0, hi:100, title:`Chance of seas over ${v} ft (share of the wave models, weighted)`, csv:`p_seas_gt${v}ft_pct` }))] : [])];
   const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg" };
   list.forEach(p => { if (CSVN[p.k]) p.csv = CSVN[p.k]; });
   PARAMS.splice(0, PARAMS.length, ...list);
@@ -309,6 +313,8 @@ function guidanceFor(sid){
       /* amounts keep two decimals (a trace under 0.005 in shows as 0) */
       if (p.unit === "in") return v == null ? null : Math.round(v*100)/100;
       if (p.unit === "kPa") return v == null ? null : Math.round(v*10)/10;
+      /* wave heights to a tenth of a foot */
+      if (p.unit === "ft" && p.g === "Waves and sea state") return v == null ? null : Math.round(v*10)/10;
       return rnd(v);
     });
   }
@@ -609,9 +615,20 @@ function qcIssues(sid, OF){
 }
 
 /* ---------- formatting ---------- */
-function fmt(p, v){
+/* wave heights (seas, wind waves, swell) show as a range to the nearest foot: two percentiles of the wave
+   models (25th to 75th unless changed in the waves options), moved with any edit, always including the value */
+const isWaveHt = p => p && p.unit === "ft" && p.g === "Waves and sea state";
+function waveRange(p, v, sid, i){
+  if (v == null) return null;
+  const A = sid != null && S.agg ? S.agg[sid] : null, b = A && A.wband && A.wband[p.k] ? A.wband[p.k][i] : null, g = A && A.val && A.val[p.k] ? A.val[p.k][i] : null;
+  let lo = v, hi = v; if (b && g != null){ lo = b[0] + (v - g); hi = b[1] + (v - g); }
+  const c = Math.round(v), L = Math.max(0, Math.min(Math.round(lo), c)), Hh = Math.max(Math.round(hi), c);
+  return { lo:L, hi:Hh, text: L === Hh ? String(L) : `${L}–${Hh}` };
+}
+function fmt(p, v, sid, i){
   if (v === undefined) return "";
   if (v == null) return "";
+  if (isWaveHt(p)) return i == null ? String(Math.round(v)) : waveRange(p, v, sid ?? prefs.site, i).text;
   if (isWind(p)) return String(Math.round(v*wfac()));
   if (p.kind === "sky") return skyCat(v);
   if (p.kind === "dir") return compass(v);
@@ -925,13 +942,31 @@ function persSetupHTML(){
       <span class="seg" id="pStep" role="group" aria-label="Rows"><button type="button" data-step="all">Hourly</button><button type="button" data-step="0">3-hourly</button></span>
       <label class="chk"><input type="checkbox" id="pMarine"> Waves and sea state (on the water)</label>
     </div>
+    <div class="psrow" id="pMarineOpts" hidden>
+      <label>Chances of seas over (ft) <input id="pSeas" style="width:110px" placeholder="2, 4, 6" autocomplete="off"></label>
+      <label>Sea height range: percentiles <span class="pfind"><input id="pSeaLo" type="number" min="0" max="49" step="5" style="width:64px" aria-label="Low percentile"> to <input id="pSeaHi" type="number" min="51" max="100" step="5" style="width:64px" aria-label="High percentile"></span></label>
+      <label>NBM marine station <input id="pNbmStn" style="width:90px" placeholder="auto" autocomplete="off" maxlength="8"></label><span class="mut" id="pNbmNote"></span>
+    </div>
     <p class="mut" id="pRangeNote"></p>
   </section>
+  <section class="panel perscwf" id="persCwf" aria-label="NWS marine forecast" hidden></section>
   <section class="panel perssum" id="persSum" aria-label="Summary">
     <div class="psh"><h3>Summary</h3><span class="mut" id="pSumState"></span><span class="sp"></span><button class="btn ghost" type="button" id="pSumReset">Rewrite from the forecast</button></div>
     <label class="col">Main concerns <span class="mut">one per line</span><textarea id="pConc" rows="3"></textarea></label>
     <label class="col">Discussion<textarea id="pDisc" rows="5"></textarea></label>
   </section>`;
+}
+/* the NBM marine station: the one typed in, else the nearest within 150 km */
+function nbmStation(){ const e = prefs.exp || {}, p = e.place || {}; if (e.nbmStn) return { id:e.nbmStn, name:"", km:0 }; return p.lat != null ? nearestNBMMarine(+p.lat, +p.lon) : null; }
+/* the NWS marine forecast text for the point's zone */
+function renderPersCwf(){
+  const el = $("persCwf"); if (!el) return;
+  const c = S.cwf; if (!PERSONAL || !prefs.exp.marine || !c){ el.hidden = true; return; }
+  el.hidden = false;
+  if (c.loading){ el.innerHTML = `<div class="psh"><h3>NWS marine forecast</h3><span class="mut">loading</span></div>`; return; }
+  if (c.none || c.err || !c.periods){ el.innerHTML = `<div class="psh"><h3>NWS marine forecast</h3><span class="mut">${c.err ? "not reachable right now" : "this point isn't in an NWS coastal or offshore waters zone"}</span></div>`; return; }
+  el.innerHTML = `<div class="psh"><h3>NWS marine forecast</h3><span class="mut">${hesc(c.id)} · ${hesc(c.name)}${c.updated ? ` · updated ${hesc(dtShow(Date.parse(c.updated)))}` : ""}</span><span class="sp"></span><a class="btn ghost" href="https://forecast.weather.gov/shmrn.php?mz=${encodeURIComponent(c.id.toLowerCase())}" target="_blank" rel="noopener">Full forecast</a></div>
+    <dl class="cwf">${c.periods.slice(0, 6).map(p => `<dt>${hesc(p.name)}</dt><dd>${hesc(p.text)}</dd>`).join("")}</dl>`;
 }
 /* a written summary from the official forecast: highs and lows, rain and thunder, wind and gusts, waves */
 function persSummaryAuto(){
@@ -965,7 +1000,10 @@ function persSummaryAuto(){
   if (e.marine && o.wvh){
     const wi = idxMax(o.wvh), wl = idxMin(o.wvh);
     if (wi >= 0){ const per = o.wvp && o.wvp[wi] != null ? `, ${Math.round(o.wvp[wi])} s` : ""; { const lo2 = Math.round(o.wvh[wl]*2)/2, hi2 = Math.round(o.wvh[wi]*2)/2; text += hi2 - lo2 < 1 ? ` Seas around ${hi2} ft${per}.` : ` Seas run ${lo2}–${hi2} ft${per}, highest around ${when(wi)}.`; }
-      if (o.wvh[wi] >= 4) conc.push(`Seas up to ${Math.round(o.wvh[wi])} ft around ${when(wi)}`); }
+      const sv = (e.seas || [2, 4, 6]).filter(v => v >= 3).sort((a, b) => b - a); let said = false;
+      for (const v of sv){ const a = o[`xw${String(v).replace(".", "_")}`], k = idxMax(a); if (k >= 0 && a[k] >= 50){ conc.push(`Seas over ${v} ft likely around ${when(k)} (${Math.round(a[k])}%)`); said = true; break; } }
+      if (!said && o.wvh[wi] >= 4) conc.push(`Seas up to ${Math.round(o.wvh[wi])} ft around ${when(wi)}`); }
+    if (o.swp){ const pi = idxMax(o.swp); if (pi >= 0 && o.swp[pi] >= 10 && o.swh && o.swh[pi] >= 2) text += ` A longer-period swell (${Math.round(o.swh[pi])} ft at ${Math.round(o.swp[pi])} s${o.swd && o.swd[pi] != null ? ` from the ${compassWord(o.swd[pi])}` : ""}) arrives around ${when(pi)}.`; }
     const st = (o.sst || []).filter(v => v != null); if (st.length) text += ` Water temperature near ${Math.round(st[0])}°F.`;
   }
   if (hi >= 0 && o.t[hi] >= 95) conc.push(`Heat: highs near ${Math.round(o.t[hi])}°F`);
@@ -991,9 +1029,11 @@ function renderPersSetup(force){
   const e = prefs.exp, ae = document.activeElement, set = (id, v) => { if (force || $(id) !== ae) $(id).value = v ?? ""; };
   /* the calendar only offers times the forecast covers */
   const lim = persLimits(); ["pStart", "pEnd"].forEach(id => { $(id).min = dtInput(lim.lo); $(id).max = dtInput(lim.hi); $(id).step = 3600; });
-  if ($("pRangeNote")) $("pRangeNote").textContent = `${S.rows ? S.rows.length : 0} rows · forecast available to ${dtShow(lim.hi)}`;
+  if ($("pRangeNote")) $("pRangeNote").textContent = `${S.rows && S.rows.length ? S.rows.length + " rows · " : ""}forecast available to ${dtShow(lim.hi)}`;
   set("pTitle", e.title); set("pName", e.place && e.place.name); set("pLat", e.place && (+e.place.lat).toFixed(4)); set("pLon", e.place && (+e.place.lon).toFixed(4));
   set("pStart", dtInput(e.start)); set("pEnd", dtInput(e.end)); $("pMarine").checked = !!e.marine;
+  $("pMarineOpts").hidden = !e.marine; set("pSeas", (e.seas || [2, 4, 6]).join(", ")); set("pNbmStn", e.nbmStn || ""); { const sp = prefs.seaPct || [25, 75]; set("pSeaLo", sp[0]); set("pSeaHi", sp[1]); }
+  { const p = e.place || {}, nb = nbmStation(); $("pNbmNote").textContent = e.nbmStn ? "" : nb ? `auto: ${nb.id} ${nb.name}, ${Math.round(nb.km)} km away` : "no NBM marine station within 150 km"; }
   document.querySelectorAll("#pStep button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.step) === String(e.hourly === "all" ? "all" : "0")));
   $("pTz").textContent = `Time zone: ${e.tz || TZ}`;
 }
@@ -1073,6 +1113,12 @@ function bindPersonal(){
   $("pQuick").onclick = ev => { const b = ev.target.closest("[data-h]"); if (!b) return; const lim = persLimits(), st = Math.max(lim.lo, Math.ceil(Date.now()/H)*H); prefs.exp.start = st; prefs.exp.end = Math.min(lim.hi, st + (+b.dataset.h)*H); expChanged(false); renderPersSetup(true); };
   $("pStep").onclick = ev => { const b = ev.target.closest("[data-step]"); if (!b) return; prefs.exp.hourly = b.dataset.step === "all" ? "all" : "0"; expChanged(false); renderPersSetup(); };
   $("pMarine").onchange = ev => { prefs.exp.marine = ev.target.checked; prefs.exp.summary = null; prefs.exp.concerns = null; expChanged(true); };
+  $("pSeas").onchange = ev => { const v = ev.target.value.split(/[ ,;]+/).map(Number).filter(x => x > 0 && x < 60).slice(0, 4); prefs.exp.seas = v.length ? [...new Set(v)].sort((a, b) => a - b) : [2, 4, 6]; prefs.exp.summary = null; prefs.exp.concerns = null; expChanged(false); renderPersSetup(true); };
+  const seaPct = () => { let a = Math.round(+$("pSeaLo").value), b = Math.round(+$("pSeaHi").value);
+    if (!isFinite(a) || a < 0 || a > 49) a = 25; if (!isFinite(b) || b < 51 || b > 100) b = 75;
+    prefs.seaPct = [a, b]; savePrefs(); recomputeAgg(); renderAll(); renderPersSetup(true); };
+  $("pSeaLo").onchange = seaPct; $("pSeaHi").onchange = seaPct;
+  $("pNbmStn").onchange = ev => { prefs.exp.nbmStn = ev.target.value.trim().toUpperCase(); expChanged(true); };
   $("pConc").oninput = ev => { prefs.exp.concerns = ev.target.value.split("\n").map(x => x.trim()).filter(Boolean); savePrefs(); renderPersSummary(); };
   $("pDisc").oninput = ev => { prefs.exp.summary = ev.target.value; savePrefs(); renderPersSummary(); };
   $("pSumReset").onclick = () => { prefs.exp.summary = null; prefs.exp.concerns = null; savePrefs(); renderPersSummary(); };
@@ -1081,7 +1127,7 @@ function bindPersonal(){
 /* planning page: the public copy option in the publish dialog */
 function bindPublicCopy(){
   if (EXPO || LMEF || !$("fmtH") || $("fmtPub")) return;
-  $("fmtH").closest("fieldset").insertAdjacentHTML("afterend", `<fieldset class="pubpub"><legend>Public products page</legend><div class="opts"><label><input type="checkbox" id="fmtPub"> Public copy (a ZIP to upload to the products repository)</label><label class="pubok" hidden><input type="checkbox" id="pubCleared"> I confirm this forecast is cleared for public release</label></div></fieldset>`);
+  $("fmtH").closest("fieldset").insertAdjacentHTML("afterend", `<fieldset class="pubpub"><legend>Public products page</legend><div class="opts"><label><input type="checkbox" id="fmtPub"> Public copy (release to the public products page)</label><label class="pubok" hidden><input type="checkbox" id="pubCleared"> I confirm this forecast is cleared for public release</label></div></fieldset>`);
   $("fmtPub").onchange = e => { document.querySelector(".pubpub .pubok").hidden = !e.target.checked; };
 }
 function bindExp(){
@@ -1174,8 +1220,9 @@ const chartGroups = () => LMEF ? [
   ["Wind", [...HEIGHTS.map(ft => "w" + ft).filter(v => VIEWS[v]), ...(P.dir ? ["dir"] : [])]],
 ].filter(g => g[1].length) : [
   ["Sky and temperature", ["sky","t","td","wbgt"].filter(k => P[k])],
-  ["Precipitation and lightning", ["pp","lt"].flatMap(k => !P[k + "1"] ? [] : P[k + "3"] ? [k] : [k + "1"])],
+  ["Precipitation and lightning", [...["pp","lt"].flatMap(k => !P[k + "1"] ? [] : P[k + "3"] ? [k] : [k + "1"]), ...(PERSONAL && P.qpf ? ["qpf"] : [])]],
   ["Wind", [...HEIGHTS.map(ft => "w" + ft).filter(v => VIEWS[v]), ...(P.dir ? ["dir"] : [])]],
+  ...(PERSONAL ? [["Waves and sea state", ["wvh","wvp","wwh","swh","swp","sst"].filter(k => P[k])]] : []),
   [EXPO ? "Constraint probability" : LMEF ? "Constraints" : "Exceedance probability", PARAMS.filter(p => p.k.startsWith("x")).map(p => p.k)],
   ...(LMEF ? [["Probability of violation", PARAMS.filter(p => p.k === "rpov").map(p => p.k)], ["LLCC rules", PARAMS.filter(p => /^r/.test(p.k) && p.k !== "rpov").map(p => p.k)]] : []),
 ].filter(g => g[1].length);
@@ -1276,7 +1323,7 @@ function renderRowPick(){
   PARAMS.forEach(p => { const g = grpLabel(p.g), last = groups[groups.length - 1]; if (last && last.g === g) last.ps.push(p); else groups.push({ g, ps:[p] }); });
   $("rowList").innerHTML = groups.map(gr => { const on = gr.ps.filter(p => !h.has(p.k)).length;
     return `<div class="rowfam"><label class="rg"><input type="checkbox" data-rg="${hesc(gr.g)}" ${on === gr.ps.length ? "checked" : ""}> <b>${hesc(gr.g)}</b></label>${gr.ps.map(p => `<label><input type="checkbox" data-row="${p.k}" ${h.has(p.k) ? "" : "checked"}> ${hesc(p.l)}${p.s ? ` <span class="mut">${hesc(p.s)}</span>` : ""}</label>`).join("")}</div>`; }).join("")
-    + (IS_PLANNING ? `<div class="rowfam"><label class="rg"><input type="checkbox" data-row="qpfday" ${h.has("qpfday") ? "" : "checked"}> <b>Daily rainfall range</b></label><span class="mut" style="font-size:12px">24 h percentiles, in the panel and every product</span></div>` : "");
+    + (IS_PLANNING || PERSONAL ? `<div class="rowfam"><label class="rg"><input type="checkbox" data-row="qpfday" ${h.has("qpfday") ? "" : "checked"}> <b>Daily rainfall range</b></label><span class="mut" style="font-size:12px">24 h percentiles, in the panel and every product</span></div>` : "");
   document.querySelectorAll("#rowList [data-rg]").forEach(x => { const gr = groups.find(g => g.g === x.dataset.rg); const on = gr.ps.filter(p => !h.has(p.k)).length; x.indeterminate = on > 0 && on < gr.ps.length; });
   const nOn = PARAMS.filter(p => !h.has(p.k)).length; $("rowSum").textContent = nOn === PARAMS.length ? "all rows" : `${nOn} of ${PARAMS.length} rows`;
 }
@@ -1311,7 +1358,7 @@ function renderBlendBy(){
     });
   }
   const gs = prefs.grpSrc || {}, fb = Object.values(S.G).reduce((m, G) => { for (const [g, set] of Object.entries(G.blendFallback || {})) m[g] = (m[g] || 0) + set.size; return m; }, {});
-  const used = BLEND_GROUPS.filter(([g]) => !(PERSONAL && g === "thunder"));
+  const used = BLEND_GROUPS.filter(([g]) => !(PERSONAL && g === "thunder") && (g !== "waves" || (PERSONAL && prefs.exp && prefs.exp.marine)));
   $("blendBy").innerHTML = `<h3>Blend by parameter</h3><p class="mut">Each group blends only the sources you choose here (your weights and the automatic weights still apply among them). An hour the chosen sources don't cover uses all sources.</p>
     <table class="bbt"><tbody>${used.map(([g, label]) => { const c = gs[g] || {}, mode = c.mode || "all";
       return `<tr><th>${label}</th><td><select data-bg="${g}">${BLEND_PRESETS.map(([k, l]) => `<option value="${k}" ${k === mode ? "selected" : ""}>${l}</option>`).join("")}</select>${fb[g] ? ` <span class="mut" title="Hours where the chosen sources had no value">${fb[g]} row${fb[g] === 1 ? "" : "s"} used all sources</span>` : ""}
@@ -1421,7 +1468,7 @@ function renderTable(){
       const bad = QC.bad[p.k] && QC.bad[p.k][i];
       const cur = S.cur && S.cur.i === i && S.cur.k === p.k;
       const c = `c ${p.kind === "sev" ? "sev" : ""} ${gs ? "gstart" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${!edd && OF.pc && OF.pc[p.k] && OF.pc[p.k][i] !== undefined ? "pf" : ""} ${!edd && OF.pc && OF.pc.__flags && OF.pc.__flags[p.k] && OF.pc.__flags[p.k][i] != null ? "ng" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""}`;
-      h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || (nudgeNote(p, i) + cellTitle(p, r, i))}">${na ? "–" : fmt(p, v)}</td>`;
+      h += `<td class="${c}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` rowspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || (nudgeNote(p, i) + cellTitle(p, r, i))}">${na ? "–" : fmt(p, v, s.id, i)}</td>`;
     }
     h += `</tr>`;
   });
@@ -1452,7 +1499,7 @@ function renderTableAcross(){
       const v = o[p.k][i], na = v === undefined, edd = e[p.k] && e[p.k][r.key] !== undefined;
       const bad = QC.bad[p.k] && QC.bad[p.k][i], cur = S.cur && S.cur.i === i && S.cur.k === p.k;
       const c = `c ${dstart.has(i) ? "dcol" : ""} ${na ? "na" : ""} ${edd ? "ed" : ""} ${edd && linkedFlag(s.id, p.k, S.rows[i].key) ? "lk" : ""} ${!edd && OF.pc && OF.pc[p.k] && OF.pc[p.k][i] !== undefined ? "pf" : ""} ${!edd && OF.pc && OF.pc.__flags && OF.pc.__flags[p.k] && OF.pc.__flags[p.k][i] != null ? "ng" : ""} ${bad ? "bad" : ""} ${cur ? "cur" : ""} ${S.hoverRow === i ? "hov" : ""}`;
-      h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || (nudgeNote(p, i) + cellTitle(p, r, i))}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v)}</td>`;
+      h += `<td class="${c}${sp.s > 1 ? " span" : ""}" data-k="${p.k}" data-i="${i}"${sp.s > 1 ? ` colspan="${sp.s}"` : ""} style="${na ? "" : tint(p, v)}" title="${bad || (nudgeNote(p, i) + cellTitle(p, r, i))}">${na ? "–" : p.kind === "sev" && v !== "-" ? v : fmt(p, v, s.id, i)}</td>`;
     });
     h += `</tr>`;
   }
@@ -1472,7 +1519,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); if (IS_PLANNING) renderQpfDay(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN){ renderFWF(); olLater(); } if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); if (IS_PLANNING || PERSONAL) renderQpfDay(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN){ renderFWF(); olLater(); } if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow
@@ -1637,6 +1684,7 @@ function parseInput(p, txt){
   if (p.lo != null) n = Math.max(p.lo, n); if (p.hi != null) n = Math.min(p.hi, n);
   if (p.unit === "in") return Math.round(n*100)/100;
   if (p.unit === "kPa") return Math.round(n*10)/10;
+  if (p.unit === "ft" && p.g === "Waves and sea state") return Math.round(n*10)/10;
   return Math.round(n);
 }
 function setEdit(sid, k, key, val, group, isLinked){
@@ -1837,7 +1885,7 @@ function openEditor(i, k, initial){
     inp.addEventListener("change", () => finishEditor(true, 0));
   } else {
     inp = document.createElement("input"); inp.type = "text"; inp.inputMode = p.kind === "dir" ? "text" : "decimal";
-    inp.value = initial != null ? initial : p.kind === "prob" ? (cur == null ? "" : String(cur)) : fmt(p, cur);
+    inp.value = initial != null ? initial : p.kind === "prob" ? (cur == null ? "" : String(cur)) : isWaveHt(p) ? (cur == null ? "" : String(Math.round(cur*10)/10)) : fmt(p, cur);
   }
   el.appendChild(inp); editor = { i, k, inp };
   inp.focus(); if (initial == null && inp.select) inp.select();
@@ -2080,7 +2128,7 @@ function updateCells(ks){
     const p = P[k]; if (!p) continue;
     mx.querySelectorAll(`td.c[data-k="${k}"]`).forEach(td => {
       const i = +td.dataset.i, v = OF.o[k][i]; if (v === undefined) return;
-      const txt = across() && p.kind === "sev" && v !== "-" ? v : fmt(p, v);
+      const txt = across() && p.kind === "sev" && v !== "-" ? v : fmt(p, v, s.id, i);
       if (td.textContent !== txt && !td.querySelector("input,select")) td.textContent = txt;
       td.style.cssText = tint(p, v);
       td.classList.toggle("ed", e[k] && e[k][S.rows[i].key] !== undefined);
@@ -2516,12 +2564,14 @@ function siteSheet(s, OFs, issued, by){
       else if (p.kind === "sky") row.push({ v: skyCat(v), s: st(5) });
       else if (p.kind === "dir") row.push({ v: compass(v), s: st(5) });
       else if (p.kind === "sev") row.push({ v: v === "-" ? "-" : SEV_NAME[v], s: st(5) });
+      else if (isWaveHt(p)) row.push({ v: waveRange(p, v, s.id, i).text, s: st(5) });
+      else if (p.unit === "in") row.push({ v: Math.round(v*100)/100, s: st(6) });
       else row.push({ v: Math.round(isWind(p) ? v*wfac() : v), s: st(6) });
     }
     R.push(row);
   });
   const n0 = 8, n1 = 7 + rows.length;
-  if (!EXPO && qpfShown()){
+  if ((!EXPO || PERSONAL) && qpfShown()){
     const q = qpfDaily(s.id, o);
     if (q && q.days.length){
       R.push([]);
@@ -2612,7 +2662,7 @@ const pctName = n => n === 50 ? "median" : `${ordinal(n)} percentile`;
 const pctShort = n => n === 50 ? "median" : ordinal(n);
 const qpfStartKey = () => ["0", "7", "12z"].includes(String(prefs.qpfStart)) ? String(prefs.qpfStart) : "0";
 const qpfStartText = () => ({ "0":"midnight to midnight local", "7":"0700 to 0700 local", "12z":"1200 to 1200 UTC" })[qpfStartKey()];
-const qpfShown = () => IS_PLANNING && !(prefs.hideRows || []).includes("qpfday");
+const qpfShown = () => (IS_PLANNING || PERSONAL) && !(prefs.hideRows || []).includes("qpfday");
 /* the 24 h periods from the first row to the end of the forecast; the first one may be partial (rest of today) */
 function qpfPeriods(){
   const rows = S.rows; if (!rows || !rows.length) return [];
@@ -2887,7 +2937,7 @@ function reportModel(list, issued, by){
             const len = sp.cov ? spm[own].s - (i - own) : sp.s;
             let n = 1; while (n < len && set.has(i + n)) n++;
             const v = o[p.k][own];
-            const txt = v === undefined ? "–" : p.kind === "sev" ? (v === "-" ? "-" : v) : fmt(p, v);
+            const txt = v === undefined ? "–" : p.kind === "sev" ? (v === "-" ? "-" : v) : fmt(p, v, s.id, own);
             cells.push({ text: txt, span:n, fill: v === undefined ? null : tintRGB(p, v), muted: v === undefined, day: times[ci].day });
           });
           g.rows.push({ label: p.kind === "sev" ? (p.k === "ero" ? "WPC excessive rain" : "SPC category") : colLabel(p, s), sub: p.s, cells });
@@ -2963,7 +3013,7 @@ function tintA(p, v){
 }
 /* the customer-facing explanation of the table (the editor's footnote is for forecasters) */
 function productNote(){
-  if (PERSONAL) return "Times are local to the forecast point. Chances are the chance of the event at any time in the row. Winds and gusts are at the standard 10 m height.";
+  if (PERSONAL) return "Times are local to the forecast point. Chances are the chance of the event at any time in the row. Winds and gusts are at the standard 10 m height." + (prefs.exp && prefs.exp.marine ? ` Seas, wind waves and swell are in feet, as the range between the ${ordinal((prefs.seaPct || [25, 75])[0])} and ${ordinal((prefs.seaPct || [25, 75])[1])} percentiles of the wave models.` : "");
   if (BURN) return "Rows are hourly. Prescription rows give the chance each criterion, and all of them together, is met through the hour. Mixing height is above ground; transport wind is the mean wind through the mixed layer; ventilation is mixing height × transport wind. LDSI is the Lavdas dispersion index and LVORI the MFL table from humidity and LDSI; the inversion base is where temperature first rises with height (0 ft = surface-based). Winds are in the selected unit; temperatures in °F.";
   const blocks = EXPO ? `Rows are hourly for the first ${prefs.exp && prefs.exp.hourly != null ? prefs.exp.hourly : 24} hours, then 3-hour blocks to the end of the period.` : "Rows are hourly for the first 24 hours, then 3-hour blocks through day 5 and 6-hour blocks on days 6 and 7.";
   return `${blocks} In blocks, temperature shows the warmest value for daytime blocks and the coolest for overnight blocks, winds show the block maximum, and probabilities are the chance of the event at any time in the period shown. 3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time.${EXPO ? " Constraint probabilities are the chance that the constraint is met at any time in the row." : ""} Winds are in the selected unit; temperatures in °F.`;
@@ -2985,7 +3035,7 @@ function interactiveReport(list, issued, by, logo){
             const sp = spm[i]; if (sp.cov) return 0;
             const v = OFs.o[p.k][i];
             if (v === undefined) return [sp.s, null, "–", null];
-            const txt = p.kind === "sev" ? (v === "-" ? "-" : v) : p.kind === "sky" ? skyCat(v) : p.kind === "dir" ? (v == null ? "" : compass(v)) : null;
+            const txt = p.kind === "sev" ? (v === "-" ? "-" : v) : p.kind === "sky" ? skyCat(v) : p.kind === "dir" ? (v == null ? "" : compass(v)) : isWaveHt(p) && v != null ? waveRange(p, v, st.id, i).text : null;
             return [sp.s, typeof v === "number" ? (p.unit === "in" ? Math.round(v*100)/100 : r2(v)) : v, txt, tintA(p, v)];
           }) };
       }) })),
@@ -3295,7 +3345,7 @@ function pdfReport(models, logo){
         for (let j = 0; j <= nd; j++) line(M + lw2 + j*dw, y0, M + lw2 + j*dw, y1, 0.75, 0.4);
         y = y1;
       }
-      text("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less." + (m.qpf && m.qpf.days.length && pi === 0 ? ` Daily rainfall: 24 h totals ${m.qpf.startText}, the spread of the guidance members around the official forecast.` : ""), M, Math.min(Hp - M, y + 14), fitText("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less." + (m.qpf && m.qpf.days.length && pi === 0 ? ` Daily rainfall: 24 h totals ${m.qpf.startText}, the spread of the guidance members around the official forecast.` : ""), W - 2*M, 6.5, false), { color:[125,139,151] });
+      text("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less." + (PERSONAL && prefs.exp && prefs.exp.marine ? ` Seas, wind waves and swell: the range between the ${ordinal((prefs.seaPct || [25, 75])[0])} and ${ordinal((prefs.seaPct || [25, 75])[1])} percentiles of the wave models, in feet.` : "") + (m.qpf && m.qpf.days.length && pi === 0 ? ` Daily rainfall: 24 h totals ${m.qpf.startText}, the spread of the guidance members around the official forecast.` : ""), M, Math.min(Hp - M, y + 14), fitText("3 hr and 6 hr probabilities cover the 3 or 6 hours starting at that time; a 1 hr chance appears only on hourly rows and a 3 hr chance only on rows of 3 hours or less." + (m.qpf && m.qpf.days.length && pi === 0 ? ` Daily rainfall: 24 h totals ${m.qpf.startText}, the spread of the guidance members around the official forecast.` : ""), W - 2*M, 6.5, false), { color:[125,139,151] });
       pages.push(cs.join("\n"));
     });
   }
@@ -3599,7 +3649,24 @@ async function loadAll(){
   OM_DET.forEach(d => tasks.push(det(d, false)));
   OM_ENS.forEach(d => tasks.push(det(d, true)));
   /* waves and sea state, when asked */
-  if (PERSONAL && prefs.exp.marine){ S.status.marine = { loading:true }; tasks.push((DEMO ? demoMarine(S.TL) : fetchMarine(SITES, S.TL)).then(per => { const x = per[SITES[0].id]; if (x){ addSrc(SITES[0].id, MARINE, x.members); S.status.marine = { ok:true, note:"loaded" }; } else S.status.marine = { err:"no wave data here (inland?)" }; }).catch(() => { S.status.marine = { err:"not reachable" }; }).finally(scheduleRender)); }
+  /* waves and sea state, when asked: each wave model, the NBM wave height and the NWS marine forecast text */
+  if (PERSONAL){
+    const s0 = SITES[0];
+    if (!prefs.exp.marine){ WAVES.forEach(d => S.status[d.id] = { err:"turn on waves to load" }); S.cwf = null; }
+    else {
+      WAVES.filter(d => d.models).forEach(d => tasks.push((DEMO ? demoWaves(d, S.TL) : fetchWaveModel(d, SITES, S.TL)).then(per => {
+        const x = per[s0.id]; if (x){ addSrc(s0.id, d, x.members); S.status[d.id] = { ok:true, note: x.model || "loaded" }; } else S.status[d.id] = { err:"no waves here (inland?)" };
+      }).catch(() => { S.status[d.id] = { err:"not available" }; }).finally(scheduleRender)));
+      const nb = nbmStation(), NBW = WAVES.find(d => d.id === "nbmwave");
+      if (!nb) S.status.nbmwave = { err:"no marine station nearby" };
+      else tasks.push((DEMO ? demoWaves(NBW, S.TL) : fetchNBMWaves(SITES, S.TL, nb.id)).then(per => {
+        const x = per[s0.id]; if (x){ addSrc(s0.id, NBW, x.members); S.status.nbmwave = { ok:true, note:`station ${nb.id}` }; } else S.status.nbmwave = { err:`no wave height for ${nb.id}` };
+      }).catch(() => { S.status.nbmwave = { err:"not reachable" }; }).finally(scheduleRender));
+      S.cwf = { loading:true };
+      tasks.push((DEMO ? demoCWF() : fetchCWF(s0.lat, s0.lon)).then(c => { S.cwf = c || { none:true }; }).catch(() => { S.cwf = { err:true }; }).finally(() => { renderPersCwf(); scheduleRender(); }));
+    }
+    renderPersCwf();
+  }
   if (!PERSONAL) MOS.forEach(d => tasks.push((DEMO ? demoMOS(d, S.TL) : fetchMOS(d, S.TL)).then(per => {
     let n = 0, run = null, from = "";
     SITES.forEach(s => { const x = per[s.stn]; if (x && x.members[0].t.some(v => v != null)){ addSrc(s.id, d, x.members, { iv:x.iv, run:x.run }); n++; run = x.run; from = x.from; } });
@@ -3637,10 +3704,27 @@ async function loadAll(){
 }
 
 /* ---------- demo data (only with ?demo=1) ---------- */
-async function demoMarine(TL){
-  const m = {}; MARINE_KEYS.forEach(k => m[k] = new Array(TL.n).fill(null));
-  for (let i = 0; i < TL.n; i++){ m.wvh[i] = 2.5 + 1.2*Math.sin(i/14); m.swh[i] = 1.8 + 0.6*Math.sin(i/20); m.wvp[i] = 8 + 2*Math.sin(i/30); m.wvd[i] = 80; m.sst[i] = 79; }
-  return { [SITES[0].id]: { members:[marineMember(m, TL.n)] } };
+async function demoMarine(TL){ return demoWaves(WAVES[0], TL); }
+/* demo waves: a swell train arriving midweek, each model a little different */
+async function demoWaves(d, TL){
+  const k = WAVES.indexOf(d), off = [0, 0.4, -0.3, 0.6, 0.2][k] || 0, lag = [0, 4, -3, 6, 2][k] || 0;
+  const m = {}; MARINE_KEYS.forEach(x => m[x] = new Array(TL.n).fill(null));
+  for (let i = 0; i < TL.n; i++){
+    if (d.id === "nbmwave" && i % 3) continue;
+    const j = i - lag, sw = 1.6 + 2.2/(1 + Math.exp(-(j - 70)/9)) - 1.6/(1 + Math.exp(-(j - 130)/12)), ww = 1.2 + 0.8*Math.sin(j/9) + off;
+    m.swh[i] = Math.max(0.5, sw + off*0.5); m.wwh[i] = Math.max(0.3, ww); m.wvh[i] = Math.hypot(m.swh[i], m.wwh[i]);
+    m.wvp[i] = 6 + 3/(1 + Math.exp(-(j - 70)/9)); m.swp[i] = m.wvp[i] + 2; m.wvd[i] = (75 + 20*Math.sin(j/30) + 360) % 360; m.swd[i] = 70; m.sst[i] = 77.5 + 0.4*k;
+    if (d.id === "nbmwave"){ ["swh","wwh","wvp","swp","wvd","swd","sst"].forEach(x => m[x][i] = null); }
+  }
+  if (d.id === "nbmwave") for (let i = 1; i < TL.n - 3; i++) if (m.wvh[i] == null){ const a = Math.floor(i/3)*3, b = a + 3; if (m.wvh[b] != null) m.wvh[i] = m.wvh[a] + (m.wvh[b] - m.wvh[a])*(i - a)/3; }
+  return { [SITES[0].id]: { members:[marineMember(m, TL.n)], model: d.models ? d.models[0] : "" } };
+}
+async function demoCWF(){
+  return { id:"AMZ552", name:"Volusia-Brevard County Line to Sebastian Inlet 0-20 nm", updated: new Date(Date.now() - 2*H).toISOString(), periods:[
+    { name:"Today", text:"East winds 10 to 15 knots. Seas 2 to 3 feet. Wave detail: east 3 feet at 6 seconds. Intracoastal waters a light chop. Scattered showers and isolated thunderstorms." },
+    { name:"Tonight", text:"East winds around 10 knots. Seas 2 to 3 feet. Wave detail: east 3 feet at 7 seconds. Intracoastal waters a light chop." },
+    { name:"Friday", text:"Northeast winds 15 to 20 knots. Seas 4 to 6 feet. Wave detail: northeast 5 feet at 8 seconds. Intracoastal waters choppy. Showers likely." },
+    { name:"Friday Night", text:"Northeast winds around 20 knots. Seas 5 to 7 feet. Wave detail: northeast 6 feet at 9 seconds. Intracoastal waters rough." }] };
 }
 async function demoNDFD(TL){
   const out = {}, r = rng(7);

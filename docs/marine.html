@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Marine Forecasts | 45th Weather Squadron</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=optional" rel="stylesheet">
+<style>
+:root{
+  --paper:#EEF2F1; --panel:#FFFFFF; --panel-2:#F6F8F8; --ink:#13202E; --ink-2:#4B5A68; --ink-3:#7D8B97;
+  --rule:#D4DBDF; --rule-2:#E6EBED; --accent:#0B6E79; --accent-ink:#FFFFFF; --edit:#B5730C; --edit-bg:#FFF4DF;
+  --warn:#B23A2E; --warn-bg:#FBE9E6; --ok:#2F7A4A;
+  --c1:#F6D58A; --c2:#EFA765; --c3:#E07152; --c4:#C2414A; --c5:#8E2F5B;
+  --hires:#7A4FA0; --blend:#0B6E79; --global:#3D6FB0; --ens:#8A9AA8; --mos:#B5730C; --ct:#B4472A; --peak:#3359A8;
+  --p:11,110,121; --hot:178,58,46; --cold:52,102,170;
+  --font:"Barlow", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --cond:"Barlow Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+    --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+    --warn:#F08070; --warn-bg:#3B1C18; --ok:#6CC08A;
+    --c1:#6B5A26; --c2:#7A4A26; --c3:#80382A; --c4:#7A2430; --c5:#5E1E44;
+    --hires:#B892DA; --blend:#4DBFC8; --global:#7FA8E0; --ens:#6E7F8D; --mos:#E3A53D; --ct:#F08A6A; --peak:#93B4F0;
+    --p:77,191,200; --hot:240,128,112; --cold:120,160,230;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D151D; --panel:#142029; --panel-2:#18252F; --ink:#E5ECF1; --ink-2:#A3B1BD; --ink-3:#73828F;
+  --rule:#283844; --rule-2:#1F2D38; --accent:#4DBFC8; --accent-ink:#06232A; --edit:#E3A53D; --edit-bg:#3A2A0E;
+  --warn:#F08070; --warn-bg:#3B1C18; --ok:#6CC08A;
+  --c1:#6B5A26; --c2:#7A4A26; --c3:#80382A; --c4:#7A2430; --c5:#5E1E44;
+  --p:77,191,200; color-scheme: dark;
+}
+:root{ box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+*,*::before,*::after{ box-sizing:inherit; }
+html{ scroll-padding-top:env(safe-area-inset-top,0px); }
+body{ margin:0; background:var(--paper); color:var(--ink); font:15px/1.45 var(--font); font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
+button,input,select,textarea{ font:inherit; color:inherit; }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+a{ color:var(--accent); }
+
+.top{ display:grid; grid-template-columns:1fr auto; gap:14px 28px; align-items:center; padding:18px 28px 16px; background:var(--panel); border-bottom:1px solid var(--rule); }
+.top h1{ margin:0; font:700 26px/1 var(--cond); }
+.top .where{ margin-top:6px; color:var(--ink-2); font-size:14px; }
+.top .where b{ color:var(--ink); }
+.actions{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.btn{ border:1px solid var(--rule); background:var(--panel); border-radius:8px; padding:7px 13px; cursor:pointer; font-weight:500; white-space:nowrap; text-decoration:none; color:var(--ink); display:inline-block; }
+.btn:hover{ border-color:var(--ink-3); }
+.btn.primary{ background:var(--ink); color:var(--panel); border-color:var(--ink); font-weight:600; padding:8px 18px; }
+.seg{ display:inline-flex; border:1px solid var(--rule); border-radius:8px; overflow:hidden; }
+.seg button{ border:0; background:var(--panel); padding:6px 12px; cursor:pointer; font-size:13.5px; }
+.seg button[aria-pressed="true"]{ background:var(--ink); color:var(--panel); }
+
+.statusline{ display:flex; flex-wrap:wrap; gap:8px 22px; align-items:center; padding:10px 28px; font-size:13.5px; color:var(--ink-2); border-bottom:1px solid var(--rule); background:var(--panel-2); }
+.statusline .k{ color:var(--ink-3); margin-right:6px; }
+.statusline .live::before{ content:""; display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); margin-right:7px; vertical-align:1px; }
+.statusline .live.err::before{ background:var(--warn); }
+.statusline label{ display:inline-flex; gap:7px; align-items:center; }
+.statusline input{ width:78px; padding:3px 7px; border:1px solid var(--rule); border-radius:6px; background:var(--panel); font-family:var(--mono); }
+.statusline .sp{ flex:1; }
+.stnline{ background:var(--panel); }
+.stnother{ display:inline-flex; gap:10px; align-items:center; }
+.stnother[hidden]{ display:none; }
+.statusline select{ border:1px solid var(--rule); border-radius:6px; padding:3px 6px; background:var(--panel); }
+.banner{ margin:14px 28px 0; padding:10px 14px; border-radius:8px; background:var(--warn-bg); color:var(--warn); font-weight:500; display:none; }
+.banner.show{ display:block; }
+.banner.demo{ background:var(--edit-bg); color:var(--edit); }
+
+main{ padding:18px 28px 40px; display:grid; gap:18px; }
+main > *{ min-width:0; }
+.tbrand{ display:flex; gap:14px; align-items:center; }
+.unitlogo{ height:60px; width:auto; flex:none; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
+.pagenav{ display:flex; gap:2px; padding:8px 28px 0; background:var(--panel); border-bottom:1px solid var(--rule); }
+.pagenav{ align-items:center; flex-wrap:wrap; }
+.pagenav a{ white-space:nowrap; }
+.pagenav .navsp{ flex:1; }
+.pagenav a.offl{ font:500 13px var(--font); border-bottom:0; margin-right:10px; }
+.pagenav .theme{ margin:0 0 4px; }
+.pagenav .theme button{ padding:4px 10px; font-size:12.5px; }
+.pagenav a{ padding:8px 16px 9px; font:600 15px var(--cond); letter-spacing:.2px; color:var(--ink-2); text-decoration:none; border-bottom:3px solid transparent; }
+.pagenav a:hover{ color:var(--ink); }
+.pagenav a[aria-current="page"]{ color:var(--accent); border-bottom-color:var(--accent); }
+.panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; }
+
+/* TAF text: the product itself */
+.taf{ padding:16px 18px 14px; }
+.tafhead{ display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:10px; }
+.tafhead h2{ margin:0; font:700 22px/1 var(--cond); }
+.tafhead .note{ color:var(--ink-3); font-size:13px; flex:1; }
+.tafhead .note.edited{ color:var(--edit); }
+textarea#taf{ width:100%; resize:vertical; border:1px solid var(--rule); border-radius:10px; background:var(--panel-2); padding:14px 16px; font:500 16px/1.75 var(--mono); letter-spacing:.2px; white-space:pre; overflow:auto; }
+textarea#taf:focus{ outline:2px solid var(--accent); outline-offset:-1px; background:var(--panel); }
+.lint{ margin:10px 0 0; padding:0; list-style:none; display:grid; gap:4px; font-size:13.5px; }
+.lint li{ display:flex; gap:8px; align-items:baseline; }
+.lint li::before{ content:""; flex:none; width:7px; height:7px; border-radius:50%; background:var(--warn); transform:translateY(-1px); }
+.lint li.ok{ color:var(--ok); }
+.lint li.ok::before{ background:var(--ok); }
+.lint li.err{ color:var(--warn); }
+.lint li.info{ color:var(--ink-2); }
+.lint li.info::before{ background:var(--ink-3); }
+.lint code{ font:500 13px var(--mono); background:var(--panel-2); padding:0 4px; border-radius:4px; }
+
+/* hourly guidance strip */
+.strip{ padding:14px 0 6px; }
+.strip h2{ margin:0 18px 2px; font:700 20px/1 var(--cond); }
+.strip .sub{ margin:4px 18px 10px; color:var(--ink-3); font-size:13px; }
+.gridwrap{ overflow-x:auto; }
+table.hr{ border-collapse:separate; border-spacing:0; font-size:13px; width:max-content; min-width:100%; }
+.hr th,.hr td{ border-bottom:1px solid var(--rule-2); border-right:1px solid var(--rule-2); padding:4px 6px; text-align:center; white-space:nowrap; }
+.hr th.rl{ position:sticky; left:0; z-index:2; background:var(--panel); text-align:left; font:600 13px var(--cond); color:var(--ink-2); padding:4px 12px 4px 18px; min-width:118px; border-right:1px solid var(--rule); }
+.hr thead th{ font:600 12.5px var(--cond); color:var(--ink-2); min-width:54px; }
+.hr thead th small{ display:block; color:var(--ink-3); font-weight:500; }
+.hr thead th.day{ border-left:2px solid var(--ink-3); }
+.hr td.day{ border-left:2px solid var(--ink-3); }
+.hr tr.groups td{ padding:3px 2px; font:600 11.5px var(--cond); }
+.hr .g{ display:block; border-radius:5px; padding:2px 4px; background:var(--panel-2); color:var(--ink-2); }
+.hr .g.init{ background:rgba(var(--p),.18); color:var(--ink); }
+.hr .g.becmg{ background:rgba(var(--p),.32); color:var(--ink); }
+.hr .g.tempo{ background:var(--edit-bg); color:var(--edit); }
+.hr td.c1{ background:var(--c1); } .hr td.c2{ background:var(--c2); } .hr td.c3{ background:var(--c3); color:#fff; } .hr td.c4{ background:var(--c4); color:#fff; } .hr td.c5{ background:var(--c5); color:#fff; }
+.hr td.mono{ font-family:var(--mono); font-size:12.5px; }
+.hr td.p{ font-weight:600; }
+
+/* settings + sources */
+details.cfg > summary{ list-style:none; cursor:pointer; padding:12px 16px; display:flex; gap:12px; align-items:center; font-weight:600; }
+details.cfg > summary::-webkit-details-marker{ display:none; }
+details.cfg > summary .chev{ color:var(--ink-3); transition:transform .15s; }
+details.cfg[open] > summary .chev{ transform:rotate(90deg); }
+details.cfg > summary .sum{ font-weight:400; color:var(--ink-2); font-size:13.5px; }
+.cfggrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:16px 26px; padding:4px 16px 18px; }
+.cfggrid h3{ margin:0 0 6px; font:600 13px var(--cond); color:var(--ink-3); letter-spacing:.3px; }
+.cfggrid label{ display:flex; justify-content:space-between; gap:10px; align-items:center; font-size:13.5px; padding:3px 0; }
+.cfggrid input{ width:110px; border:1px solid var(--rule); border-radius:6px; padding:3px 7px; background:var(--panel); font-family:var(--mono); font-size:13px; }
+.cfggrid input[type=checkbox]{ width:auto; }
+.srow{ display:flex; gap:8px; align-items:center; font-size:13.5px; padding:2px 0; }
+.srow .st{ font-size:12px; color:var(--ink-3); }
+.srow.na{ color:var(--ink-3); }
+.foot{ color:var(--ink-3); font-size:12.5px; max-width:100ch; }
+.foot p{ margin:4px 0; }
+.toast{ position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%) translateY(20px); background:var(--ink); color:var(--panel); padding:10px 18px; border-radius:10px; font-weight:500; opacity:0; transition:all .2s; pointer-events:none; z-index:50; }
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+@media (max-width:760px){
+  .top{ grid-template-columns:1fr; }
+  .top,.statusline,main{ padding-left:14px; padding-right:14px; }
+  .banner{ margin-left:14px; margin-right:14px; }
+  textarea#taf{ font-size:14px; }
+}
+@media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+<script>
+/* color theme shared by all pages: auto (follow the system), light or dark */
+(function(){ var t; try { t = localStorage.getItem("erwx:theme"); } catch (e) {} if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); })();
+document.addEventListener("DOMContentLoaded", function(){
+  var cur = function(){ return document.documentElement.getAttribute("data-theme") || "auto"; };
+  var mark = function(){ document.querySelectorAll(".theme [data-th]").forEach(function(b){ b.setAttribute("aria-pressed", b.getAttribute("data-th") === cur()); }); };
+  document.querySelectorAll(".theme [data-th]").forEach(function(b){ b.addEventListener("click", function(){
+    var t = b.getAttribute("data-th");
+    if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t);
+    try { localStorage.setItem("erwx:theme", t); } catch (e) {}
+    mark(); window.dispatchEvent(new Event("themechange"));
+  }); });
+  mark();
+});
+</script>
+</head>
+<body>
+<nav class="pagenav" aria-label="Products"><a href="./">Planning forecast</a><a href="taf.html">TAF generator</a><a href="mwp.html" data-page="mwp">Mission weather (MWP)</a><a href="marine.html" data-page="marine" aria-current="page">Marine</a><a href="burn.html">Burn forecasts</a><a href="exposure.html">Exposure forecasts</a><a href="lmef.html">Launch forecast (LMEF)</a><a href="verify.html">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
+<header class="top">
+  <div class="tbrand"><img class="unitlogo" src="45ws-logo.png" alt="45th Weather Squadron" onerror="this.remove()"><div>
+    <h1>Marine forecasts</h1>
+    <div class="where">Route and point forecasts for vessels: wind, seas, swell and weather from the NWS, the NBM, the global models and the wave models</div>
+  </div></div>
+  <div class="actions"><button class="btn" id="txtBtn" title="Copy a plain-text forecast for email or chat">Copy text</button><button class="btn" id="csvBtn">CSV</button><button class="btn" id="htmlBtn">HTML</button><button class="btn primary" id="pdfBtn">Download PDF</button></div>
+</header>
+<div class="statusline mwpbar">
+  <span class="seg" id="modeSel" role="group" aria-label="Forecast type"><button data-m="route">Route</button><button data-m="point">Single point</button></span>
+  <label>Forecast for <input id="mTitle" maxlength="60" style="width:220px" placeholder="vessel, mission or customer" autocomplete="off"></label>
+  <label>Forecaster <input id="mFc" maxlength="12" style="width:84px" autocomplete="off"></label>
+  <span class="seg" id="tzSel" role="group" aria-label="Times in"><button data-z="l">Local</button><button data-z="z">UTC</button></span>
+  <span class="sp"></span><button class="btn" id="reload" style="padding:4px 10px;font-size:13px">Refresh guidance</button>
+</div>
+<div class="statusline"><span class="live" id="live">Loading</span></div>
+<div class="banner" id="banner"></div>
+<main class="mwpmain">
+  <section class="panel">
+    <div class="ph2"><h2 class="route-only">Route</h2><h2 class="point-only">Point</h2><span class="mut" id="mapHint"></span><span class="sp"></span>
+      <span class="seg mapz"><button type="button" id="zOut" aria-label="Zoom out">−</button><button type="button" id="zIn" aria-label="Zoom in">+</button><button type="button" id="zFit">Fit</button></span></div>
+    <div class="mapbox" id="map"></div>
+    <div class="route-only">
+      <div class="rbar">
+        <span class="seg" id="etaSel" role="group" aria-label="Arrival times"><button data-e="auto">Times from speed</button><button data-e="fixed">Times I enter</button></span>
+        <label id="rDepartWrap">Depart <input type="datetime-local" id="rDepart"> <button class="btn ghost sm" id="rNow" type="button">Next hour</button></label>
+        <label id="rSpeedWrap">Speed <input type="number" id="rSpeed" min="0.5" max="60" step="0.5" style="width:70px"> kt</label>
+        <label>Rows between waypoints <select id="rLeg"><option value="0">none</option><option value="1">every hour</option><option value="2">every 2 h</option><option value="3">every 3 h</option><option value="6">every 6 h</option><option value="12">every 12 h</option></select></label>
+        <span class="sp"></span><span class="mut" id="rTotal"></span>
+      </div>
+      <div class="scroll"><table class="wpt"><thead><tr><th>#</th><th>Name</th><th>Lat</th><th>Lon</th><th>Arrive</th><th title="Hours at this waypoint before going on">Stay (h)</th><th>From last</th><th></th></tr></thead><tbody id="wpRows"></tbody></table></div>
+      <div class="rbar"><button class="btn" id="wpAdd" type="button">Add waypoint</button><button class="btn ghost" id="wpClear" type="button">Clear route</button><span class="sp"></span>
+        <select id="savedSel" aria-label="Saved routes"></select><button class="btn ghost" id="saveAs" type="button">Save route as</button><button class="btn ghost" id="delSaved" type="button">Delete saved</button>
+        <span class="btn ghost fileb">Open route file<input type="file" id="fileOpen" accept=".json,.csv,.txt,.gpx,application/json,text/csv,application/gpx+xml"></span><button class="btn ghost" id="fileSave" type="button">Save route file</button></div>
+      <p class="mut">Positions in decimal degrees or degrees and minutes (28 24.5N, 80 36.3W). Route files: this page's JSON, a CSV of name, lat, lon and optionally time, or a GPX route. Routes and positions stay on this computer.</p>
+    </div>
+    <div class="point-only rbar">
+      <label>Name <input id="pName" maxlength="40" style="width:170px" autocomplete="off"></label>
+      <label>Lat <input id="pLat" class="mono" style="width:100px"></label><label>Lon <input id="pLon" class="mono" style="width:100px"></label>
+      <label>From <input type="datetime-local" id="pStart"></label><label>To <input type="datetime-local" id="pEnd"></label>
+      <label>Every <select id="pStep"><option value="1">hour</option><option value="3">3 hours</option><option value="6">6 hours</option></select></label>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="ph2"><h2>Forecast</h2>
+      <label class="mut">Chances of wind at or over <input id="thrWind" class="mono" style="width:90px"> kt</label>
+      <label class="mut">and seas at or over <input id="thrSeas" class="mono" style="width:80px"> ft</label>
+      <label class="mut">Ranges: percentiles <input id="pctLo" type="number" min="0" max="49" step="5" style="width:56px"> to <input id="pctHi" type="number" min="51" max="100" step="5" style="width:56px"></label>
+      <span class="sp"></span><button class="btn ghost" id="clrEd" type="button">Clear my edits</button></div>
+    <p class="mut">Click any value to change it (type a number, or a compass point for directions); clear the box to go back to guidance. Hover a value to see each source. Edited cells are amber; ranges and chances follow your edits.</p>
+    <div class="scroll" id="tbl"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+  <section class="panel two">
+    <div><div class="ph2"><h2>Summary</h2><span class="mut" id="discNote"></span><span class="sp"></span><button class="btn ghost" id="discReset" type="button">Back to automatic</button></div>
+      <textarea id="disc" rows="6" class="ta"></textarea></div>
+    <div><h2>Remarks</h2><p class="mut">Anything else for the customer: hazards, timing, what to watch for.</p><textarea id="remarks" rows="4" class="ta"></textarea></div>
+  </section>
+  <section class="panel" id="zonesPanel" hidden>
+    <div class="ph2"><h2>NWS marine forecasts along the way</h2><span class="sp"></span><label class="mut"><input type="checkbox" id="zInc"> Include in the products</label></div>
+    <div id="zones"></div>
+  </section>
+  <details class="panel cfg">
+    <summary><span class="chev">▸</span>Guidance sources <span class="sum" id="srcSum"></span></summary>
+    <p class="mut">Wind, gusts and weather blend the NWS forecast and the models; seas, swell and wind waves blend the wave models, the NWS waves and the NBM wave height. Weights apply wherever a source has a value; untick a source to leave it out. The ensembles set the chances of strong wind.</p>
+    <div class="cfggrid srcgrid" id="srcGrid"></div>
+    <div style="padding:0 16px 14px"><button class="btn ghost" id="srcReset" type="button">Default weights</button></div>
+  </details>
+  <div class="foot">
+    <p>Wind in knots at 10 m. Seas are the significant wave height (the average of the highest third of the waves); with swell and wind waves they are given as a range between two percentiles of the guidance, set above. Chances of wind come from the GEFS (31 members) and ECMWF (51 members) ensembles, moved by any edit; chances of seas come from the spread of the wave models plus the usual forecast error at that lead time. Rows between waypoints are on a straight track at the set speed.</p>
+    <p>Sources: NWS gridded forecast and marine zone forecasts (api.weather.gov), models from Open-Meteo (NBM, GFS, ECMWF, ICON, GEM, UKMO and the GEFS and ECMWF ensembles), wave models from Open-Meteo marine (NOAA WAVEWATCH III, ECMWF WAM, Météo-France MFWAM, DWD GWAM), the NBM wave height from the NBM text bulletins (Iowa Environmental Mesonet), and the coastline from Natural Earth.</p>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+<style>
+.mwpbar{ flex-wrap:wrap; gap:8px 14px; } .mwpbar input{ border:1px solid var(--rule); border-radius:7px; padding:4px 6px; background:var(--panel); color:var(--ink); }
+.mwpmain{ display:grid; gap:14px; padding:14px 22px 40px; } .panel{ background:var(--panel); border:1px solid var(--rule); border-radius:12px; padding:14px 16px; }
+.panel h2{ margin:0 0 6px; font:700 17px var(--cond); } .ph2{ display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; } .ph2 .sp,.rbar .sp{ flex:1; }
+.ph2 input,.rbar input,.rbar select,.ph2 select{ border:1px solid var(--rule); border-radius:7px; padding:4px 6px; background:var(--panel); color:var(--ink); }
+.two{ display:grid; grid-template-columns:1fr 1fr; gap:18px; } @media (max-width:900px){ .two{ grid-template-columns:1fr; } }
+.mut{ color:var(--ink-3); font-size:12.5px; } .mono{ font-family:var(--mono); } .scroll{ overflow-x:auto; }
+.btn.ghost{ background:transparent; } .btn.sm{ padding:3px 8px; font-size:12.5px; }
+.fileb{ position:relative; overflow:hidden; cursor:pointer; } .fileb input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+.mapbox{ position:relative; height:430px; border:1px solid var(--rule); border-radius:10px; overflow:hidden; margin:8px 0 10px; touch-action:none; cursor:crosshair; user-select:none; }
+.mapbox svg{ display:block; width:100%; height:430px; }
+.mapsvg .sea{ fill:#DCEAF2; } .mapsvg .land{ fill:#D8D2BE; stroke:#9C9478; stroke-width:.6; } .mapsvg .grid{ stroke:#9DB4C4; stroke-width:.6; fill:none; opacity:.8; }
+.mapsvg .gl{ font:10.5px var(--font); fill:#4B5A68; } .mapsvg .rl{ fill:none; stroke:#0B6E79; stroke-width:2.6; } .mapsvg .rd{ fill:#0B6E79; }
+.mapsvg .wpm{ cursor:grab; } .mapsvg .wc{ fill:#0B6E79; stroke:#fff; stroke-width:2; } .mapsvg .wn{ font:700 11px var(--font); fill:#fff; text-anchor:middle; pointer-events:none; }
+.mapsvg .wl{ font:600 12px var(--font); fill:#13202E; paint-order:stroke; stroke:#fff; stroke-width:3px; pointer-events:none; }
+:root[data-theme="dark"] .mapsvg .sea{ fill:#1A2C3A; } :root[data-theme="dark"] .mapsvg .land{ fill:#3A3A30; stroke:#5E5A48; } :root[data-theme="dark"] .mapsvg .wl{ fill:#E5ECF1; stroke:#0D151D; } :root[data-theme="dark"] .mapsvg .gl{ fill:#A3B1BD; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .mapsvg .sea{ fill:#1A2C3A; } :root:not([data-theme="light"]) .mapsvg .land{ fill:#3A3A30; stroke:#5E5A48; } :root:not([data-theme="light"]) .mapsvg .wl{ fill:#E5ECF1; stroke:#0D151D; } :root:not([data-theme="light"]) .mapsvg .gl{ fill:#A3B1BD; } }
+.mapz button{ min-width:34px; font-weight:700; }
+.rbar{ display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin:6px 0; font-size:13.5px; } .rbar label{ display:inline-flex; gap:6px; align-items:center; }
+table.wpt{ border-collapse:collapse; font-size:13px; } .wpt th{ font:600 12px var(--cond); color:var(--ink-2); text-align:left; padding:4px 6px; border-bottom:1px solid var(--rule); }
+.wpt td{ padding:3px 6px; border-bottom:1px solid var(--rule-2); } .wpt td.n{ font-weight:700; color:var(--accent); } .wpt input{ border:1px solid var(--rule); border-radius:6px; padding:3px 6px; background:var(--panel); color:var(--ink); width:150px; }
+.wpt input.mono{ width:96px; } .wpt input[type=datetime-local]{ width:auto; } .wpb{ white-space:nowrap; } .ib{ border:1px solid var(--rule); background:var(--panel); border-radius:6px; padding:1px 7px; margin-left:2px; cursor:pointer; color:var(--ink); } .ib:disabled{ opacity:.35; cursor:default; }
+table.rt{ border-collapse:collapse; font:600 12.5px var(--mono); width:max-content; min-width:100%; }
+.rt th,.rt td{ padding:4px 6px; border-bottom:1px solid var(--rule-2); text-align:center; white-space:nowrap; }
+.rt thead th{ font:600 11.5px var(--cond); color:var(--ink-2); border-bottom:1px solid var(--rule); } .rt tr.gr th{ font:700 12px var(--cond); color:var(--ink); border-bottom:0; padding-bottom:0; }
+.rt .sl{ text-align:left; } .rt th.sl{ font:600 12.5px var(--font); position:sticky; left:0; background:var(--panel); z-index:1; } .rt td.small{ font-size:11px; color:var(--ink-3); font-weight:500; }
+.rt tr.leg td,.rt tr.leg th{ color:var(--ink-2); font-weight:500; } .rt tr.leg th.sl{ font-style:italic; } .rt tr.nd td,.rt tr.nd th{ border-top:2px solid var(--ink-3); }
+.wpn{ display:inline-block; min-width:18px; height:18px; line-height:18px; border-radius:9px; background:var(--accent); color:var(--accent-ink); font:700 11px var(--font); text-align:center; margin-right:6px; padding:0 4px; }
+.rt td.ed{ cursor:text; } .rt td.ed:hover{ outline:1px solid var(--ink-3); outline-offset:-1px; } .rt td.ed:focus{ outline:2px solid var(--accent); outline-offset:-2px; }
+.rt td.ov{ background:var(--edit-bg) !important; color:var(--edit); } .rt td.h1{ background:#FCEFC9; } .rt td.h2{ background:#F7CF9A; } .rt td.h3{ background:#EE9A86; color:#3A0E06; }
+:root[data-theme="dark"] .rt td.h1{ background:#4A3F1C; color:#F6E4A8; } :root[data-theme="dark"] .rt td.h2{ background:#5A3A1A; color:#F6CE9A; } :root[data-theme="dark"] .rt td.h3{ background:#6A2A20; color:#FFD5CB; }
+.cellin{ width:58px; font:600 12.5px var(--mono); border:1px solid var(--accent); border-radius:5px; padding:1px 4px; background:var(--panel); color:var(--ink); }
+.legend{ display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:8px; font-size:12px; color:var(--ink-2); } .legend span{ display:inline-flex; gap:6px; align-items:center; }
+.lg{ display:inline-block; width:14px; height:10px; border-radius:2px; } .lg.h1{ background:#FCEFC9; } .lg.h2{ background:#F7CF9A; } .lg.h3{ background:#EE9A86; } .lg.ov{ background:var(--edit-bg); outline:1px solid var(--edit); }
+.ta{ width:100%; border:1px solid var(--rule); border-radius:8px; padding:8px 10px; font:14px/1.5 var(--font); background:var(--panel); color:var(--ink); resize:vertical; }
+.zone{ border-top:1px solid var(--rule-2); padding:8px 0; } .zone:first-child{ border-top:0; } .zh{ display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; font-size:14px; }
+.cwf{ display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; margin:6px 0 0; font-size:13.5px; line-height:1.45; } .cwf dt{ font-weight:700; } .cwf dd{ margin:0; }
+@media (max-width:640px){ .cwf{ grid-template-columns:1fr; } }
+.srcgrid .srow{ gap:8px; } .srcgrid .srow .sp{ flex:1; } .srcgrid input.w{ width:58px; }
+body.mode-point .route-only{ display:none !important; } body:not(.mode-point) .point-only{ display:none !important; }
+.toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); background:var(--ink); color:var(--panel); padding:10px 18px; border-radius:10px; opacity:0; transition:.2s; pointer-events:none; z-index:50; } .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+<script src="guidance.js?v=baf30cc0a6"></script>
+<script src="marine.js?v=347573a886"></script>
+</body>
+</html>
