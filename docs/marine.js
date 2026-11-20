@@ -539,11 +539,8 @@ async function loadCoast(){
   COAST_LOADING = false; renderMap();
 }
 const MAPH = 430;
-function mapProj(W, Hh, v){
-  const kx = v.k*Math.cos(v.lat*Math.PI/180);
-  return { x: lo => (lo - v.lon)*kx + W/2, y: la => (v.lat - la)*v.k + Hh/2, lon: x => (x - W/2)/kx + v.lon, lat: y => v.lat - (y - Hh/2)/v.k,
-    bb: [v.lon - W/2/kx, v.lat - Hh/2/v.k, v.lon + W/2/kx, v.lat + Hh/2/v.k] };
-}
+/* Web Mercator (basemap.js), so the map tiles line up; k = pixels per degree of longitude */
+function mapProj(W, Hh, v){ return ERWXBase.proj(W, Hh, v); }
 /* rings in view, with points far outside the view pinned to a margin around it (off screen, so the pinned
    edges never show) and near-duplicate points dropped: keeps the drawing and the products small */
 function viewRings(rings, bb, cb){
@@ -590,7 +587,8 @@ function mapSVG(W, Hh, v, opts){
   const marks = pts.map(p => `<g class="wpm" data-id="${esc(p.id)}"><circle cx="${pr.x(p.lon).toFixed(1)}" cy="${pr.y(p.lat).toFixed(1)}" r="${opts.print ? 7 : 10}" class="wc"/><text x="${pr.x(p.lon).toFixed(1)}" y="${(pr.y(p.lat) + (opts.print ? 3 : 4)).toFixed(1)}" class="wn">${esc(p.n || "•")}</text>${p.name ? `<text x="${(pr.x(p.lon) + 13).toFixed(1)}" y="${(pr.y(p.lat) - 9).toFixed(1)}" class="wl">${esc(p.name)}</text>` : ""}</g>`).join("");
   return `<svg viewBox="0 0 ${W} ${Hh}" width="${W}" height="${Hh}" class="mapsvg" role="img" aria-label="${M.mode === "route" ? "Route map" : "Point map"}" xmlns="http://www.w3.org/2000/svg">
     <defs>${cb}${coarseMask}</defs><rect width="${W}" height="${Hh}" class="sea"/><path d="${land}" class="land"${coarseMask ? ` mask="url(#cm${opts.id || ""})"` : ""}/>${det ? `<path d="${det}" class="land" clip-path="url(#dbx${opts.id || ""})"/>` : ""}
-    <path d="${grid}" class="grid"/>${glab}${line}${dots}${marks}</svg>`;
+    ${opts.print ? "" : ERWXBase.tiles(W, Hh, v)}<path d="${grid}" class="grid"/>${glab}${line}${dots}${marks}
+    ${opts.print ? "" : `<text x="${W - 5}" y="${Hh - 5}" class="attr">${esc(ERWXBase.attribution())}</text>`}</svg>`;
 }
 function renderMap(){
   if (!COAST) loadCoast();
@@ -614,7 +612,7 @@ function bindMap(){
       const lo = pr.lon(p.x), la = pr.lat(p.y);
       if (drag.id === "p"){ M.point.lat = la; M.point.lon = lo; } else { const w = M.route.pts.find(q => q.id === drag.id); if (w){ w.lat = la; w.lon = lo; } }
       buildRows(); renderMap();
-    } else { M.view.lon = drag.v0.lon - dx/(drag.v0.k*Math.cos(drag.v0.lat*Math.PI/180)); M.view.lat = clamp(drag.v0.lat + dy/drag.v0.k, -80, 80); renderMap(); }
+    } else { const v = ERWXBase.panned(p.W, MAPH, drag.v0, dx, dy); M.view.lon = v.lon; M.view.lat = v.lat; renderMap(); }
   });
   box.addEventListener("pointerup", ev => {
     if (!drag) return; const p = pt(ev), d = drag; drag = null;
@@ -626,21 +624,23 @@ function bindMap(){
     changed();
   });
   box.addEventListener("wheel", ev => { ev.preventDefault(); zoomAt(ev.deltaY < 0 ? 1.25 : 0.8, pt(ev)); }, { passive:false });
+  ERWXBase.bindPicker($("mapStyle"), renderMap);
   $("zIn").onclick = () => zoomAt(1.5); $("zOut").onclick = () => zoomAt(1/1.5); $("zFit").onclick = fitMap;
 }
 function zoomAt(f, p){
   const W = $("map").clientWidth || 760, pr = mapProj(W, MAPH, M.view);
   const lo = p ? pr.lon(p.x) : M.view.lon, la = p ? pr.lat(p.y) : M.view.lat;
-  M.view.k = clamp(M.view.k*f, 4, 2400);
+  M.view.k = clamp(M.view.k*f, 4, 20000);
   if (p){ const q = mapProj(W, MAPH, M.view); M.view.lon += lo - q.lon(p.x); M.view.lat += la - q.lat(p.y); }
   save(); renderMap();
 }
 function fitView(pts, W, Hh){
   if (!pts.length) return { ...M.view };
   const la = pts.map(p => p.lat), lo = pts.map(p => p.lon), c = { lat:(Math.min(...la) + Math.max(...la))/2, lon:(Math.min(...lo) + Math.max(...lo))/2 };
-  const dla = Math.max(0.15, Math.max(...la) - Math.min(...la)), dlo = Math.max(0.15, Math.max(...lo) - Math.min(...lo));
-  const k = Math.min((Hh - 70)/dla, (W - 90)/(dlo*Math.cos(c.lat*Math.PI/180)));
-  return { lat:c.lat, lon:c.lon, k: clamp(k, 4, 1200) };
+  const pad = 0.075, laS = Math.min(...la) - pad, laN = Math.max(...la) + pad, dlo = Math.max(0.15, Math.max(...lo) - Math.min(...lo));
+  c.lat = (laS + laN)/2;
+  const k = ERWXBase.fitK(dlo, laS, laN, W - 90, Hh - 70);
+  return { lat:c.lat, lon:c.lon, k: clamp(k, 4, 1300) };
 }
 function fitMap(){ const pts = mapPoints(); if (!pts.length) return; M.view = fitView(pts, $("map").clientWidth || 760, MAPH); save(); renderMap(); }
 

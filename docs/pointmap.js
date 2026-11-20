@@ -17,11 +17,8 @@
     return loading;
   }
   const esc = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  function proj(W, H, v){
-    const kx = v.k*Math.cos(v.lat*Math.PI/180);
-    return { x: lo => (lo - v.lon)*kx + W/2, y: la => (v.lat - la)*v.k + H/2, lon: x => (x - W/2)/kx + v.lon, lat: y => v.lat - (y - H/2)/v.k,
-      bb: [v.lon - W/2/kx, v.lat - H/2/v.k, v.lon + W/2/kx, v.lat + H/2/v.k] };
-  }
+  const B = () => window.ERWXBase;
+  const proj = (W, H, v) => B().proj(W, H, v);
   function path(rings, pr, bb){
     const mx = (bb[2] - bb[0])*0.08, my = (bb[3] - bb[1])*0.08, E = [bb[0] - mx, bb[1] - my, bb[2] + mx, bb[3] + my]; let d = "";
     for (const r of rings){
@@ -39,7 +36,7 @@
     let pick = opts.lat != null ? { lat:opts.lat, lon:opts.lon } : null, refs = opts.refs || [];
     el.classList.add("pmap");
     el.innerHTML = `<div class="pmapbox" tabindex="0" aria-label="Map: click to pick the point; drag to pan; scroll, + or - to zoom"></div>
-      <div class="pmapbar"><span class="pmaphint">Click to pick the point. Drag to pan; scroll or use + and − to zoom.</span><span class="pmapsp"></span>
+      <div class="pmapbar"><span class="pmaphint">Click to pick the point. Drag to pan; scroll or use + and − to zoom.</span><span class="pmapsp"></span>${window.ERWXBase ? B().pickerHTML("bstyle") : ""}
       <button type="button" class="btn" data-z="out" aria-label="Zoom out">−</button><button type="button" class="btn" data-z="in" aria-label="Zoom in">+</button><button type="button" class="btn" data-z="fit">Centre on point</button></div>`;
     const box = el.querySelector(".pmapbox");
     function draw(){
@@ -61,21 +58,23 @@
       const pk = pick ? `<g class="ppick"><circle cx="${pr.x(pick.lon).toFixed(1)}" cy="${pr.y(pick.lat).toFixed(1)}" r="8"/><circle cx="${pr.x(pick.lon).toFixed(1)}" cy="${pr.y(pick.lat).toFixed(1)}" r="2.5" class="pdot"/></g>` : "";
       box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Map for picking the custom point"><defs>${mask}</defs>
         <rect width="${W}" height="${H}" class="psea"/><path d="${land}" class="pland"${det ? ' mask="url(#pmm)"' : ""}/>${det ? `<path d="${det}" class="pland" clip-path="url(#pmc)"/>` : ""}
-        <path d="${grid}" class="pgrid"/>${gl}${rf}${pk}</svg>`;
+        ${window.ERWXBase ? B().tiles(W, H, view) : ""}
+        <path d="${grid}" class="pgrid"/>${gl}${rf}${pk}<text x="${W - 4}" y="${H - 4}" class="pattr">${esc(window.ERWXBase ? B().attribution() : "Natural Earth")}</text></svg>`;
       if (COAST && COAST.err) el.querySelector(".pmaphint").textContent = "Coastline file not found (data/coast.json); click to pick on the grid.";
     }
     let drag = null;
     const at = ev => { const r = box.getBoundingClientRect(); return { x:ev.clientX - r.left, y:ev.clientY - r.top, W:r.width }; };
     box.addEventListener("pointerdown", ev => { const p = at(ev); drag = { x0:p.x, y0:p.y, v0:{ ...view }, moved:false }; box.setPointerCapture(ev.pointerId); });
     box.addEventListener("pointermove", ev => { if (!drag) return; const p = at(ev), dx = p.x - drag.x0, dy = p.y - drag.y0; if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true; if (!drag.moved) return;
-      view.lon = drag.v0.lon - dx/(drag.v0.k*Math.cos(drag.v0.lat*Math.PI/180)); view.lat = Math.max(-80, Math.min(80, drag.v0.lat + dy/drag.v0.k)); draw(); });
+      view = B().panned(box.clientWidth || 640, H, drag.v0, dx, dy); draw(); });
     box.addEventListener("pointerup", ev => { if (!drag) return; const p = at(ev), d = drag; drag = null; if (d.moved) return;
       const pr = proj(p.W, H, view); pick = { lat: +pr.lat(p.y).toFixed(4), lon: +pr.lon(p.x).toFixed(4) }; draw(); if (opts.onPick) opts.onPick(pick.lat, pick.lon); });
     const zoom = (f, p) => { const W = box.clientWidth || 640, pr = proj(W, H, view), lo = p ? pr.lon(p.x) : view.lon, la = p ? pr.lat(p.y) : view.lat;
-      view.k = Math.max(20, Math.min(4000, view.k*f)); if (p){ const q = proj(W, H, view); view.lon += lo - q.lon(p.x); view.lat += la - q.lat(p.y); } draw(); };
+      view.k = Math.max(20, Math.min(20000, view.k*f)); if (p){ const q = proj(W, H, view); view.lon += lo - q.lon(p.x); view.lat += la - q.lat(p.y); } draw(); };
     box.addEventListener("wheel", ev => { ev.preventDefault(); zoom(ev.deltaY < 0 ? 1.25 : 0.8, at(ev)); }, { passive:false });
     el.querySelector(".pmapbar").addEventListener("click", ev => { const b = ev.target.closest("[data-z]"); if (!b) return;
       if (b.dataset.z === "in") zoom(1.5); else if (b.dataset.z === "out") zoom(1/1.5); else if (pick){ view.lat = pick.lat; view.lon = pick.lon; draw(); } });
+    if (window.ERWXBase) B().bindPicker(el.querySelector(".bstyle"), draw);
     window.addEventListener("resize", () => { if (el.offsetParent) draw(); });
     loadCoast().then(draw); draw();
     return { update(o){ if (o.lat != null && isFinite(o.lat) && o.lon != null && isFinite(o.lon)){ pick = { lat:+o.lat, lon:+o.lon }; if (o.center){ view.lat = pick.lat; view.lon = pick.lon; } } if (o.refs) refs = o.refs; draw(); }, redraw: draw };

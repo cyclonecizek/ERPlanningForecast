@@ -297,6 +297,16 @@ Not generated: WS, icing and turbulence groups, and remarks.
 Ceilings come from LAMP, GFS/NAM MOS, NBM text and RRFS/REFS where available; otherwise from the
 models' low/mid/high cloud cover. Add `?demo=1` to see it with synthetic data.
 
+## Maps (basemap)
+The Exposure and Burn custom point maps and the Marine route/point map draw a **CARTO** basemap (the same key as
+the Space Coast Rainfall dashboard, in `docs/basemap.js`), with a style menu on each map: **Map** (CARTO Voyager),
+**Light**, **Dark**, **Satellite** (Esri imagery with CARTO labels) or **Coastline only**. The choice is kept in the
+browser. The maps use Web Mercator so the tiles line up; the offline Natural Earth coastline stays underneath, so
+the maps still work without tiles (offline copy, or a key that doesn't work on that domain). The key is sent with every
+tile request and is visible in the page source (unavoidable for a map key on a static site). Tile requests tell CARTO
+or Esri which area is on screen; choose **Coastline only** to make no outside requests. The PDF and HTML products keep
+the vector coastline (no tiles).
+
 ## Exposure forecasts (`exposure.html`)
 A tailored forecast for one operation, with the same editor, linking and publishing as the planning
 page. Pick LC-39A, LC-39B, SLC-41, SLC-40, SLC-37, LC-36, the SLF, XMR or a custom point (type the latitude and

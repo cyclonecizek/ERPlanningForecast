@@ -377,6 +377,9 @@ document.addEventListener("DOMContentLoaded", function(){
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .psea{ fill:#1A2C3A; } :root:not([data-theme="light"]) .pland{ fill:#3A3A30; stroke:#5E5A48; } :root:not([data-theme="light"]) .pgl{ fill:#A3B1BD; } :root:not([data-theme="light"]) .pref text{ fill:#E5ECF1; stroke:#0D151D; } }
 #expCustom{ flex-wrap:wrap; }
 .sites button.sitesmap{ background:var(--panel); }
+.pmap .bt{ pointer-events:none; } .pmap .btiles + .pgrid{ opacity:.3; }
+.pmap .pattr{ font:10px var(--font, sans-serif); fill:#3C4A57; text-anchor:end; paint-order:stroke; stroke:rgba(255,255,255,.85); stroke-width:3px; pointer-events:none; }
+.pmap .bstyle{ font:inherit; font-size:13px; padding:5px 8px; border:1px solid var(--rule); border-radius:8px; background:var(--panel); color:var(--ink); }
 @media (max-width:1200px){ .sites{ flex-wrap:wrap; margin-left:0; } .sites button{ border-bottom:1px solid var(--rule); } }
 .sites button.sitesmap .n{ color:var(--accent, #1d5fa8); }
 
@@ -559,7 +562,8 @@ document.addEventListener("DOMContentLoaded", function(){
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "exposure";</script>
 <script src="guidance.js?v=baf30cc0a6"></script>
-<script src="pointmap.js?v=700e9872fc"></script>
-<script src="planning-app.js?v=4db396a783"></script>
+<script src="basemap.js?v=7b27564e42"></script>
+<script src="pointmap.js?v=e5d23f117a"></script>
+<script src="planning-app.js?v=dc945925dd"></script>
 </body>
 </html>

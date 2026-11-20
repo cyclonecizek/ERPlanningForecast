@@ -1063,7 +1063,7 @@ async function openMap(){
   const p = prefs.exp.place;
   if (!PMAP){
     PMAP = window.L.map("pMap").setView([p.lat, p.lon], 9);
-    window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, attribution:"© OpenStreetMap contributors" }).addTo(PMAP);
+    (window.ERWXBase ? window.ERWXBase.leafletLayer(window.L) : window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:18, attribution:"© OpenStreetMap contributors" })).addTo(PMAP);
     PMAP._mk = window.L.marker([p.lat, p.lon]).addTo(PMAP);
     PMAP.on("click", ev => { PMAP._mk.setLatLng(ev.latlng); setPlace(ev.latlng.lat, ev.latlng.lng, `Point at ${ev.latlng.lat.toFixed(3)}, ${ev.latlng.lng.toFixed(3)}`); });
   } else { PMAP.invalidateSize(); PMAP.setView([p.lat, p.lon]); PMAP._mk.setLatLng([p.lat, p.lon]); }
