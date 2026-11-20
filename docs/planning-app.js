@@ -1153,8 +1153,20 @@ function bindExp(){
   $("expStart").onchange = range; $("expEnd").onchange = range;
   $("expHourly").onchange = e => { prefs.exp.hourly = e.target.value === "all" ? "all" : +e.target.value; expChanged(false); };
   $("expQuick").onclick = ev => { const b = ev.target.closest("[data-q]"); if (!b) return; const st = Math.ceil(Date.now()/H)*H; prefs.exp.start = st; prefs.exp.end = st + (+b.dataset.q)*H; expChanged(false); };
+  /* decimal degrees, or degrees and minutes (28 30.5N, 80 36W); S and W are negative */
+  const cuCoord = (t, lonQ) => { t = String(t || "").trim().toUpperCase(); if (!t) return NaN; const neg = /[SW]/.test(t) || t.startsWith("-");
+    const n = t.replace(/[^0-9.\s]/g, " ").trim().split(/\s+/).map(Number).filter(isFinite); if (!n.length) return NaN;
+    let v = n[0] + (n[1] || 0)/60 + (n[2] || 0)/3600; if (neg) v = -v; else if (lonQ && v > 0 && !/E/.test(t)) v = -v; return v; };
+  let cuMap = null;
+  if ($("cuMapBtn") && window.ERWXPointMap) $("cuMapBtn").onclick = () => {
+    const box = $("cuMap"), show = box.hidden; box.hidden = !show; $("cuMapBtn").setAttribute("aria-expanded", show); $("cuMapBtn").textContent = show ? "Hide map" : "Pick on map";
+    if (!show) return;
+    const c = prefs.exp.custom || {}, refs = SITES.filter(s => !s.custom && s.lat != null).map(s => ({ lat:s.lat, lon:s.lon, name:s.point || s.name }));
+    if (!cuMap) cuMap = window.ERWXPointMap.mount(box, { lat:+c.lat, lon:+c.lon, refs, k:1500, onPick:(la, lo) => { $("cuLat").value = la.toFixed(4); $("cuLon").value = lo.toFixed(4); $("cuLoad").click(); } });
+    else cuMap.update({ lat:+c.lat, lon:+c.lon, center:true });
+  };
   $("cuLoad").onclick = () => {
-    const la = parseFloat($("cuLat").value), lo = parseFloat($("cuLon").value);
+    const la = cuCoord($("cuLat").value), lo = cuCoord($("cuLon").value, true);
     if (!(la > 27 && la < 30) || !(lo > -82 && lo < -79)){ toast("Enter a latitude and longitude near the Space Coast (decimal degrees, west is negative)"); return; }
     prefs.exp.custom = { name: $("cuName").value.trim() || "Custom point", lat: la, lon: lo }; expChanged(true);
   };

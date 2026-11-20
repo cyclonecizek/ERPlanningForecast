@@ -271,7 +271,9 @@ function dayData(i){
   out.risk = { ...(d.risk || {}) };
   for (const r of L.risks){ if (ov.risk && ov.risk[r.id]) out.risk[r.id] = ov.risk[r.id]; else if (!out.risk[r.id]) out.risk[r.id] = "Low"; }
   out.showSeg = !(L.days[i] && L.days[i].showSeg === false);
-  out.trend = !!ov.trend;
+  /* one PoV per hour: a window shorter than an hour has a single PoV, so it never carries a trend */
+  const win = (L.windows || [])[i]; out.short = !!win && (win.b - win.a) < H;
+  out.trend = !!ov.trend && !out.short;
   out.povA = ov.povA !== undefined ? ov.povA : d.povFirst; out.povB = ov.povB !== undefined ? ov.povB : d.povLast;
   /* the product's PoV: the window value, or "start → end" when the trend is on */
   out.povText = out.past ? "–" : out.trend && out.povA != null && out.povB != null ? `${out.povA}% → ${out.povB}%` : out.pov == null ? "–" : `${out.pov}%`;
@@ -472,10 +474,22 @@ function csvLMEFHourly(){
   });
   return out.join("\r\n") + "\r\n";
 }
-/* the 45 WS database format (LMEF_Forecast_output.csv, plus a third cloud group): one row per window, every value quoted,
-   empty fields bare, times as MM/DD/YYYY h:mm AM in UTC, cloud heights with thousands separators,
-   a missing second or third cloud group as 0 heights, winds in knots, UTF-8 with a byte-order mark, CRLF */
-const DB_COLS = ["mission","vehicle","pad_id","issued_utc","forecaster","window_index","window_open_utc","window_close_utc","pov_pct","primary_concern_1","primary_concern_2","primary_concern_3","weather","visibility_mi","temperature_f","relative_humidity_pct","wind_dir_deg","wind_min_kt","wind_max_kt","cloud1_type","cloud1_coverage","cloud1_base_ft","cloud1_tops_ft","cloud2_type","cloud2_coverage","cloud2_base_ft","cloud2_tops_ft","cloud3_type","cloud3_coverage","cloud3_base_ft","cloud3_tops_ft","risktype_1","risklevel_1","risktype_2","risklevel_2","risktype_3","risklevel_3","risktype_4","risklevel_4","next_forecast","discussion"];
+/* the 45 WS database format: one row per window, every value quoted, empty fields bare, times as MM/DD/YYYY h:mm AM
+   in UTC, cloud heights with thousands separators, a missing second or third cloud group as 0 heights, winds in
+   knots, UTF-8 with a byte-order mark, CRLF. Mission_ID and Attempt_ID are left for the database to fill.
+   PoV goes hour by hour into pov_pct_1 to pov_pct_6 (see povSlots). */
+const DB_COLS = ["Mission_ID","Attempt_ID","mission_name","vehicle","issued_utc","forecaster","window_index","window_open_utc","window_close_utc","pov_pct_1","pov_pct_2","pov_pct_3","pov_pct_4","pov_pct_5","pov_pct_6","primary_concern_1","primary_concern_2","primary_concern_3","weather","visibility_mi","temperature_f","relative_humidity_pct","wind_dir_deg","wind_min_kt","wind_max_kt","cloud1_type","cloud1_coverage","cloud1_base_ft","cloud1_tops_ft","cloud2_type","cloud2_coverage","cloud2_base_ft","cloud2_tops_ft","cloud3_type","cloud3_coverage","cloud3_base_ft","cloud3_tops_ft","risktype_1","risklevel_1","risktype_2","risklevel_2","risktype_3","risklevel_3","risktype_4","risklevel_4","next_forecast","discussion"];
+/* PoV in hourly slots across the window: one slot per hour (a window under an hour, or instantaneous, has only
+   pov_pct_1 and no trend), at most six. With a trend shown on the product the slots step evenly from the start
+   to the end value (a 4 h window going 5% to 20%: 5, 10, 15, 20); without one, every slot holds the PoV. */
+function povSlots(w, D){
+  if (D.past || D.pov == null && !(D.trend && D.povB != null)) return [];
+  const hrs = (w.b - w.a)/H, n = hrs < 1 ? 1 : Math.min(6, Math.max(2, Math.ceil(hrs - 1e-6)));
+  const num = v => v == null || v === "" ? null : +String(v).replace(/%/g, "");
+  if (n === 1) return [num(D.pov)];
+  if (D.trend && D.povA != null && D.povB != null){ const a = num(D.povA), b = num(D.povB); return Array.from({ length:n }, (_, k) => Math.round(a + (b - a)*k/(n - 1))); }
+  return new Array(n).fill(num(D.pov));
+}
 const dbTime = ms => { if (ms == null || !isFinite(ms)) return ""; const d = new Date(ms), h = d.getUTCHours(), h12 = h % 12 || 12; return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${h12}:${String(d.getUTCMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
 const dbFt = v => v == null || v === "" || !isFinite(+v) ? "" : Math.round(+v).toLocaleString("en-US");
 const visNum = t => { const m = String(t || "").replace(/^M/, ""); if (/^7\+/.test(m)) return "7"; const f = m.match(/^(\d+)\/(\d+)/); if (f) return String(+(f[1]/f[2]).toFixed(2)); const n = m.match(/[\d.]+/); return n ? n[0] : ""; };
@@ -493,8 +507,8 @@ function csvLMEFdb(){
     const D = dayData(i), con = String(D.concerns || "").split(/\s*,\s*/).filter(c => c && c !== "None"), wk = windKtOf(D);
     const cl = (D.clouds || []).filter(c => c.type && c.type !== "None");
     const v = {
-      mission: L.mission, vehicle: L.vehicle, pad_id: pad.name, issued_utc: dbTime(L.issued || Date.now()), forecaster: (prefs.initials || "").toUpperCase(),
-      window_index: i, window_open_utc: dbTime(w.a), window_close_utc: dbTime(w.b), pov_pct: D.past || D.pov == null ? "" : String(D.trend && D.povB != null ? D.povB : D.pov).replace(/%/g, ""),
+      Mission_ID: "", Attempt_ID: "", mission_name: L.mission, vehicle: L.vehicle, issued_utc: dbTime(L.issued || Date.now()), forecaster: (prefs.initials || "").toUpperCase(),
+      window_index: i, window_open_utc: dbTime(w.a), window_close_utc: dbTime(w.b),
       primary_concern_1: con[0], primary_concern_2: con[1], primary_concern_3: con[2],
       weather: D.wx || "None", visibility_mi: visNum(D.vis), temperature_f: numIn(D.temp), relative_humidity_pct: numIn(D.rh),
       wind_dir_deg: wk ? wk.dir : "", wind_min_kt: wk ? wk.lo : "", wind_max_kt: wk ? wk.hi : "",
@@ -504,6 +518,7 @@ function csvLMEFdb(){
       next_forecast: L.next || "As Required", discussion: L.discussion,
     };
     rk.forEach((r, k) => { v[`risktype_${k + 1}`] = r.name; v[`risklevel_${k + 1}`] = (D.risk || {})[r.id] || "Low"; });
+    povSlots(w, D).forEach((x, k) => { v[`pov_pct_${k + 1}`] = x == null || !isFinite(x) ? "" : String(x); });
     return DB_COLS.map(c => q(v[c])).join(",");
   });
   return "\ufeff" + [DB_COLS.map(c => `"${c}"`).join(","), ...rows].join("\r\n") + "\r\n";
@@ -853,7 +868,7 @@ function fields(i, d, ov){
   const pick = (f, label, list, cls) => { const v = ov[f] !== undefined ? ov[f] : (d[f] ?? ""); const opts = list.includes(v) || !v ? list : [v, ...list];
     return `<label class="${cls || ""} ${ov[f] !== undefined ? "ov" : ""}">${label}<span class="u"><select data-f="${f}">${opts.map(o2 => `<option ${o2 === v ? "selected" : ""}>${hesc(o2)}</option>`).join("")}</select>${ov[f] !== undefined ? `<button type="button" class="rs" data-rs="${f}" title="Back to the forecast value (${hesc(d[f] ?? "")})">↺</button>` : ""}</span></label>`; };
   return `<div class="edgrid" data-day="${i}">
-    ${fld("pov", "PoV %", "pv")}<div class="trend wide"><label class="chk"><input type="checkbox" data-trend ${D.trend ? "checked" : ""}> Show a trend on the product</label>${D.trend ? `${fld("povA", "From %", "pv")}<span class="arr">→</span>${fld("povB", "To %", "pv")}<span class="mut">${d.multi ? `defaults: first hour ${d.povFirst ?? "–"}%, last hour ${d.povLast ?? "–"}%` : "single-time window: set both values"}</span>` : ""}</div>${concernPicker(i, d, ov)}
+    ${fld("pov", "PoV %", "pv")}<div class="trend wide">${D.short ? `<span class="mut">Window under 1 hour: one PoV, no trend.</span>` : `<label class="chk"><input type="checkbox" data-trend ${D.trend ? "checked" : ""}> Show a trend on the product</label>`}${D.trend ? `${fld("povA", "From %", "pv")}<span class="arr">→</span>${fld("povB", "To %", "pv")}<span class="mut">${d.multi ? `defaults: first hour ${d.povFirst ?? "–"}%, last hour ${d.povLast ?? "–"}%` : "single-time window: set both values"}</span>` : ""}</div>${concernPicker(i, d, ov)}
     ${pick("wx", "Weather", WX_OPTS)}${pick("vis", "Visibility", VIS_OPTS)}${fld("temp", "Temperature")}${fld("rh", "Humidity")}${fld("wind", `${windsName()} (${(L.liftoff && L.liftoff.h) || 200} ft, ${windUnitLSP() === "kt" ? "kts" : windUnitLSP() === "ft/s" ? "fps" : "mph"})`, "wide")}
     <div class="wide clouds"><span>Clouds ${ov.clouds ? `<button type="button" class="rs" data-rs="clouds" title="Back to the forecast layers">↺</button>` : ""}</span>${(D.clouds || []).map((c, k) => `<div class="crow" data-i="${k}"><select data-c="type">${opt(CLOUD_TYPES.includes(c.type) || !c.type ? CLOUD_TYPES : [c.type, ...CLOUD_TYPES], c.type || "None")}</select><select data-c="cov">${opt(["", ...CLOUD_COVS], c.cov || "")}</select><input data-c="base" type="number" step="500" value="${c.base ?? ""}" placeholder="Base"><input data-c="tops" type="number" step="500" value="${c.tops ?? ""}" placeholder="Tops"><button type="button" class="x" data-delc="${k}" aria-label="Remove layer">×</button></div>`).join("")}${(D.clouds || []).filter(c => c.type && c.type !== "None").length < 3 ? '<button type="button" class="lnk" data-addc="1">+ cloud layer</button>' : '<small class="mut">three cloud layers at most</small>'}</div>
     ${risksOn().map(r => `<label class="${ov.risk && ov.risk[r.id] ? "ov" : ""}">${hesc(r.name)} <select data-risk="${r.id}">${opt(RISK, D.risk[r.id] || "Low")}</select></label>`).join("")}

@@ -718,8 +718,8 @@ function lmTemplate(kind){
     ? ["mission,window_index,window_open_utc,weather_violation," + rules.join(",") + ",notes",
        `Starlink 10-11,0,11/3/2026 6:00 PM,Y,N,Y,N,N,N,N,N,N,N,N,N,Cumulus within 5 nmi of the flight path at T-0`,
        `Starlink 10-11,1,11/4/2026 6:00 PM,N,,,,,,,,,,,,`]
-    : ["mission,vehicle,pad_id,issued_utc,forecaster,window_index,window_open_utc,window_close_utc,pov_pct," + rules.map(r => r + "_pct").join(","),
-       `Starlink 10-11,Falcon 9,SLC-40,11/2/2026 9:07 PM,BC,0,11/3/2026 6:00 PM,11/3/2026 10:00 PM,25,15,20,5,0,0,0,0,0,0,0,5`];
+    : ["Mission_ID,Attempt_ID,mission_name,vehicle,pad_id,issued_utc,forecaster,window_index,window_open_utc,window_close_utc,pov_pct_1,pov_pct_2,pov_pct_3,pov_pct_4,pov_pct_5,pov_pct_6," + rules.map(r => r + "_pct").join(","),
+       `,,Starlink 10-11,Falcon 9,SLC-40,11/2/2026 9:07 PM,BC,0,11/3/2026 6:00 PM,11/3/2026 10:00 PM,10,15,20,25,,,15,20,5,0,0,0,0,0,0,0,5`];
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + text.join("\r\n") + "\r\n"], { type:"text/csv" }));
   a.download = kind === "obs" ? "LMEF_observed_LLCC_template.csv" : "LMEF_forecast_template.csv"; document.body.appendChild(a); a.click(); a.remove();
 }
@@ -735,7 +735,10 @@ function addLMEFdbCSV(text){
   const rows = lmCSV(text.replace(/^\ufeff/, "")); if (!rows.length || !("window_open_utc" in rows[0])) return 0;
   const t = s2 => { const m = String(s2 || "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)?/i); if (!m) return Date.parse(s2); let h = +m[4] % 12; if (/PM/i.test(m[6] || "")) h += 12; return Date.UTC(+m[3], +m[1] - 1, +m[2], h, +m[5]); };
   const groups = {};
-  for (const r of rows){ const key = `${r.mission}|${t(r.issued_utc)}`; (groups[key] = groups[key] || []).push(r); }
+  /* old files have mission and pov_pct; new ones mission_name and pov_pct_1 to _6 (the window's PoV is the highest) */
+  for (const r of rows){ if (r.mission == null) r.mission = r.mission_name || "";
+    if (r.pov_pct == null){ const ps = [1, 2, 3, 4, 5, 6].map(k => r[`pov_pct_${k}`]).filter(x => x != null && x !== "" && isFinite(+x)).map(Number); r.pov_pct = ps.length ? String(Math.max(...ps)) : ""; }
+    const key = `${r.mission}|${t(r.issued_utc)}`; (groups[key] = groups[key] || []).push(r); }
   let n = 0;
   for (const [id, rs] of Object.entries(groups)){
     const r0 = rs[0], padId = Object.keys(LM_PADS).find(k => LM_PADS[k][2].toUpperCase() === String(r0.pad_id || "").toUpperCase());

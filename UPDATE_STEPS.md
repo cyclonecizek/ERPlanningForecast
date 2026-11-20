@@ -1,31 +1,18 @@
-# Update: Marine forecasts (route and single point)
+# Update: exposure map picker + LMEF database CSV (Personal)
 
-Upload into your personal **ERPlanningForecast** repository (cyclonecizek/ERPlanningForecast).
-**Add file → Upload files**, drag in everything in this folder (except this file), **Commit changes**. As before,
-`docs/site.config.json` (your personal settings) and the data the workflows build are left out, so nothing
-you've set up is overwritten.
+Copy these files into cyclonecizek/ERPlanningForecast (your personal repo) at the same paths, replacing the old ones, then commit and push.
+Do not overwrite `docs/site.config.json`; it is not in this bundle.
 
-## Changed or new
-- `docs/marine.html`, `docs/marine.js` (**new**): the Marine forecasts page
-- `docs/data/coast.json` (**new**): the offline coastline for the map (Natural Earth, public domain)
-- `docs/index.html`, `taf.html`, `mwp.html`, `burn.html`, `exposure.html`, `lmef.html`, `verify.html`: **Marine** in the page bar
-- `docs/guidance.js`, `docs/planning-app.js`: shared code for the wave models and NBM wave height; wave heights as
-  ranges on the personal page; Excel rain amounts keep two decimals
-- `docs/ER_Weather_Tools.html`, `pipeline/build_standalone.py`: the offline copy now has the Marine tab (built for
-  your personal address and settings; the standalone workflow rebuilds it too)
-- `README.md`: a Marine forecasts section
+| File | Change |
+|---|---|
+| docs/pointmap.js | NEW: offline map for picking a point (coastline, fixed points, pan/zoom, click to pick) |
+| docs/exposure.html, docs/burn.html | "Pick on map" button under the custom point; lat/lon accept degrees-minutes |
+| docs/planning-app.js | Custom point: degrees-minutes parsing, map wiring |
+| docs/lmef.js | Database CSV: new headers, Mission_ID/Attempt_ID blank, pov_pct_1-6, risktype_4, next_forecast + discussion; windows under 1 hour have one PoV and no trend option |
+| docs/verify.js | Loads the new database CSV (and still loads older files) |
+| docs/index.html, lmef.html, verify.html | Version stamps only (cache refresh) |
+| docs/ER_Weather_Tools.html | Offline copy rebuilt |
+| README.md | Exposure map picker, new CSV columns and PoV slots |
 
-No new workflows, secrets or settings.
-
-## Try it
-1. Hard-refresh the page and click **Marine**. Add `?demo=1` to the address for a demo route first if you like.
-2. **Route:** click the map to drop waypoints (drag to move), set **Depart** and **Speed**, and choose **Rows between
-   waypoints**. Or switch to **Times I enter** to type each arrival time. **Open route file** takes a GPX route or
-   a CSV of name, lat, lon.
-3. **Single point:** click the map (or type lat and lon), then set **From**, **To** and **Every**.
-4. Click any value in the forecast to change it; ranges, chances and the summary follow. Set the chance thresholds
-   and the range percentiles above the table.
-5. Add your initials as **Forecaster**, then **Download PDF**, **HTML**, **CSV** or **Copy text**.
-
-## What stays where
-Routes, positions and edits stay in the browser (save routes by name, or to a file). Nothing goes to GitHub.
+After pushing: open Exposure, choose Custom point, press "Pick on map", and click a point. On LMEF, press CSV and check the header row.
+A hard refresh (Ctrl+F5) once is enough if the old page is cached.

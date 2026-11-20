@@ -410,6 +410,17 @@ table.ol td.oed{ box-shadow:inset 0 0 0 2px var(--edit); } table.ol td.oed:hover
 table.ol input.oein{ width:100%; max-width:7em; border:1px solid var(--accent); border-radius:5px; padding:3px 6px; font:inherit; text-align:center; background:var(--panel); color:var(--ink); }
 .con .caut{ font-size:12.5px; color:var(--ink-3); display:inline-flex; gap:4px; align-items:center; margin-left:6px; } .con .caut input{ width:70px; }
 </style>
+<style>
+.pmap{ width:100%; margin-top:8px; } .pmapbox{ height:340px; border:1px solid var(--rule); border-radius:10px; overflow:hidden; cursor:crosshair; touch-action:none; user-select:none; }
+.pmapbox svg{ display:block; width:100%; height:340px; } .pmapbar{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:12.5px; color:var(--ink-3); } .pmapsp{ flex:1; }
+.pmapbar .btn{ padding:3px 10px; font-size:13px; }
+.psea{ fill:#DCEAF2; } .pland{ fill:#D8D2BE; stroke:#9C9478; stroke-width:.6; } .pgrid{ stroke:#9DB4C4; stroke-width:.6; fill:none; } .pgl{ font:10.5px sans-serif; fill:#4B5A68; }
+.pref circle{ fill:#5C6B7A; stroke:#fff; stroke-width:1.2; } .pref text{ font:600 11px sans-serif; fill:#33414F; paint-order:stroke; stroke:#fff; stroke-width:3px; }
+.ppick circle{ fill:none; stroke:#C2410C; stroke-width:2.5; } .ppick .pdot{ fill:#C2410C; stroke:none; }
+:root[data-theme="dark"] .psea{ fill:#1A2C3A; } :root[data-theme="dark"] .pland{ fill:#3A3A30; stroke:#5E5A48; } :root[data-theme="dark"] .pgl{ fill:#A3B1BD; } :root[data-theme="dark"] .pref text{ fill:#E5ECF1; stroke:#0D151D; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .psea{ fill:#1A2C3A; } :root:not([data-theme="light"]) .pland{ fill:#3A3A30; stroke:#5E5A48; } :root:not([data-theme="light"]) .pgl{ fill:#A3B1BD; } :root:not([data-theme="light"]) .pref text{ fill:#E5ECF1; stroke:#0D151D; } }
+#expCustom{ flex-wrap:wrap; }
+</style>
 </head>
 <body>
 <nav class="pagenav" aria-label="Products"><a href="./" data-page="planning">Planning forecast</a><a href="taf.html" data-page="taf">TAF generator</a><a href="mwp.html" data-page="mwp">Mission weather (MWP)</a><a href="marine.html" data-page="marine">Marine</a><a href="burn.html" data-page="burn">Burn forecasts</a><a href="exposure.html" data-page="exposure">Exposure forecasts</a><a href="lmef.html" data-page="lmef">Launch forecast (LMEF)</a><a href="verify.html" data-page="verify">Verification</a><span class="navsp"></span><a class="offl" href="ER_Weather_Tools.html" download title="One file with all four tools, to open from your computer">Offline copy</a><span class="seg theme" role="group" aria-label="Color theme"><button type="button" data-th="auto">Auto</button><button type="button" data-th="light">Light</button><button type="button" data-th="dark">Dark</button></span></nav>
@@ -478,9 +489,11 @@ table.ol input.oein{ width:100%; max-width:7em; border:1px solid var(--accent); 
     <div class="esrow" id="expCustom" hidden>
       <strong>Custom point</strong>
       <label>Name <input id="cuName" maxlength="24" autocomplete="off"></label>
-      <label>Latitude <input id="cuLat" inputmode="decimal" style="width:100px"></label>
-      <label>Longitude <input id="cuLon" inputmode="decimal" style="width:100px"></label>
+      <label>Latitude <input id="cuLat" style="width:110px" placeholder="28.5 or 28 30N"></label>
+      <label>Longitude <input id="cuLon" style="width:110px" placeholder="-80.6 or 80 36W"></label>
       <button class="btn" type="button" id="cuLoad">Load point</button>
+      <button class="btn ghost" type="button" id="cuMapBtn" aria-expanded="false">Pick on map</button>
+      <div id="cuMap" hidden></div>
     </div>
     <div class="cons">
       <h3 id="expConsTitle">Constraints</h3>
@@ -586,6 +599,7 @@ table.ol input.oein{ width:100%; max-width:7em; border:1px solid var(--accent); 
 <div class="toast" id="toast"></div>
 <script>window.PAGE = "burn";</script>
 <script src="guidance.js?v=baf30cc0a6"></script>
-<script src="planning-app.js?v=44359ed0a4"></script>
+<script src="pointmap.js?v=700e9872fc"></script>
+<script src="planning-app.js?v=8a4da00ed6"></script>
 </body>
 </html>

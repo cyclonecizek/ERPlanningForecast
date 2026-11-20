@@ -299,7 +299,10 @@ models' low/mid/high cloud cover. Add `?demo=1` to see it with synthetic data.
 
 ## Exposure forecasts (`exposure.html`)
 A tailored forecast for one operation, with the same editor, linking and publishing as the planning
-page. Pick LC-39A, LC-39B, SLC-41, SLC-40, SLC-37, LC-36, the SLF, XMR or a custom point; set the
+page. Pick LC-39A, LC-39B, SLC-41, SLC-40, SLC-37, LC-36, the SLF, XMR or a custom point (type the latitude and
+longitude as decimals or degrees and minutes, such as `28 33.6N` / `80 34.6W`, or press **Pick on map** and
+click the point; the map works offline and shows the fixed points for reference; the burn page has the same
+map); set the
 valid window, how many hours stay hourly before switching to 3-hour blocks, and any number of
 constraints:
 * wind: height (ft), sustained or peak, at-or-above or above a speed in kt, mph, m/s or km/h,
@@ -523,11 +526,18 @@ gets its own Brier score and reliability curve. *Forecast template* and *Observe
   Cumulus, Cumulonimbus, Nimbostratus, Altostratus, Cirrostratus, Cirrus), risk levels (Low, Low-Mod,
   Moderate, Mod-High, High) and primary concerns (up to three). The automatic values use the same words.
 * **CSV** downloads the 45 WS database format (`LMEF_Forecast_output.csv`): one row per window with
-  `mission, vehicle, pad_id, issued_utc, forecaster, window_index, window_open_utc, window_close_utc,
-  pov_pct, primary_concern_1-3, weather, visibility_mi, temperature_f, relative_humidity_pct,
-  wind_dir_deg, wind_min_kt, wind_max_kt, cloud1-3 type/coverage/base/tops, risktype/risklevel 1-4,
-  next_forecast, discussion`; values quoted, empty fields bare, times MM/DD/YYYY h:mm AM in UTC, cloud
-  heights with thousands separators, a missing second or third cloud group as 0, winds in knots, UTF-8 with BOM.
+  `Mission_ID, Attempt_ID, mission_name, vehicle, issued_utc, forecaster, window_index, window_open_utc,
+  window_close_utc, pov_pct_1-6, primary_concern_1-3, weather, visibility_mi, temperature_f,
+  relative_humidity_pct, wind_dir_deg, wind_min_kt, wind_max_kt, cloud1-3 type/coverage/base/tops,
+  risktype/risklevel 1-4, next_forecast, discussion`. `Mission_ID` and `Attempt_ID` are left blank for the
+  database to fill; there is no pad column. Values quoted, empty fields bare, times MM/DD/YYYY h:mm AM in
+  UTC, cloud heights with thousands separators, a missing second or third cloud group as 0, winds in knots,
+  UTF-8 with BOM.
+* **PoV slots** (`pov_pct_1` to `pov_pct_6`) hold one value per hour of the window, up to six. A window
+  shown as a trend spreads the trend evenly from the first slot to the last (4 h window, 5% -> 20%:
+  5, 10, 15, 20). A window without a trend repeats its PoV in every slot. A window shorter than one hour
+  (or instantaneous) has one PoV and no trend: the value goes in `pov_pct_1` only.
+  Windows longer than six hours spread the trend over the six slots. Past windows leave the slots empty.
 
 **Solar Activity (SWPC binned translation).** The SWPC 3-day forecast's S1-or-greater chance (10 MeV at
 10 pfu) on the window's forecast day sets the Solar Activity level through the 45 WS translation tables
@@ -562,11 +572,10 @@ the default; **Lowest sustained to highest peak**; or **Sustained only**. The di
 direction at the middle of the window.
 
 ## LMEF PoV trend
-Each window can show its PoV as a trend (for example **10% → 25%**): tick **Show a trend on the product**
-in the product editor. The start and end default to the PoV in the window's first and last hour and can
+Each window of an hour or longer can show its PoV as a trend (for example **10% → 25%**): tick **Show a
+trend on the product** in the product editor. Windows under an hour have one PoV, so the option is not offered. The start and end default to the PoV in the window's first and last hour and can
 be changed. The trend appears in both PDF layouts, the preview and HTML; Excel shows the same text; the
-database CSV adds `pov_trend`, `pov_start_pct` and `pov_end_pct` (first- and last-hour PoV on every
-row, so the trend is there even when it isn't shown).
+database CSV spreads it across `pov_pct_1` to `pov_pct_6` (see above).
 
 ## LMEF CSV export (for databases)
 **CSV** on the LMEF page downloads two tables that join on `forecast_id`
