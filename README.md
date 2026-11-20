@@ -300,8 +300,8 @@ models' low/mid/high cloud cover. Add `?demo=1` to see it with synthetic data.
 ## Exposure forecasts (`exposure.html`)
 A tailored forecast for one operation, with the same editor, linking and publishing as the planning
 page. Pick LC-39A, LC-39B, SLC-41, SLC-40, SLC-37, LC-36, the SLF, XMR or a custom point (type the latitude and
-longitude as decimals or degrees and minutes, such as `28 33.6N` / `80 34.6W`, or press **Pick on map** and
-click the point; the map works offline and shows the fixed points for reference; the burn page has the same
+longitude as decimals or degrees and minutes, such as `28 33.6N` / `80 34.6W`, or press **Pick on map** (at the end of the
+location row, or next to the latitude and longitude) and click the point; the map works offline and shows the fixed points for reference; the burn page has the same
 map); set the
 valid window, how many hours stay hourly before switching to 3-hour blocks, and any number of
 constraints:

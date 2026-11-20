@@ -31,8 +31,8 @@ const EXP_POINTS = [
   { id:"slc40", name:"SLC-40", point:"SLC-40", area:"CCSFS", tag:"40",  off:[6,4,"start"],   stn:"KXMR", lat:28.5620, lon:-80.5772 },
   { id:"slc37", name:"SLC-37", point:"SLC-37", area:"CCSFS", tag:"37",  off:[6,3,"start"],   stn:"KXMR", lat:28.5314, lon:-80.5650 },
   { id:"lc36",  name:"LC-36",  point:"LC-36",  area:"CCSFS", tag:"36",  off:[6,3,"start"],   stn:"KXMR", lat:28.4710, lon:-80.5378 },
-  { id:"slf",   name:"SLF",    point:"SLF",    area:"KSC Shuttle Landing Facility", tag:"SLF", off:[-5,3,"end"],    stn:"KTTS", lat:28.6150, lon:-80.6945 },
-  { id:"xmr",   name:"XMR",    point:"XMR",    area:"CCSFS Skid Strip", tag:"XMR", off:[-6,3,"end"],    stn:"KXMR", lat:28.4686, lon:-80.5667 },
+  { id:"slf",   name:"SLF",    point:"SLF",    area:"KSC", tag:"SLF", off:[-5,3,"end"],    stn:"KTTS", lat:28.6150, lon:-80.6945 },
+  { id:"xmr",   name:"XMR",    point:"XMR",    area:"CCSFS", tag:"XMR", off:[-6,3,"end"],    stn:"KXMR", lat:28.4686, lon:-80.5667 },
 ];
 const MOS_STATIONS = { KTTS:[28.6150,-80.6945], KXMR:[28.4686,-80.5667], KCOF:[28.2349,-80.6101] };
 const WIND_UNITS = { kt:1, mph:0.868976, "m/s":1.943844, "ft/s":0.592484, "km/h":0.539957 };
@@ -656,7 +656,8 @@ function colLabel(p, s){ if (p.k === "xhot") return `>${hotOf(s)}°F`; return p.
    Rendering: header, locator, params, sources
    ============================================================ */
 function renderSites(){
-  $("sites").innerHTML = SITES.map(s => `<button type="button" data-site="${s.id}" aria-pressed="${s.id === prefs.site}" class="${editCount(s.id) ? "dirty" : ""}"><span class="n">${s.name}<span class="dot" title="Has edits"></span></span><span class="p">${EXPO ? (s.custom ? `${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}` : s.area) : s.point}</span></button>`).join("");
+  $("sites").innerHTML = SITES.map(s => `<button type="button" data-site="${s.id}" aria-pressed="${s.id === prefs.site}" class="${editCount(s.id) ? "dirty" : ""}"><span class="n">${s.name}<span class="dot" title="Has edits"></span></span><span class="p">${EXPO ? (s.custom ? `${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}` : s.area) : s.point}</span></button>`).join("")
+    + (EXPO && $("cuMapBtn") && window.ERWXPointMap ? `<button type="button" id="sitesMap" class="sitesmap" title="Switch to Custom point and pick it on the map"><span class="n">Pick on map</span><span class="p">any point</span></button>` : "");
   const s = site();
   if (EXPO){
     const e = prefs.exp, z = zulu(), r0 = S.rows && S.rows[0], r1 = S.rows && S.rows[S.rows.length - 1];
@@ -3838,7 +3839,14 @@ function bind(){
     window.addEventListener("hashchange", () => { if (location.hash === "#brief") wantBrief(); });
   }
   window.addEventListener("themechange", () => { CH.layout = null; renderChart(); });
-  $("sites").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; clearSel(); renderAll(); renderExpSetup(); });
+  $("sites").addEventListener("click", ev => {
+    /* "Pick on map": switch to the custom point and open its map in one step */
+    if (ev.target.closest("#sitesMap")){
+      if (prefs.site !== "custom"){ prefs.site = "custom"; savePrefs(); S.cur = null; clearSel(); renderAll(); renderExpSetup(); }
+      if ($("cuMap") && $("cuMap").hidden) $("cuMapBtn").click();
+      ($("cuMap") || $("expCustom")).scrollIntoView({ behavior:"smooth", block:"center" }); return;
+    }
+    const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); S.cur = null; clearSel(); renderAll(); renderExpSetup(); });
   $("locator").addEventListener("click", ev => { const b = ev.target.closest("[data-site]"); if (!b) return; prefs.site = b.dataset.site; savePrefs(); renderAll(); });
   $("params").addEventListener("click", ev => { const b = ev.target.closest("[data-p]"); if (!b) return; if (prefs.param !== b.dataset.p) clearSel(); prefs.param = b.dataset.p; savePrefs(); renderParams(); renderChart(); renderMatrix(); });
   $("undo").onclick = undo; $("redo").onclick = redo;

@@ -420,6 +420,10 @@ table.ol input.oein{ width:100%; max-width:7em; border:1px solid var(--accent); 
 :root[data-theme="dark"] .psea{ fill:#1A2C3A; } :root[data-theme="dark"] .pland{ fill:#3A3A30; stroke:#5E5A48; } :root[data-theme="dark"] .pgl{ fill:#A3B1BD; } :root[data-theme="dark"] .pref text{ fill:#E5ECF1; stroke:#0D151D; }
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .psea{ fill:#1A2C3A; } :root:not([data-theme="light"]) .pland{ fill:#3A3A30; stroke:#5E5A48; } :root:not([data-theme="light"]) .pgl{ fill:#A3B1BD; } :root:not([data-theme="light"]) .pref text{ fill:#E5ECF1; stroke:#0D151D; } }
 #expCustom{ flex-wrap:wrap; }
+.sites button.sitesmap{ background:var(--panel); }
+@media (max-width:1200px){ .sites{ flex-wrap:wrap; margin-left:0; } .sites button{ border-bottom:1px solid var(--rule); } }
+.sites button.sitesmap .n{ color:var(--accent, #1d5fa8); }
+
 </style>
 </head>
 <body>
@@ -600,6 +604,6 @@ table.ol input.oein{ width:100%; max-width:7em; border:1px solid var(--accent); 
 <script>window.PAGE = "burn";</script>
 <script src="guidance.js?v=baf30cc0a6"></script>
 <script src="pointmap.js?v=700e9872fc"></script>
-<script src="planning-app.js?v=8a4da00ed6"></script>
+<script src="planning-app.js?v=4db396a783"></script>
 </body>
 </html>
