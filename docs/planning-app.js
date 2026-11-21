@@ -253,6 +253,8 @@ function applyExposureConfig(exp){
   const consRows = cons.filter((p, i) => p.k !== "hailp" || cons.findIndex(q => q.k === "hailp") === i);
   const list = [...["sky","t","td","wbgt","pp1","pp3","pp6", ...(hasRain ? ["qpf"] : []),"lt1","lt3","lt6"].map(base), ...winds, base("dir"), ...consRows.map(p => ({ ...p, unit:"%", step:1, lo:0, hi:100 })), base("sev")];
   list.find(p => p.k === "dir").s = `${hs[0]} ft`;
+  /* the storm-gust row (convective gusts on) goes after the last peak-wind row */
+  if (typeof convOn === "function" && convOn()){ const at = list.map(p => !!p.peakOf).lastIndexOf(true); list.splice(at + 1, 0, convParam()); }
   const CSVN = { sky:"sky_pct", t:"temp_f", td:"dewpoint_f", wbgt:"wbgt_f", pp1:"pop_1h_pct", pp3:"pop_3h_pct", pp6:"pop_6h_pct", lt1:"ltg_1h_pct", lt3:"ltg_3h_pct", lt6:"ltg_6h_pct", dir:"wind_dir_deg", sev:"spc_category" };
   list.forEach(p => { if (CSVN[p.k]) p.csv = CSVN[p.k]; });
   PARAMS.splice(0, PARAMS.length, ...list);
@@ -390,6 +392,92 @@ function linkProbs(ev, rows, Gv, ed){
    tapering to 40% at 65 km; none beyond), the same way edits carry between planning points. */
 const FOR_KEY = "erwx:for:v1", FOR_MAX_AGE = 48*H;
 const IS_PLANNING = !EXPO && !LMEF && !PERSONAL;
+/* ---------- convective gusts (convgust.js): forecaster toggle, flow regime, storm-gust row, mixed probabilities ---------- */
+const CONV_PAGE = (IS_PLANNING || (PAGE === "exposure" && !PERSONAL)) && typeof window !== "undefined" && !!window.ERWXConv;
+prefs.conv = Object.assign({ on:false, regime:"auto", thr:20, share:100 }, prefs.conv || {});
+function convOn(){ try { return CONV_PAGE && !!(prefs.conv && prefs.conv.on); } catch (e) { return false; } }
+function convParam(){ return { k:"cg", g: (PARAMS.find(p => p.peakOf) || {}).g || "Winds (kt)", l:"Storm gust", s:"in storms", kind:"num", unit:"kt", step:1, lo:0, title:"Typical peak wind if a thunderstorm affects the site (median to 90th percentile of the 45 WS convective wind climatology for the flow regime); shown when lightning reaches the set chance. Edit it to move the storm part of the wind probabilities.", csv:"storm_gust_kt", conv:true }; }
+/* planning page: add or remove the storm-gust row (exposure rebuilds its list in applyExposureConfig) */
+function syncConvParam(){
+  if (!IS_PLANNING) return;
+  const at = PARAMS.findIndex(p => p.k === "cg");
+  if (convOn() && at < 0){ const i = PARAMS.map(p => !!p.peakOf).lastIndexOf(true); PARAMS.splice(i + 1, 0, convParam()); }
+  if (!convOn() && at >= 0) PARAMS.splice(at, 1);
+  for (const k of Object.keys(P)) delete P[k]; PARAMS.forEach(p => P[p.k] = p);
+}
+if (IS_PLANNING) syncConvParam();
+/* the exposure list was built before these settings existed: rebuild it once with the storm-gust row */
+if (PAGE === "exposure" && convOn()) applyExposureConfig(prefs.exp || expStored);
+/* GFS flow regimes, loaded when convective gusts are on */
+function ensureRegimes(){
+  if (!convOn() || S.regimes !== undefined || S.regLoading) return;
+  S.regLoading = true;
+  (DEMO ? Promise.resolve(demoRegimes()) : ERWXConv.fetchRegimes(getJSON)).then(x => { S.regimes = x; }).catch(() => { S.regimes = null; })
+    .finally(() => { S.regLoading = false; scheduleRender(); });
+}
+function demoRegimes(){ const out = {}, seq = ["SW-1","SW-2","SE-1","NE","NW","SE-2","Other","SW-1"]; for (let d = 0; d < 8; d++){ const day = new Date(Date.now() - 5*H + d*86400000).toISOString().slice(0, 10); out[day] = { regime: seq[d], xmr:null }; } return out; }
+/* the bar above the table: on/off, flow regime, when the storm gust shows, the share of lightning hours with a storm gust */
+function renderConvBar(){
+  const bar = $("convBar"); if (!bar) return;
+  if (!CONV_PAGE){ bar.hidden = true; return; }
+  ensureRegimes();
+  const c = prefs.conv, r0 = S.rows && S.rows[0] ? convRegime(S.rows[0]) : null;
+  const autoTxt = !convOn() ? "Auto" : S.regLoading ? "Auto (loading)" : S.regimes === null ? "Auto (not reachable: average used)" : r0 && r0.amu ? `Auto (today ${r0.amu})` : "Auto";
+  const opt = (v, t) => `<option value="${v}"${c.regime === v ? " selected" : ""}>${t}</option>`;
+  bar.hidden = false;
+  bar.innerHTML = `<label class="chk"><input type="checkbox" id="cvOn"${c.on ? " checked" : ""}> <b>Include convective gusts</b></label>
+    ${c.on ? `<label>Flow regime <select id="cvReg">${opt("auto", autoTxt)}${["SW","NW","SE","NE","Other"].map(g => opt(g, ERWXConv.GROUP_NAME[g])).join("")}</select></label>
+    <label>Show storm gust from <input id="cvThr" type="number" min="0" max="100" step="5" value="${c.thr}"> % lightning</label>
+    <label title="Share of lightning hours in which a convective wind reaches the site. 100% assumes every lightning hour brings one (conservative) until the tower climatology calibrates it.">Storm hits site <input id="cvShare" type="number" min="0" max="100" step="5" value="${c.share}"> % of lightning</label>
+    <span class="mut cvnote">Peak-wind chances add the storm part: lightning chance × the 45 WS convective climatology (1995–2012, May–Sep) for the regime. Edit the storm gust row to change it.</span>` : `<span class="mut cvnote">Off: wind chances come from the models only.</span>`}`;
+  const redo = () => { savePrefs(); if (PAGE === "exposure") applyExposureConfig(prefs.exp); else syncConvParam(); if (PAGE === "exposure") rebuildViews(); renderAll(); };
+  $("cvOn").onchange = ev => { c.on = ev.target.checked; redo(); };
+  if ($("cvReg")) $("cvReg").onchange = ev => { c.regime = ev.target.value; savePrefs(); renderAll(); };
+  if ($("cvThr")) $("cvThr").onchange = ev => { c.thr = Math.max(0, Math.min(100, +ev.target.value || 0)); savePrefs(); renderAll(); };
+  if ($("cvShare")) $("cvShare").onchange = ev => { c.share = Math.max(0, Math.min(100, +ev.target.value || 0)); savePrefs(); renderAll(); };
+}
+/* the flow regime for a row: the forecaster's choice, or the AMU regime for that day (GFS, 12Z) */
+function convRegime(r){
+  const c = prefs.conv;
+  if (c.regime && c.regime !== "auto") return { amu:null, grp:c.regime, auto:false };
+  const day = new Date(r.a - 5*H).toISOString().slice(0, 10), x = S.regimes && S.regimes[day];
+  return { amu: x ? x.regime : null, grp: ERWXConv.groupOf(x && x.regime), auto:true, missing: !x };
+}
+/* lightning chance for a row: the window that matches the row, or the best one that covers it */
+function convLtg(src, r, i){
+  const pick = r.len >= 6 ? ["lt6","lt3","lt1"] : r.len >= 3 ? ["lt3","lt6","lt1"] : ["lt1","lt3","lt6"];
+  for (const k of pick){ const v = src[k] && src[k][i]; if (v != null) return +v; }
+  /* a row inside a longer lightning window: use that window's chance */
+  for (const k of ["lt1","lt3","lt6"]){ const a = src[k]; if (!a) continue; for (let j = i; j >= 0 && j > i - 6; j--){ if (a[j] != null){ const c = probCell(S.rows[j], +k.slice(2)); if (c && c.B > r.a) return +a[j]; break; } } }
+  return null;
+}
+/* storm gust and the storm share of every peak-wind probability (prob rows built on a peak wind) */
+function applyConv(o, g, rows, ed, probs){
+  const c = prefs.conv, share = Math.max(0, Math.min(100, +c.share || 0))/100, thr = +c.thr || 0;
+  const info = { regime:[], pc:[], med:[] };
+  const peakX = PARAMS.filter(p => p.k.startsWith("x") && typeof p.ex === "string" && /^g(\d+|max)$/.test(p.ex) && (p.op === ">" || p.op === ">="));
+  rows.forEach((r, i) => {
+    const rg = convRegime(r), med0 = ERWXConv.BASE_MEDIAN + (ERWXConv.SHIFT[rg.grp] || 0);
+    const lo = convLtg(o, r, i), lg = convLtg(g, r, i);
+    const pc = lo == null ? 0 : Math.min(1, lo/100*share), pcg = lg == null ? 0 : Math.min(1, lg/100*share);
+    const e = ed("cg", r), med = e != null ? +e : med0;
+    info.regime[i] = rg; info.pc[i] = pc; info.med[i] = med;
+    if (o.cg) o.cg[i] = e !== undefined ? e : (lo != null && lo >= thr ? Math.round(med0) : null);
+    if (g){ g.cg = g.cg || []; g.cg[i] = lg != null && lg >= thr ? Math.round(med0) : null; }
+    if (!probs) return;
+    for (const p of peakX){
+      if (o[p.k] && o[p.k][i] != null && ed(p.k, r) === undefined){
+        const pb = o[p.k][i]/100, pv = ERWXConv.exceed(p.v, med - ERWXConv.BASE_MEDIAN);
+        o[p.k][i] = probRound(Math.max(0, Math.min(prefs.clamp ? 99 : 100, 100*(pb + pc*(1 - pb)*pv))));
+      }
+      if (g && g[p.k] && g[p.k][i] != null){
+        const pb = g[p.k][i]/100, pv = ERWXConv.exceed(p.v, med0 - ERWXConv.BASE_MEDIAN);
+        g[p.k][i] = probRound(Math.max(0, Math.min(prefs.clamp ? 99 : 100, 100*(pb + pcg*(1 - pb)*pv))));
+      }
+    }
+  });
+  return info;
+}
 function readFOR(){ try { const r = JSON.parse(localStorage.getItem(FOR_KEY) || "null"); return r && r.v === 1 && Date.now() - r.saved < FOR_MAX_AGE ? r : null; } catch (e) { return null; } }
 let forT = null;
 function saveFOR(published){
@@ -564,6 +652,7 @@ function officialFor(sid, fast){
     /* while dragging: keep the exceedance probabilities from the last full pass */
     for (const p of PARAMS.filter(p => p.k.startsWith("x"))){ o[p.k] = OF.o[p.k] || []; gx[p.k] = OF.g[p.k] || []; src[p.k] = OF.xsrc[p.k] || {}; }
     const outF = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid, pc };
+    if (convOn()) outF.conv = applyConv(o, null, rows, ed, false);
     if (HOOKS.official) HOOKS.official(outF, ed, rows);
     return outF;
   }
@@ -591,6 +680,7 @@ function officialFor(sid, fast){
     rows.forEach((r, i) => { if (ed("xall", r) !== undefined || o.xall[i] == null) return; const lo = Math.min(...crit.map(p => o[p.k][i]).filter(v => v != null)); if (isFinite(lo)) o.xall[i] = Math.min(o.xall[i], lo); });
   }
   const out = { o, g: Object.assign(g, gx), xsrc: src, fits, site:sid, pc };
+  if (convOn()) out.conv = applyConv(o, out.g, rows, ed, true);
   if (HOOKS.official) HOOKS.official(out, ed, rows);
   return out;
 }
@@ -629,6 +719,7 @@ function fmt(p, v, sid, i){
   if (v === undefined) return "";
   if (v == null) return "";
   if (isWaveHt(p)) return i == null ? String(Math.round(v)) : waveRange(p, v, sid ?? prefs.site, i).text;
+  if (p.conv && window.ERWXConv){ const rg = ERWXConv.range(+v); return `${Math.round(rg.med*wfac())}–${Math.round(rg.hi*wfac())}`; }
   if (isWind(p)) return String(Math.round(v*wfac()));
   if (p.kind === "sky") return skyCat(v);
   if (p.kind === "dir") return compass(v);
@@ -1449,6 +1540,11 @@ function nudgeNote(p, i){
   return `Guidance changed by ${f > 0 ? "+" : ""}${f}${u} since the ${prev ? hhmm(prev.published, zulu()) + (zulu() ? "Z" : "L") : "last"} forecast: worth a fresh look. `;
 }
 function cellTitle(p, r, i){
+  if (convOn() && OF && OF.conv && (p.k === "cg" || (p.k.startsWith("x") && /^g(\d+|max)$/.test(p.ex || "")))){
+    const rg = OF.conv.regime[i] || {}, pc = OF.conv.pc[i];
+    const reg = rg.auto ? (rg.amu ? `flow regime ${rg.amu} (${rg.grp})` : "flow regime not loaded (average used)") : `flow regime set to ${rg.grp}`;
+    return `${String(p.title).replace(/\.$/, "")}. Convective gusts on: ${reg}; storm chance ${Math.round((pc || 0)*100)}% from lightning; typical storm gust ${Math.round(OF.conv.med[i] || 0)} kt.`;
+  }
   if (!p.win) return p.title;
   const c = probCell(r, p.win);
   if (c && c.mode === "max") return `Highest ${p.win}-hour chance inside this ${r.len}-hour block`;
@@ -1532,7 +1628,7 @@ function markHover(i){
 }
 /* arrow / Enter / Tab move on screen: convert to (time step, parameter step) */
 const visStep = (down, right) => across() ? [right, down] : [down, right];
-function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); if (IS_PLANNING || PERSONAL) renderQpfDay(); renderChart(); renderLinkBar(); if (PERSONAL) renderPersSummary(); if (BURN){ renderFWF(); olLater(); } if (HOOKS.rendered) HOOKS.rendered(); }
+function renderAll(){ recompute(); if (IS_PLANNING) saveFOR(); renderSites(); renderRowPick(); renderPlanBar(); renderParams(); renderStatus(); renderMatrix(); if (IS_PLANNING || PERSONAL) renderQpfDay(); renderChart(); renderLinkBar(); renderConvBar(); if (PERSONAL) renderPersSummary(); if (BURN){ renderFWF(); olLater(); } if (HOOKS.rendered) HOOKS.rendered(); }
 
 /* ---------- recent verification: the last 24 h of observations against the guidance ----------
    Observations are the hourly tower / METAR / MRMS / MERLIN record from the verification workflow

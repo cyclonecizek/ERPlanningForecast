@@ -1,18 +1,21 @@
-# Update: CARTO basemap on all maps + Pick on map (personal)
+# Personal repo: everything not yet pushed (cyclonecizek/ERPlanningForecast)
 
-Copy these files into cyclonecizek/ERPlanningForecast at the same paths, replacing the old ones, then commit and push.
-This replaces Personal_Pick_On_Map_Update.zip (everything from it is included). Do not overwrite `docs/site.config.json`.
+Checked against your repo as of 20 Nov 23:32Z. The LMEF CSV, Pick on map and CARTO map updates are already in it;
+this bundle adds the rest. Copy these files in at the same paths (replacing the old ones), then commit and push.
+Do not overwrite `docs/site.config.json` (not in this bundle).
 
 | File | Change |
 |---|---|
-| docs/basemap.js | NEW: CARTO basemap (your Rainfall dashboard key) + Esri satellite, style menu, offline coastline fallback |
-| docs/pointmap.js | Exposure/Burn point map: basemap tiles, style menu, Web Mercator |
-| docs/marine.js, docs/marine.html | Marine map: basemap tiles, style menu, Web Mercator (PDF/HTML products keep the vector coast) |
-| docs/planning-app.js | "Pick on map" at the end of the location row (switches to Custom point and opens the map); shorter SLF/XMR labels |
-| docs/exposure.html, docs/burn.html | Load basemap.js; map and button styling; location row wraps on narrow screens |
-| docs/index.html, docs/lmef.html | Version stamps only (cache refresh) |
-| docs/ER_Weather_Tools.html | Offline copy rebuilt (uses tiles when online, coastline when offline) |
-| README.md | New "Maps (basemap)" section; Pick on map |
+| docs/convgust.js | NEW: convective gust climatology (45 WS Gumbel fit, flow-regime shifts) and AMU flow regime from GFS |
+| docs/planning-app.js | Convective gusts: toggle, flow regime, storm-gust row, mixed peak-wind chances |
+| docs/index.html, docs/exposure.html | Convective gusts bar; load convgust.js |
+| docs/burn.html, docs/lmef.html | Version stamps (cache refresh) |
+| docs/ER_Weather_Tools.html | Offline copy rebuilt |
+| pipeline/planning_hires.py | CAM gusts: hourly-max 10 m wind, point / 10 km / 25 km maxima per member; calibration log in docs/data/camlog/ |
+| .github/workflows/planning-hires.yml | Commits docs/data/camlog too (the .github folder is hidden on some computers: show hidden files to copy it) |
+| README.md | Convective gusts and CAM gusts sections |
 
-After pushing, wait a minute for GitHub Pages, then hard-refresh (Ctrl+F5) Exposure and Marine.
-If a map shows an "API KEY REQUIRED" watermark, the CARTO key isn't registered for cyclonecizek.github.io; switch to Satellite or Coastline only and add the domain on carto.com.
+After pushing:
+1. Hard-refresh (Ctrl+F5). Convective gusts stay off until you tick the box above the table.
+2. The pipeline change starts the high-res workflow. In Actions > "Planning forecast high-res guidance" > newest run, check the
+   `... wind/gust records:` lines (field names each model has) and any `camlog:` lines, and that the run finishes inside its budget.

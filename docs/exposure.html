@@ -346,6 +346,9 @@ dialog::backdrop{ background:rgba(13,21,29,.45); }
   .matrix{ max-height:none; overflow:visible; }
   body{ background:#fff; }
 }
+.convbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 18px; margin:0 0 10px; padding:8px 14px; border:1px solid var(--rule); border-radius:10px; background:var(--panel); font-size:13px; }
+.convbar label{ display:inline-flex; align-items:center; gap:6px; } .convbar input[type=number]{ width:58px; } .convbar select, .convbar input[type=number]{ font:inherit; padding:3px 6px; border:1px solid var(--rule); border-radius:6px; background:var(--panel); color:var(--ink); }
+.convbar .cvnote{ flex:1 1 320px; font-size:12px; }
 </style>
 <script>
 /* color theme shared by all pages: auto (follow the system), light or dark */
@@ -506,6 +509,7 @@ document.addEventListener("DOMContentLoaded", function(){
   </details>
 
   <div class="linkbar" id="linkBar" hidden></div>
+  <div class="convbar" id="convBar" hidden></div>
   <section class="panel matrix" id="matrix" aria-label="Forecast matrix" tabindex="-1"></section>
 
   <div class="foot">
@@ -564,6 +568,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="guidance.js?v=baf30cc0a6"></script>
 <script src="basemap.js?v=7b27564e42"></script>
 <script src="pointmap.js?v=e5d23f117a"></script>
-<script src="planning-app.js?v=dc945925dd"></script>
+<script src="convgust.js?v=3e8fa19e16"></script>
+<script src="planning-app.js?v=88bc2227df"></script>
 </body>
 </html>

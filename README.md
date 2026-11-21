@@ -297,6 +297,42 @@ Not generated: WS, icing and turbulence groups, and remarks.
 Ceilings come from LAMP, GFS/NAM MOS, NBM text and RRFS/REFS where available; otherwise from the
 models' low/mid/high cloud cover. Add `?demo=1` to see it with synthetic data.
 
+## Convective gusts (planning and exposure)
+**Include convective gusts** (the bar above the table, off by default, kept in the browser) adds thunderstorm
+outflow to the peak-wind chances, which the models alone underforecast:
+
+* **Climatology:** the 45 WS convective wind climatology (WINDS towers, KTTS and KXMR, May-Sep 1995-2012):
+  the peak wind in a convective period follows a Gumbel curve, P(>= X) = 1 - exp(-exp(-((X - shift) - 27.21)/8.096)),
+  shifted by the AMU flow regime: SW +5.7 kt, NW +5.1, SE-1/SE-2 -0.9, NE -3.5, other 0 (typical storm gusts of
+  36, 35, 29, 27 and 30 kt). Constants and regime rules are in `docs/convgust.js`.
+* **Flow regime:** automatic per day from GFS (Open-Meteo) 1000-700 hPa mean winds at 12Z at MFL, TBW, JAX and XMR,
+  with the AMU rules (Lambert 2007, as in the Cape flow regime dashboard), or set by the forecaster. If the GFS
+  winds can't be loaded, the average curve is used.
+* **Storm chance:** the row's lightning chance (1, 3 or 6 h to match the row; edits count) times **Storm hits site**
+  (default 100%, the conservative choice until the tower archive calibrates it).
+* **Mixed chance:** P = Pb + Pc x (1 - Pb) x Pconv, where Pb is the models' chance and Pconv the climatology's
+  chance of reaching the threshold. Applies to every peak-wind probability (planning >25/35/50 kt rows and
+  exposure peak-wind constraints); sustained-wind, temperature and rain rows are unchanged. No height adjustment
+  is applied to the storm part (outflow gusts change little with height near the ground).
+* **Storm gust row:** median to 90th percentile (for example 36-51 kt) in rows where lightning reaches the set chance
+  (default 20%). Editing it (the typical storm gust, in kt) moves the storm part of that row's probabilities.
+  It appears on the PDF and HTML products and in the exposure CSV (`storm_gust_kt`, the typical value); the
+  planning CSV keeps its fixed columns.
+* **Limits:** the climatology is warm season only and is used all year for now; whether its peaks are per tower or
+  network-wide still needs confirming; the storm share is not yet calibrated. MWP and LMEF don't use it yet.
+
+### CAM gusts: neighborhood fields and the calibration log (pipeline)
+`pipeline/planning_hires.py` also samples the **hourly-maximum 10 m wind** (`WIND ... hour max fcst`; the
+instantaneous `GUST` field when a run has no hourly maximum) from the REFS members, RRFS and the time-lagged
+HRRR/RRFS runs, for the first 48 hours (`CONV_H`). For each member and forecast point it stores the grid-point
+value and the **maximum within 10 km and 25 km** (`wx`, `wx10`, `wx25` in kt; `wxsrc` says which field), so a
+storm a few km from the pad still counts. The first run logs the wind and gust records each model actually has.
+
+Every newly fetched run appends to `docs/data/camlog/YYYY-MM.jsonl`: one line per point with the hours where any
+member's 25 km maximum reaches 20 kt (`CAMLOG_KT`), and every member's [point, 10 km, 25 km] values. Hours
+not listed had every member below 20 kt. With the tower peaks and lightning counts that `verify.py` already
+stores, this is what the CAM gust probabilities will be calibrated on. The pages don't use these fields yet.
+
 ## Maps (basemap)
 The Exposure and Burn custom point maps and the Marine route/point map draw a **CARTO** basemap (the same key as
 the Space Coast Rainfall dashboard, in `docs/basemap.js`), with a style menu on each map: **Map** (CARTO Voyager),

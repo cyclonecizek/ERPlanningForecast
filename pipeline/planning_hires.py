@@ -10,7 +10,12 @@ Sources
           written to "status" in hires.json and shown on the pages.
   refsct  SPC REFS calibrated thunder, 1 h and 4 h periods (para until Nov 3, then prod)
 
-Point values are taken from the nearest grid point to each forecast point. Inventories (.idx)
+Point values are taken from the nearest grid point to each forecast point. For convective gusts the
+hourly-maximum 10 m wind (WIND max fcst; the instantaneous GUST field when a run has no hourly max) is
+also taken as the maximum within NBR_KM (10 and 25 km) of each point: "wx" (point), "wx10" and "wx25" in
+each member, for the first CONV_H hours. Hours where any member reaches CAMLOG_KT within 25 km are logged
+to docs/data/camlog/YYYY-MM.jsonl for calibrating against the towers (an hour not logged means every
+member stayed below CAMLOG_KT). Inventories (.idx)
 come from AWS (noaa-rrfs-ops-pds) when present, otherwise NOMADS; GRIB messages are fetched by
 byte range from AWS when the inventory matches, otherwise from NOMADS (rate limited). A source
 whose newest run is already in hires.json is not downloaded again, and a source that fails keeps
@@ -62,6 +67,10 @@ UA = {"User-Agent": "planning-forecast-hires (GitHub Actions)"}
 BUDGET_S = float(os.environ.get("HIRES_BUDGET_MIN", "35")) * 60
 T0 = time.time()
 KEEP_OLD_H = 24
+CONV_H = int(os.environ.get("CONV_H", "48"))          # hours with the convective-gust fields
+NBR_KM = (10, 25)                                      # neighborhood radii (km)
+CAMLOG_KT = float(os.environ.get("CAMLOG_KT", "20"))   # log hours where any member reaches this within 25 km
+CAMLOG_DIR = os.path.join(ROOT, "docs", "data", "camlog")
 LOG = lambda *a: print(*a, flush=True)  # noqa: E731
 
 
@@ -122,6 +131,42 @@ def acc_hours(fc):
     return int(g.group(1)) * k, int(g.group(2)) * k
 
 
+def pick_max(recs, var, lev, fh=None):
+    """Hourly-maximum record ending at fh ('11-12 hour max fcst'); else the longest sub-hour max window ending at fh."""
+    c = [r for r in recs if r["var"] == var and r["lev"].startswith(lev) and "max" in r["fc"]
+         and "prob" not in r["rest"].lower() and "ens" not in r["rest"].lower()]
+    best = None
+    for r in c:
+        g = re.match(r"(\d+)-(\d+) (hour|min)", r["fc"])
+        if not g:
+            continue
+        a, b = int(g.group(1)), int(g.group(2))
+        if g.group(3) == "min":
+            a, b = a / 60, b / 60
+        if fh is not None and abs(b - fh) > 1e-6:
+            continue
+        L = b - a
+        if L > 1 + 1e-6:
+            continue   # 0-12 hour max and the like: not the hour's peak
+        # the full hour first, then the longest shorter window ending at fh
+        score = 0 if abs(L - 1) < 1e-6 else 1 + (1 - L)
+        if best is None or score < best[0]:
+            best = (score, r)
+    return best[1] if best else None
+
+
+_logged_inv = set()
+
+
+def log_wind_records(recs, tag):
+    """Once per source: the wind and gust records in the inventory (shows the field names in the log)."""
+    if tag in _logged_inv:
+        return
+    _logged_inv.add(tag)
+    w = [f"{r['var']}:{r['lev']}:{r['fc']}" for r in recs if r["var"] in ("WIND", "GUST", "MAXUW", "MAXVW")]
+    LOG(f"  {tag} wind/gust records: {'; '.join(w) or 'none'}")
+
+
 def pick(recs, var, lev, fh=None):
     """Best record for var/level: plain (not probability/ensemble), instantaneous preferred."""
     c = [r for r in recs if r["var"] == var and r["lev"].startswith(lev)
@@ -172,6 +217,48 @@ def site_values(raw_or_msg):
     return out
 
 
+_nbr_cache = {}
+
+
+def site_nbr(raw_or_msg):
+    """Point, 10 km and 25 km maximum of one GRIB2 message at each forecast point: {"p": [...], 10: [...], 25: [...]}."""
+    msg = raw_or_msg if hasattr(raw_or_msg, "values") else first_message(raw_or_msg)
+    vals = np.ma.filled(np.ma.asarray(msg.values, dtype=float), np.nan)
+    lat1 = round(float(msg["latitudeOfFirstGridPointInDegrees"]), 4)
+    lon1 = round(float(msg["longitudeOfFirstGridPointInDegrees"]), 4)
+    key = (vals.shape, lat1, lon1)
+    if key not in _nbr_cache:
+        lats, lons = msg.latlons()
+        lons = np.where(lons > 180, lons - 360, lons)
+        idx = []
+        for _, la, lo in SITES:
+            # distance in km (equirectangular; fine over 25 km), only inside a small box for speed
+            box = (np.abs(lats - la) < 0.5) & (np.abs(lons - lo) < 0.6)
+            ii = np.flatnonzero(box)
+            dk = np.hypot((lats.ravel()[ii] - la) * 111.2, (lons.ravel()[ii] - lo) * 111.2 * math.cos(math.radians(la)))
+            idx.append({"p": int(ii[np.argmin(dk)]) if len(ii) else None,
+                        **{r: ii[dk <= r] for r in NBR_KM}})
+        _nbr_cache[key] = idx
+    flat = vals.ravel()
+    out = {"p": [], **{r: [] for r in NBR_KM}}
+    for d in _nbr_cache[key]:
+        v = flat[d["p"]] if d["p"] is not None else np.nan
+        out["p"].append(None if not np.isfinite(v) else float(v))
+        for r in NBR_KM:
+            sub = flat[d[r]] if len(d[r]) else np.array([np.nan])
+            m = np.nanmax(sub) if np.isfinite(sub).any() else np.nan
+            out[r].append(None if not np.isfinite(m) else float(m))
+    return out
+
+
+def sample(key, b):
+    """Site values for one message; the gust fields also carry their neighborhood maxima."""
+    if key in NBR_KEYS:
+        nb = site_nbr(b)
+        return nb["p"], nb
+    return site_values(b), None
+
+
 def is_grib(b):
     return bool(b) and b[:4] == b"GRIB" and b[-4:] == b"7777"
 
@@ -215,6 +302,7 @@ FIELDS = [  # key, GRIB var, level prefix
     ("t", "TMP", "2 m above ground"), ("td", "DPT", "2 m above ground"),
     ("u10", "UGRD", "10 m above ground"), ("v10", "VGRD", "10 m above ground"),
     ("gust", "GUST", "surface"),
+    ("wmax", "WIND", "10 m above ground"),   # hourly-maximum 10 m wind (picked by pick_max)
     ("u80", "UGRD", "80 m above ground"), ("v80", "VGRD", "80 m above ground"),
     ("tcc", "TCDC", "entire atmosphere"), ("vis", "VIS", "surface"),
     ("sw", "DSWRF", "surface"), ("apcp", "APCP", "surface"),
@@ -225,7 +313,8 @@ FIELDS = [  # key, GRIB var, level prefix
 ]
 # the members feed winds, temperatures, sky and precipitation; ceilings and cloud layers for the TAF
 # page come from the deterministic run, which keeps the downloads per member cycle down by about half
-MEMBER_FIELDS = [f for f in FIELDS if f[0] in ("t", "td", "u10", "v10", "gust", "u80", "v80", "tcc", "vis", "apcp")]
+MEMBER_FIELDS = [f for f in FIELDS if f[0] in ("t", "td", "u10", "v10", "gust", "wmax", "u80", "v80", "tcc", "vis", "apcp")]
+NBR_KEYS = ("wmax", "gust")   # fields also sampled as a neighborhood maximum
 FT = 3.28084
 KT = 1.943844
 k2f = lambda k: (k - 273.15) * 9 / 5 + 32  # noqa: E731
@@ -273,8 +362,11 @@ def run_member(fx, cyc, maxh, member=None, fields=None, stop_at=60):
         if not recs:
             missing += 1
             continue
+        log_wind_records(recs, "RRFS" if member is None else "REFS member")
         for key, var, lev in (fields or FIELDS):
-            r = pick(recs, var, lev, fh=h)
+            if key == "wmax" and h > CONV_H:
+                continue
+            r = pick_max(recs, var, lev, fh=h) if key == "wmax" else pick(recs, var, lev, fh=h)
             if r:
                 jobs.append((h, key, r, url, suffix))
     if missing:
@@ -283,12 +375,12 @@ def run_member(fx, cyc, maxh, member=None, fields=None, stop_at=60):
     def work(j):
         h, key, r, url, suffix = j
         b = fx.message(url, r, suffix)
-        return j, (site_values(b) if b else None)
+        return j, (sample(key, b) if b else None)
 
     with ThreadPoolExecutor(max_workers=8 if fx.aws_ok else 2) as ex:
-        for (h, key, r, url, suffix), vals in ex.map(work, jobs):
-            if vals is not None:
-                raw[h][key] = (vals, r.get("acc"))
+        for (h, key, r, url, suffix), res in ex.map(work, jobs):
+            if res is not None:
+                raw[h][key] = (res[0], r.get("acc"), res[1])
     return assemble(cyc, hours, raw)
 
 
@@ -300,6 +392,8 @@ def assemble(cyc, hours, raw):
     for si in range(len(SITES)):
         m = {k: [None] * n for k in ("t", "td", "sky", "s10", "d10", "g10", "s80", "d80", "vis", "sw", "pr", "pacc",
                                      "cig", "lcb", "cl", "cm", "ch", "slp")}
+        conv = {k: [None] * n for k in ("wx", "wx10", "wx25")}
+        conv_src = None
         prev_h, prev_tot = 0, 0.0
         for h in hours:
             f = raw.get(h, {})
@@ -318,6 +412,15 @@ def assemble(cyc, hours, raw):
                     m[dk][i] = round((math.degrees(math.atan2(-u, -v)) + 360) % 360)
             if g("gust") is not None:
                 m["g10"][i] = round(g("gust") * KT, 1)
+            # convective gusts: hourly-max 10 m wind (point and neighborhood max); instantaneous gust if the run has none
+            for ck in ("wmax", "gust"):
+                nb = f[ck][2] if ck in f and len(f[ck]) > 2 else None
+                if nb and nb["p"][si] is not None:
+                    conv["wx"][i] = round(nb["p"][si] * KT, 1)
+                    conv["wx10"][i] = None if nb[10][si] is None else round(nb[10][si] * KT, 1)
+                    conv["wx25"][i] = None if nb[25][si] is None else round(nb[25][si] * KT, 1)
+                    conv_src = conv_src or ck
+                    break
             if g("vis") is not None:
                 m["vis"][i] = round(g("vis"))
             if g("sw") is not None:
@@ -343,6 +446,9 @@ def assemble(cyc, hours, raw):
                 else:
                     m["pr"][i] = round(max(0.0, mm) / 25.4, 3)
                     m["pacc"][i] = val
+        if conv_src:
+            m.update(conv)
+            m["wxsrc"] = "hourly max" if conv_src == "wmax" else "gust"
         per_site.append(m)
     return t0, per_site
 
@@ -393,20 +499,21 @@ def tl_run(fx, kind, cyc, stop_at=60):
         recs, url, _ = fx.inventory(suffix(cyc, h), bases)
         if not recs:
             continue
+        log_wind_records(recs, "HRRR" if kind == "hrrrtl" else "RRFS hourly")
         for key, var, lev in MEMBER_FIELDS:
-            r = pick(recs, var, lev, fh=h)
+            r = pick_max(recs, var, lev, fh=h) if key == "wmax" else pick(recs, var, lev, fh=h)
             if r:
                 jobs.append((h, key, r, url, suffix(cyc, h)))
 
     def work(j):
         h, key, r, url, sfx = j
         b = fx.message(url, r, sfx)
-        return j, (site_values(b) if b else None)
+        return j, (sample(key, b) if b else None)
 
     with ThreadPoolExecutor(max_workers=8 if fx.aws_ok else 2) as ex:
-        for (h, key, r, url, sfx), vals in ex.map(work, jobs):
-            if vals is not None:
-                raw[h][key] = (vals, r.get("acc"))
+        for (h, key, r, url, sfx), res in ex.map(work, jobs):
+            if res is not None:
+                raw[h][key] = (res[0], r.get("acc"), res[1])
     return assemble(cyc, hours, raw)
 
 
@@ -440,6 +547,7 @@ def time_lagged(kind, now, old, status):
         t0, per_site = tl_run(fx, kind, cyc, stop_at=90)
         if any(v is not None for v in per_site[0]["t"]):
             got[iso] = ("new", (t0, per_site)); fetched += 1
+            camlog(kind, iso, t0, {SITES[i][0]: [dict(per_site[i], mem=f"{cyc:%HZ}")] for i in range(len(SITES))})
     if not got:
         s = keep_or_drop(old, kind, now)
         status[kind] = "runs found but none could be read" + ("; showing the previous one" if s else "")
@@ -538,6 +646,38 @@ def thunder_values(b):
     return vals, (1.0 if frac else 0.01)
 
 
+# --------------------------------------------------------------------------- convective-gust log
+def camlog(src, run_iso, t0, members_by_site):
+    """Append one line per point for a newly fetched run: the hours (valid time) where any member's 25 km
+    maximum reaches CAMLOG_KT, with every member's [point, 10 km, 25 km] hourly-max wind in kt. Hours not
+    listed had every member below CAMLOG_KT (or no data: "n" says how many hours each member had)."""
+    try:
+        lines = []
+        for sid, mems in members_by_site.items():
+            mems = [m for m in mems if isinstance(m, dict) and any(v is not None for v in (m.get("wx25") or []))]
+            if not mems:
+                continue
+            n = min(CONV_H, max(len(m["wx25"]) for m in mems))
+            hrs = []
+            for i in range(n):
+                vals = [[(m.get(k) or [None] * n)[i] if i < len(m.get(k) or []) else None for k in ("wx", "wx10", "wx25")] for m in mems]
+                if any(v[2] is not None and v[2] >= CAMLOG_KT for v in vals):
+                    hrs.append({"t": int(t0 + i * 3600e3), "v": vals})
+            lines.append({"src": src, "run": run_iso, "site": sid, "mem": [m.get("mem", "") for m in mems],
+                          "f": mems[0].get("wxsrc", "hourly max"), "n": [sum(v is not None for v in m["wx25"][:n]) for m in mems],
+                          "thr": CAMLOG_KT, "h": hrs})
+        if not lines:
+            return
+        os.makedirs(CAMLOG_DIR, exist_ok=True)
+        fn = os.path.join(CAMLOG_DIR, datetime.fromisoformat(run_iso).strftime("%Y-%m") + ".jsonl")
+        with open(fn, "a") as f:
+            for ln in lines:
+                f.write(json.dumps(ln, separators=(",", ":")) + "\n")
+        LOG(f"camlog: {src} {run_iso[:13]}: {len(lines)} points, {sum(len(x['h']) for x in lines)} point-hours at {CAMLOG_KT:g} kt or more")
+    except Exception as e:  # noqa: BLE001 - logging must never break the page data
+        LOG(f"camlog: {src}: {e}")
+
+
 # --------------------------------------------------------------------------- main
 def load_old():
     try:
@@ -602,6 +742,7 @@ def main():
                         sites[s2[0]]["members"].append(mm)
         LOG(f"refsm: {n_ok} of 5 members")
         if t0 is not None:
+            camlog("refsm", cyc.isoformat(), t0, {sid: v["members"] for sid, v in sites.items()})
             out.append({"id": "refsm", "name": "REFS members", "fam": "hires", "run": cyc.isoformat(),
                         "t0": t0, "gap": 3, "sites": sites})
             status["refsm"] = f"{cyc:%HZ} run, {n_ok} of 5 members"
@@ -622,6 +763,7 @@ def main():
     elif cyc:
         LOG(f"rrfs: {cyc:%HZ %Y%m%d} from {where}")
         t0, per_site = run_member(fx, cyc, 84)
+        camlog("rrfs", cyc.isoformat(), t0, {SITES[i][0]: [dict(per_site[i], mem="det")] for i in range(len(SITES))})
         out.append({"id": "rrfs", "name": "RRFS", "fam": "hires", "run": cyc.isoformat(), "t0": t0,
                     "gap": 3, "sites": {SITES[i][0]: {"members": [per_site[i]]} for i in range(len(SITES))}})
     else:
