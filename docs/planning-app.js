@@ -2219,14 +2219,18 @@ function paintRange(k, i0, v0, i1, v1, erase){
 }
 let tableTimer = null;
 let liveFrame = 0;
-function liveRefresh(){
-  if (liveFrame) return;
-  liveFrame = requestAnimationFrame(() => {
+/* redraw while editing. now = true when already inside an animation frame (a pointer move): draw at once,
+   so the line keeps up with the pointer instead of trailing it by a frame */
+function liveRefresh(now){
+  const run = () => {
     liveFrame = 0;
     OF = officialFor(prefs.site, true);
     renderChartFg();
     if (!tableTimer) tableTimer = setTimeout(() => { tableTimer = null; updateCells(keysOf(prefs.param)); }, 120);
-  });
+  };
+  if (now){ if (liveFrame){ cancelAnimationFrame(liveFrame); } run(); return; }
+  if (liveFrame) return;
+  liveFrame = requestAnimationFrame(run);
 }
 /* update only the matrix cells of the parameters being edited */
 function updateCells(ks){
@@ -2245,7 +2249,26 @@ function updateCells(ks){
     });
   }
 }
-function chartPos(ev){ const r = $("chart").getBoundingClientRect(); return { px: (ev.clientX - r.left) * (CH.w / r.width), py: (ev.clientY - r.top) * (CH.h / r.height) }; }
+/* pointer position in the chart's own coordinates. The SVG's screen transform handles page zoom, display
+   scaling and CSS transforms the same way in every browser (remote desktops and managed browsers included);
+   the bounding box is only a fallback. */
+function chartPos(ev){
+  const svg = $("chart");
+  try {
+    const m = svg.getScreenCTM && svg.getScreenCTM();
+    if (m){ const q = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(m.inverse()); if (isFinite(q.x) && isFinite(q.y)) return { px:q.x, py:q.y }; }
+  } catch (e) { /* fall back below */ }
+  const r = svg.getBoundingClientRect(); return { px: (ev.clientX - r.left) * (CH.w / (r.width || CH.w)), py: (ev.clientY - r.top) * (CH.h / (r.height || CH.h)) };
+}
+/* ?chartdebug=1: a line under the graph with what the browser reports for each press (for remote troubleshooting) */
+const CHART_DEBUG = /[?&]chartdebug=1\b/.test(location.search);
+function chartDebug(ev, pos, i, what){
+  if (!CHART_DEBUG) return;
+  let el = document.getElementById("chartDbg");
+  if (!el){ el = document.createElement("div"); el.id = "chartDbg"; el.style.cssText = "font:12px ui-monospace,monospace;color:var(--ink-2,#555);padding:4px 0;white-space:pre-wrap"; $("chart").after(el); }
+  const r = $("chart").getBoundingClientRect();
+  el.textContent = `${what} · ${ev.pointerType || "?"} id ${ev.pointerId} · client ${Math.round(ev.clientX)},${Math.round(ev.clientY)} · chart box ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)} · viewBox ${CH.w}x${CH.h} · pos ${Math.round(pos.px)},${Math.round(pos.py)} · column ${i} of ${S.rows.length} · zoom ${window.devicePixelRatio} · ${navigator.userAgent.replace(/^Mozilla\/5\.0 /, "")}`;
+}
 /* ---------- selection helpers ---------- */
 CH.sel = new Set();
 function clearSel(){ CH.sel = new Set(); }
@@ -2286,9 +2309,15 @@ function bindChart(){
   const svg = $("chart");
   svg.addEventListener("pointerdown", ev => {
     if (ev.button !== 0 || P[keysOf(prefs.param)[0]].kind === "sev") return;
-    svg.focus({ preventScroll:true });
-    svg.setPointerCapture(ev.pointerId);
+    try { svg.focus({ preventScroll:true }); } catch (e) { /* older browsers */ }
+    /* some managed browsers and remote desktops refuse pointer capture: carry on, and follow the
+       pointer on the window instead so the drag still tracks outside the graph */
+    let captured = false;
+    try { svg.setPointerCapture(ev.pointerId); captured = svg.hasPointerCapture ? svg.hasPointerCapture(ev.pointerId) : true; } catch (e) { captured = false; }
+    if (!captured){ window.addEventListener("pointermove", winMove); window.addEventListener("pointerup", winUp); }
+    ev.preventDefault();
     const { px, py } = chartPos(ev);
+    chartDebug(ev, { px, py }, CH.ix(px), prefs.cmode === "draw" ? "draw press" : "press");
     $("tip").style.display = "none";
     if (prefs.cmode === "draw"){
       const i = CH.ix(px), k = pickKey(i, py), v = chartValue(py, k);
@@ -2309,22 +2338,26 @@ function bindChart(){
     renderChartFg();
   });
   let pmEv = null, pmFrame = 0;
-  svg.addEventListener("pointermove", ev => {
+  const queueMove = ev => {
     pmEv = ev; if (pmFrame) return;
     pmFrame = requestAnimationFrame(() => { pmFrame = 0; const e = pmEv; pmEv = null; if (e) onMove(e); });
-  });
+  };
+  svg.addEventListener("pointermove", queueMove);
+  /* used only when pointer capture was refused */
+  const winMove = ev => { if (CH.drag && ev.target !== svg && !svg.contains(ev.target)) queueMove(ev); };
+  const winUp = ev => { window.removeEventListener("pointermove", winMove); window.removeEventListener("pointerup", winUp); if (ev.target !== svg && !svg.contains(ev.target)) end(); };
   const onMove = ev => {
     const { px, py } = chartPos(ev); const i = CH.ix(px);
     MOUSE.x = ev.clientX; MOUSE.y = ev.clientY; MOUSE.i = i; MOUSE.in = true;
     const d = CH.drag;
-    if (d && d.kind === "paint"){ const v = chartValue(py, d.k); paintRange(d.k, d.i, d.v, i, v, d.erase || ev.altKey); d.i = i; d.v = v; liveRefresh(); }
+    if (d && d.kind === "paint"){ const v = chartValue(py, d.k); paintRange(d.k, d.i, d.v, i, v, d.erase || ev.altKey); d.i = i; d.v = v; liveRefresh(true); }
     else if (d && d.kind === "move"){
       const dv = (CH.inv(py) - CH.inv(d.py0))/(CH.sc || 1);
       if (!d.moved && Math.abs(py - d.py0) < 3) return;
       d.moved = true;
       const tmp = [];
       for (const q of d.snap){ writeCell(q.k, q.i, clampV(q.k, q.val + dv), tmp); }
-      liveRefresh();
+      liveRefresh(true);
     }
     else if (d && d.kind === "marq"){
       d.x1 = px; d.y1 = py;
@@ -2343,6 +2376,7 @@ function bindChart(){
     hover(i, ev);
   };
   const end = () => {
+    window.removeEventListener("pointermove", winMove); window.removeEventListener("pointerup", winUp);
     if (pmFrame){ cancelAnimationFrame(pmFrame); pmFrame = 0; if (pmEv){ const e = pmEv; pmEv = null; onMove(e); } }
     if (liveFrame){ cancelAnimationFrame(liveFrame); liveFrame = 0; }
     const d = CH.drag; if (!d) return; CH.drag = null;

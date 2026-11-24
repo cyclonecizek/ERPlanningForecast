@@ -297,6 +297,14 @@ Not generated: WS, icing and turbulence groups, and remarks.
 Ceilings come from LAMP, GFS/NAM MOS, NBM text and RRFS/REFS where available; otherwise from the
 models' low/mid/high cloud cover. Add `?demo=1` to see it with synthetic data.
 
+### Graph editing on managed or remote computers
+The graph reads the pointer through the chart's own screen transform, so page zoom, display scaling and remote
+desktops map clicks to the right column. If a browser refuses pointer capture, a drag still works (it follows
+the pointer on the page). While dragging, the graph redraws in the same frame as the pointer move.
+If a click still lands on the wrong point, open the page with `?chartdebug=1` (for example
+`index.html?chartdebug=1`): a line under the graph shows what the browser reports for each press (pointer type,
+position, chart size, column, zoom, browser). Send a screenshot of it.
+
 ## Convective gusts (planning and exposure)
 **Include convective gusts** (the bar above the table, off by default, kept in the browser) adds thunderstorm
 outflow to the peak-wind chances, which the models alone underforecast:
