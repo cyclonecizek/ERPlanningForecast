@@ -1,10 +1,10 @@
 {
- "kbdi": 1,
- "change": -36,
- "date": "2026-11-26",
+ "kbdi": 7,
+ "change": 6,
+ "date": "2026-11-27",
  "county": "Brevard",
  "source": "https://weather.fdacs.gov/KBDI/report/kbdi_current.html",
- "saved": "2026-11-26T21:44:54+00:00",
- "min": 1,
- "max": 7
+ "saved": "2026-11-27T21:29:02+00:00",
+ "min": 6,
+ "max": 14
 }
